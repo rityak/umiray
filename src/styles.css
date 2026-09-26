@@ -1,0 +1,124 @@
+/* The look belongs entirely to rootik (D-142): its own layer between the base and Tailwind
+   utilities. Tailwind here is for layout only (flex, grid, spacing); colours, fonts, radii
+   and motion are the kit's tokens and components. Layer order is declared before imports.
+
+   `src/` only: Tailwind v4 walks the project looking for classes on its own, and that walk
+   used to pick up the mockups in `design/`. */
+@layer theme, base, rootik, components, utilities;
+@import "tailwindcss" source("./");
+@import "rootik/styles.css";
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    /* Our own frame (D-041): interface text is not selectable, otherwise dragging the window
+       turns into selecting the title. Inputs and logs restore selection themselves. */
+    user-select: none;
+    overflow: hidden;
+  }
+
+  input,
+  textarea,
+  .selectable {
+    user-select: text;
+  }
+}
+
+/* Touches of our own styling (D-142): only the kit's roles, no colours of our own.
+   The design language lives in the style guide. */
+@layer components {
+  /* Cards own scrolling; reserve the actual dock height in both shell layouts. */
+  .um-shell .rk-shell-content {
+    overflow: hidden;
+  }
+
+  .um-shell[data-variant="inset"] .rk-shell-content[data-dock] {
+    padding-bottom: calc(var(--rk-dock-height) + var(--rk-shell-gap) * 2);
+  }
+
+  /* A multi-line value field must not grow into a capsule with the pill preset. */
+  .um-rule-values {
+    border-radius: min(var(--rk-radius-control), calc(var(--rk-h-md) / 2));
+    min-height: 150px;
+    max-height: 320px;
+  }
+
+  .um-rule {
+    container-type: inline-size;
+  }
+
+  .um-rule-summary {
+    cursor: pointer;
+    padding: 4px;
+    border-radius: var(--rk-radius-control);
+  }
+
+  .um-rule-summary:focus-visible {
+    outline: 2px solid var(--rk-accent-text);
+    outline-offset: 2px;
+  }
+
+  @container (max-width: 700px) {
+    .um-rule-header {
+      grid-template-columns: 24px minmax(0, 1fr) 32px 32px;
+    }
+    .um-rule-header > :nth-child(3) {
+      grid-column: 1 / 3;
+      grid-row: 2;
+    }
+    .um-rule-header > :nth-child(4) {
+      display: none;
+    }
+    .um-rule-header > :nth-child(5) {
+      grid-column: 1 / -1;
+      grid-row: 3;
+    }
+    .um-rule-header > :nth-child(6) {
+      grid-column: 3;
+      grid-row: 1;
+    }
+    .um-rule-header > :nth-child(7) {
+      grid-column: 4;
+      grid-row: 1;
+    }
+  }
+
+  /* lucide icons outside the kit's slots get the same stroke as inside them
+     (`--rk-icon-stroke`): lucide draws 2 by default and would look bolder next to the kit's. */
+  svg.lucide {
+    stroke-width: var(--rk-icon-stroke);
+  }
+
+  /* An icon coloured by meaning: `data-tone` sets the tone, the kit gives the colour (`--rk-tone-text`). */
+  .um-tone {
+    color: var(--rk-tone-text);
+  }
+
+  /* The "am I on VPN?" answer under the power button: the kit's large number, thin weight. */
+  .um-headline {
+    font-size: var(--rk-text-2xl);
+    font-weight: 300;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+  }
+
+  /* Rule number — order is the meaning here; the number's colour is the rule's outcome. */
+  .um-no {
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 999px;
+    color: var(--rk-tone-text, var(--rk-text-2));
+    background: color-mix(in oklab, var(--rk-tone, var(--rk-text-2)) 16%, var(--rk-well));
+    font-size: var(--rk-text-xs);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+  }
+}

@@ -1,0 +1,58 @@
+[package]
+name = "umiray"
+version = "1.0.0"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# image-png — чтобы значок трея можно было менять на лету: иконки состояний
+# лежат отдельными PNG и грузятся из бинаря (D-051).
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+thiserror = "2"
+# Окно теперь прячется в трей, а не закрывается (D-046) — значит второй запуск ярлыка
+# поднял бы вторую копию поверх работающей: она упёрлась бы в занятый порт и подралась
+# за файлы источников. Плагин вместо этого показывает уже открытое окно.
+tauri-plugin-single-instance = "2"
+# Всё это уже собиралось как транзитивные зависимости Tauri — прямая ссылка ничего не удорожает.
+reqwest = { version = "0.13", features = ["json"] }
+base64 = "0.22"
+getrandom = "0.3"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+# rt и macros — только ради живых тестов, помеченных ignore; Tauri тянет их всё равно.
+# net — UDP для запросов к резолверам (D-097); остальное было и раньше.
+tokio = { version = "1", features = ["time", "rt", "macros", "net"] }
+tauri-plugin-updater = "2"
+
+# Спрятанному в трей окну WebView2 говорят «тебя не видно» (`IsVisible`): иначе страница
+# считает себя на экране и крутит таймеры и отрисовку часами. Уже в дереве через wry.
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.38"
+
+# Права администратора для TUN: проверка токена и перезапуск через UAC.
+# Плюс клетка процессов: ядро не переживает падение клиента (D-058),
+# и обычный ping до серверов без прав администратора (D-062).
+[target.'cfg(windows)'.dependencies.windows-sys]
+version = "0.59"
+features = [
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_Security",
+    "Win32_System_Threading",
+    "Win32_System_JobObjects",
+    "Win32_System_Console",
+    "Win32_System_IO",
+    "Win32_System_Registry",
+    "Win32_System_SystemInformation",
+    "Win32_Storage_FileSystem",
+    "Win32_Networking_WinInet",
+    "Win32_UI_Controls_Dialogs",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+]

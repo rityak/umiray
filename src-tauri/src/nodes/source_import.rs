@@ -1,0 +1,216 @@
+//! Добавление и обновление источников узлов.
+
+use crate::error::{AppError, Result};
+use crate::nodes::source_id::SourceId;
+use crate::nodes::sources::{get, list, ordered, own_proxies, raw, write, Source};
+use crate::nodes::subscription;
+
+/// Имя источника для ссылок, добавленных руками.
+const MANUAL: &str = "Мои ссылки";
+
+/// Имя источника для узлов, которые клиент пишет сам: собранных руками и принесённых
+/// файлом (D-120). Отдельно от «Моих ссылок» не из вкуса: файл провайдера не бывает
+/// наполовину списком ссылок, наполовину документом `proxies:`.
+const OWN: &str = "Свои узлы";
+
+/// Завести подписку: скачать, вычистить имена, сохранить. Служебные записи провайдера
+/// возвращаются отдельно — в узлы они не идут, но показать их надо.
+pub async fn add_subscription(url: &str) -> Result<(Source, Vec<String>)> {
+    let id = SourceId::new()?.as_str().to_string();
+    let source = Source {
+        id: id.clone(),
+        name: host_of(url),
+        url: Some(url.to_string()),
+        updated: None,
+        nodes: 0,
+        records: false,
+        skipped: Vec::new(),
+    };
+    let notices = download(source, &id).await?;
+    Ok((get(&id)?, notices))
+}
+
+pub async fn refresh(id: &str) -> Result<(Source, Vec<String>)> {
+    SourceId::parse(id)?;
+    let source = get(id)?;
+    if source.url.is_none() {
+        return Err(AppError::invalid("Это не подписка: обновлять её неоткуда"));
+    }
+    let notices = download(source, id).await?;
+    Ok((get(id)?, notices))
+}
+
+async fn download(mut source: Source, id: &str) -> Result<Vec<String>> {
+    let url = source.url.clone().unwrap_or_default();
+    let fetched = subscription::fetch(&url).await?;
+    let (lines, notices) = subscription::links(&fetched.body);
+    // Панель обычно называет себя сама — это понятнее хоста из адреса.
+    if let Some(title) = fetched.title {
+        source.name = title;
+    }
+
+    if lines.is_empty() {
+        // Пустой ответ не имеет права стирать то, что уже есть (D-018): провайдер молчит по своим
+        // причинам, а причину он написал в служебных записях.
+        return Err(AppError::Subscription {
+            message: "Подписка не вернула ни одного сервера".into(),
+            notices,
+        });
+    }
+
+    source.updated = crate::stamp::now();
+    write(&mut source, lines, id, &crate::config::awg::get())?;
+    Ok(notices)
+}
+
+/// Добавить ссылку руками (D-017): одиночная **дописывается**, а подписка список
+/// заменяет — она источник истины по серверам. Если источника «мои ссылки» ещё нет — заводим.
+pub fn add_link(uri: &str) -> Result<Source> {
+    let uri = uri.trim();
+    if !uri.contains("://") {
+        return Err(AppError::invalid("Это не ссылка на сервер"));
+    }
+    // Дописываем **в список ссылок**, а не в первый попавшийся источник без адреса:
+    // у «своих узлов» адреса тоже нет, и строка в их документе `proxies:` ломает его
+    // целиком (GOTCHAS).
+    let id = match list()
+        .into_iter()
+        .find(|source| source.url.is_none() && !source.records)
+    {
+        Some(existing) => existing.id,
+        None => SourceId::new()?.as_str().to_string(),
+    };
+    let mut source = get(&id).unwrap_or(Source {
+        id: id.clone(),
+        name: MANUAL.into(),
+        url: None,
+        updated: None,
+        nodes: 0,
+        records: false,
+        skipped: Vec::new(),
+    });
+
+    let mut lines: Vec<String> = raw(&id).lines().map(str::to_string).collect();
+    lines.push(uri.to_string());
+    write(&mut source, lines, &id, &crate::config::awg::get())?;
+    get(&id)
+}
+
+/// Добавить узел записью (D-120): собранный руками или принесённый файлом.
+///
+/// Ссылку из формы не собираем — её пришлось бы **выдумать**: единого формата у неё нет,
+/// а запись ядро читает однозначно, и имена полей у неё из его документации.
+pub fn add_proxy(entry: serde_yaml::Mapping) -> Result<Source> {
+    let (id, mut source) = own()?;
+    let mut proxies = own_proxies(&id);
+    let mut entry = entry;
+    let wanted = entry
+        .get(serde_yaml::Value::from("name"))
+        .and_then(serde_yaml::Value::as_str)
+        .unwrap_or("Узел")
+        .to_string();
+    let taken: Vec<String> = proxies
+        .iter()
+        .filter_map(|proxy| proxy.get("name")?.as_str().map(str::to_string))
+        .collect();
+    crate::yaml::set(
+        &mut entry,
+        "name",
+        serde_yaml::Value::from(unique(&wanted, &taken)),
+    );
+    proxies.push(serde_yaml::Value::Mapping(ordered(entry)));
+
+    let mut document = serde_yaml::Mapping::new();
+    crate::yaml::set(
+        &mut document,
+        "proxies",
+        serde_yaml::Value::Sequence(proxies),
+    );
+    let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(document))
+        .map_err(|e| AppError::invalid(e.to_string()))?;
+    write(&mut source, vec![yaml], &id, &crate::config::awg::get())?;
+    get(&id)
+}
+
+/// Принять файл с конфигом. Понимаем только то, что узнаём: чужой формат получает отказ
+/// с текстом, а не узел, который молча не работает (D-120).
+pub fn import_file(path: &std::path::Path) -> Result<Source> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| AppError::io(format!("Файл не читается: {e}")))?;
+    let name = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("Узел")
+        .to_string();
+    add_proxy(crate::nodes::wgconf::to_proxy(&text, &name)?)
+}
+
+/// Источник для записей: найти или завести. Узнаём его по содержимому, а не по имени:
+/// имя пользователь вправе сменить.
+fn own() -> Result<(String, Source)> {
+    if let Some(existing) = list().into_iter().find(|source| source.records) {
+        let id = existing.id.clone();
+        return Ok((id, existing));
+    }
+    let id = SourceId::new()?.as_str().to_string();
+    let source = Source {
+        id: id.clone(),
+        name: OWN.into(),
+        url: None,
+        updated: None,
+        nodes: 0,
+        records: false,
+        skipped: Vec::new(),
+    };
+    Ok((id, source))
+}
+
+/// Имя, которого ещё нет рядом. Ядро различает узлы по имени, и два одинаковых оно
+/// не примет вовсе.
+fn unique(wanted: &str, taken: &[String]) -> String {
+    if !taken.iter().any(|name| name == wanted) {
+        return wanted.to_string();
+    }
+    (2..)
+        .map(|n| format!("{wanted} {n}"))
+        .find(|name| !taken.iter().any(|taken| taken == name))
+        .unwrap_or_else(|| wanted.to_string())
+}
+
+/// Принять готовые записи прокси при переезде со старой раскладки.
+///
+/// Ядро читает провайдер и в YAML-виде, поэтому серверы, которые уже были разобраны,
+/// не приходится собирать обратно в ссылки. Первое «Обновить» заменит это списком ссылок.
+pub fn adopt(url: &str, proxies: Vec<serde_yaml::Value>) -> Result<Source> {
+    let id = SourceId::new()?.as_str().to_string();
+    let mut map = serde_yaml::Mapping::new();
+    crate::yaml::set(&mut map, "proxies", serde_yaml::Value::Sequence(proxies));
+    let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(map))
+        .map_err(|e| AppError::invalid(e.to_string()))?;
+
+    let mut source = Source {
+        id: id.clone(),
+        name: if url.is_empty() {
+            MANUAL.into()
+        } else {
+            host_of(url)
+        },
+        url: (!url.is_empty()).then(|| url.to_string()),
+        updated: None,
+        nodes: 0,
+        records: false,
+        skipped: Vec::new(),
+    };
+    write(&mut source, vec![yaml], &id, &crate::config::awg::get())?;
+    get(&id)
+}
+
+/// Имя источника по адресу — его хост. Пользователь узнаёт свою панель по нему.
+pub(super) fn host_of(url: &str) -> String {
+    url.split("://")
+        .nth(1)
+        .and_then(|rest| rest.split('/').next())
+        .filter(|host| !host.is_empty())
+        .unwrap_or("Подписка")
+        .to_string()
+}

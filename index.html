@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>umiray</title>
+    <link rel="icon" type="image/svg+xml" href="/ray.svg" />
+    <!--
+      Заставка живёт здесь, а не в React, и стиль у неё встроенный, а не в styles.css.
+      Причина одна: и то и другое приезжает модулями, а окно белое ровно до их приезда —
+      в dev-режиме это секунды. Разметка в самом документе рисуется первым же кадром.
+
+      Цвета — стандартная тема rootik (D-142): токены набора приедут вместе с бандлом,
+      до этого заставка держит их запасные значения.
+    -->
+    <style>
+      /* Фон **только на body**. Стоит объявить его ещё и на html — и body перестаёт
+         отдавать свой фон холсту: он рисуется обычной коробкой, а она кроет собой
+         сцену и дождь, у которых отрицательный z-index. Проверено больно. */
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+      /* Цвета — токены rootik, числа — только запасные значения до приезда бандла. */
+      body {
+        background: var(--rk-bg, oklch(0.145 0.012 260));
+        color: var(--rk-text, oklch(0.93 0.01 260));
+      }
+      #splash {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        font: 12px/1.45 ui-monospace, Consolas, monospace;
+        letter-spacing: 0.08em;
+        background: oklch(0.145 0.012 260);
+        transition: opacity 0.18s ease-out;
+      }
+      #splash[data-done="1"] {
+        opacity: 0;
+        pointer-events: none;
+      }
+      #splash-mark {
+        font-size: 22px;
+        font-weight: 600;
+        letter-spacing: 0.22em;
+        color: #fff;
+      }
+      /* Полоса не показывает проценты — их неоткуда взять честно. Она показывает,
+         что процесс идёт: бегунок ходит из края в край, пока этап не сменится. */
+      #splash-bar {
+        width: 160px;
+        height: 2px;
+        overflow: hidden;
+        background: oklch(0.225 0.024 260);
+        border-radius: 999px;
+      }
+      #splash-bar::after {
+        content: "";
+        display: block;
+        width: 40%;
+        height: 100%;
+        border-radius: 999px;
+        background: oklch(0.57 0.2 277);
+        animation: splash-sweep 1.1s ease-in-out infinite;
+      }
+      #splash-step {
+        /* Строка про скачивание ядра длинная, а окно бывает узким: без предела
+           по ширине она вылезала бы за края вместо переноса. */
+        max-width: 80vw;
+        text-align: center;
+        color: oklch(0.77 0.03 260);
+        text-transform: uppercase;
+      }
+      @keyframes splash-sweep {
+        0% {
+          transform: translateX(-100%);
+        }
+        100% {
+          transform: translateX(250%);
+        }
+      }
+      /* Системное «поменьше движения» гасит бегунок: полоса остаётся, просто стоит. */
+      @media (prefers-reduced-motion: reduce) {
+        #splash-bar::after {
+          animation: none;
+          width: 100%;
+        }
+        #splash {
+          transition: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <div id="splash" role="status" aria-live="polite">
+      <div id="splash-mark">umiray</div>
+      <div id="splash-bar"></div>
+      <div id="splash-step"></div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

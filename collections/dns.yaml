@@ -1,0 +1,268 @@
+# Коллекция публичных резолверов (D-100).
+#
+# Это ДАННЫЕ, а не код: чтобы добавить провайдера, правится только этот файл — ни строки
+# на Rust. Клиент кладёт копию в `%LOCALAPPDATA%\umiray-client\collections\` при первом
+# запуске и дальше читает **оттуда**: правьте копию, эта — образец на случай сброса.
+#
+# Откуда список: https://adguard-dns.io/kb/ru/general/dns-providers/ (сверено 09.09.2026).
+#
+# Поля:
+#   id       — короткое имя, по нему на провайдера ссылаются настройки. Менять нельзя.
+#   name     — как показать человеку.
+#   note     — одна строка: чем этот провайдер отличается от соседей.
+#   variants — у одного провайдера бывает несколько наборов адресов: с фильтрацией,
+#              без неё, семейный. Это разные резолверы, и мерить их надо порознь.
+#   filter   — что режет: none | ads | family | security | bypass. Слово свободное:
+#              клиент показывает его как есть и ничего не ломает от незнакомого.
+#   servers  — адреса ровно в том виде, в каком их принимает mihomo (`nameserver:`).
+#   proto    — udp | tcp | doh | dot | doq | doh3. Незнакомый протокол клиент не мерит
+#              и честно пишет об этом в консоль, а не молчит.
+#   ipv6     — адрес шестой версии; на машине без IPv6 такие пропускаются.
+#
+# DNSCrypt сюда не попал намеренно: ядро его не умеет, а хранить то, что нельзя
+# прописать, — врать самим себе.
+
+version: 1
+
+providers:
+  - id: adguard
+    name: AdGuard DNS
+    note: режет рекламу и трекеры, есть DoQ
+    site: https://adguard-dns.io
+    variants:
+      - id: default
+        name: обычный
+        filter: ads
+        servers:
+          - { proto: udp, addr: 94.140.14.14 }
+          - { proto: udp, addr: 94.140.15.15 }
+          - { proto: udp, addr: "2a10:50c0::ad1:ff", ipv6: true }
+          - { proto: doh, addr: https://dns.adguard-dns.com/dns-query }
+          - { proto: dot, addr: tls://dns.adguard-dns.com }
+          - { proto: doq, addr: quic://dns.adguard-dns.com }
+      - id: family
+        name: семейный
+        filter: family
+        servers:
+          - { proto: udp, addr: 94.140.14.15 }
+          - { proto: udp, addr: 94.140.15.16 }
+          - { proto: doh, addr: https://family.adguard-dns.com/dns-query }
+          - { proto: dot, addr: tls://family.adguard-dns.com }
+          - { proto: doq, addr: quic://family.adguard-dns.com }
+      - id: unfiltered
+        name: без фильтрации
+        filter: none
+        servers:
+          - { proto: udp, addr: 94.140.14.140 }
+          - { proto: udp, addr: 94.140.14.141 }
+          - { proto: doh, addr: https://unfiltered.adguard-dns.com/dns-query }
+          - { proto: dot, addr: tls://unfiltered.adguard-dns.com }
+          - { proto: doq, addr: quic://unfiltered.adguard-dns.com }
+
+  - id: cloudflare
+    name: Cloudflare DNS
+    note: обычно быстрее всех, но в РФ его чаще прочих и режут
+    site: https://one.one.one.one
+    variants:
+      - id: default
+        name: обычный
+        filter: none
+        servers:
+          - { proto: udp, addr: 1.1.1.1 }
+          - { proto: udp, addr: 1.0.0.1 }
+          - { proto: udp, addr: "2606:4700:4700::1111", ipv6: true }
+          - { proto: doh, addr: https://cloudflare-dns.com/dns-query }
+          - { proto: dot, addr: tls://one.one.one.one }
+      - id: security
+        name: с защитой
+        filter: security
+        servers:
+          - { proto: udp, addr: 1.1.1.2 }
+          - { proto: udp, addr: 1.0.0.2 }
+          - { proto: doh, addr: https://security.cloudflare-dns.com/dns-query }
+          - { proto: dot, addr: tls://security.cloudflare-dns.com }
+      - id: family
+        name: семейный
+        filter: family
+        servers:
+          - { proto: udp, addr: 1.1.1.3 }
+          - { proto: udp, addr: 1.0.0.3 }
+          - { proto: doh, addr: https://family.cloudflare-dns.com/dns-query }
+          - { proto: dot, addr: tls://family.cloudflare-dns.com }
+
+  - id: google
+    name: Google DNS
+    note: без фильтрации, отвечает почти отовсюду
+    site: https://dns.google
+    variants:
+      - id: default
+        name: обычный
+        filter: none
+        servers:
+          - { proto: udp, addr: 8.8.8.8 }
+          - { proto: udp, addr: 8.8.4.4 }
+          - { proto: udp, addr: "2001:4860:4860::8888", ipv6: true }
+          - { proto: doh, addr: https://dns.google/dns-query }
+          - { proto: dot, addr: tls://dns.google }
+
+  - id: quad9
+    name: Quad9 DNS
+    note: швейцарский, режет вредоносное
+    site: https://quad9.net
+    variants:
+      - id: default
+        name: с защитой
+        filter: security
+        servers:
+          - { proto: udp, addr: 9.9.9.9 }
+          - { proto: udp, addr: 149.112.112.112 }
+          - { proto: udp, addr: "2620:fe::fe", ipv6: true }
+          - { proto: doh, addr: https://dns.quad9.net/dns-query }
+          - { proto: dot, addr: tls://dns.quad9.net }
+      - id: unsecured
+        name: без защиты
+        filter: none
+        servers:
+          - { proto: udp, addr: 9.9.9.10 }
+          - { proto: udp, addr: 149.112.112.10 }
+          - { proto: doh, addr: https://dns10.quad9.net/dns-query }
+          - { proto: dot, addr: tls://dns10.quad9.net }
+      - id: ecs
+        name: с ECS
+        filter: security
+        servers:
+          - { proto: udp, addr: 9.9.9.11 }
+          - { proto: udp, addr: 149.112.112.11 }
+          - { proto: doh, addr: https://dns11.quad9.net/dns-query }
+          - { proto: dot, addr: tls://dns11.quad9.net }
+
+  - id: yandex
+    name: Yandex DNS
+    # Единственный в списке, кого нет в справочнике AdGuard: адреса взяты из документации
+    # самого Яндекса. Шифрованных точек здесь нет намеренно — пока не проверены живьём,
+    # класть их в справочник нельзя.
+    note: ближе всех в РФ; только обычный DNS
+    site: https://dns.yandex.ru
+    variants:
+      - id: basic
+        name: базовый
+        filter: none
+        servers:
+          - { proto: udp, addr: 77.88.8.8 }
+          - { proto: udp, addr: 77.88.8.1 }
+      - id: safe
+        name: безопасный
+        filter: security
+        servers:
+          - { proto: udp, addr: 77.88.8.88 }
+          - { proto: udp, addr: 77.88.8.2 }
+      - id: family
+        name: семейный
+        filter: family
+        servers:
+          - { proto: udp, addr: 77.88.8.7 }
+          - { proto: udp, addr: 77.88.8.3 }
+
+  - id: comss
+    name: Comss.one DNS
+    note: обходит геоблокировки; для РФ это его главный смысл
+    site: https://www.comss.ru/page.php?id=7315
+    variants:
+      - id: bypass
+        name: обход блокировок
+        filter: bypass
+        servers:
+          - { proto: udp, addr: 83.220.169.155 }
+          - { proto: udp, addr: 212.109.195.93 }
+          - { proto: doh, addr: https://dns.comss.one/dns-query }
+          - { proto: dot, addr: tls://dns.comss.one }
+          - { proto: doq, addr: quic://dns.comss.one }
+      - id: bypass-ads
+        name: обход и реклама
+        filter: bypass
+        servers:
+          - { proto: udp, addr: 195.133.25.16 }
+          - { proto: doh, addr: https://router.comss.one/dns-query }
+          - { proto: dot, addr: tls://router.comss.one }
+          - { proto: doq, addr: quic://router.comss.one }
+
+  - id: surfshark
+    name: Surfshark DNS
+    note: без логов, есть DoQ
+    site: https://surfshark.com/dns
+    variants:
+      - id: default
+        name: обычный
+        filter: none
+        servers:
+          - { proto: udp, addr: 194.169.169.169 }
+          - { proto: udp, addr: "2a09:a707:169::", ipv6: true }
+          - { proto: doh, addr: https://dns.surfsharkdns.com/dns-query }
+          - { proto: dot, addr: tls://dns.surfsharkdns.com }
+          - { proto: doq, addr: quic://dns.surfsharkdns.com }
+
+  - id: openbld
+    name: OpenBLD.net DNS
+    note: только шифрованные точки, обычного DNS у него нет
+    site: https://openbld.net
+    variants:
+      - id: ada
+        name: адаптивный
+        filter: ads
+        servers:
+          - { proto: doh, addr: https://ada.openbld.net/dns-query }
+          - { proto: dot, addr: tls://ada.openbld.net }
+      - id: ric
+        name: строгий
+        filter: ads
+        servers:
+          - { proto: doh, addr: https://ric.openbld.net/dns-query }
+          - { proto: dot, addr: tls://ric.openbld.net }
+
+  - id: alidns
+    name: Ali DNS
+    note: китайский; из РФ отвечает медленно, но отвечает
+    site: https://alidns.com
+    variants:
+      - id: default
+        name: обычный
+        filter: none
+        servers:
+          - { proto: udp, addr: 223.5.5.5 }
+          - { proto: udp, addr: 223.6.6.6 }
+          - { proto: udp, addr: "2400:3200::1", ipv6: true }
+          - { proto: doh, addr: https://dns.alidns.com/dns-query }
+          - { proto: dot, addr: tls://dns.alidns.com }
+          - { proto: doq, addr: "quic://dns.alidns.com:853" }
+
+  - id: onedns
+    name: OneDNS
+    note: китайский, две редакции
+    site: https://www.onedns.net
+    variants:
+      - id: pure
+        name: чистый
+        filter: security
+        servers:
+          - { proto: udp, addr: 117.50.10.10 }
+          - { proto: udp, addr: 52.80.52.52 }
+          - { proto: doh, addr: https://doh-pure.onedns.net/dns-query }
+      - id: family
+        name: семейный
+        filter: family
+        servers:
+          - { proto: udp, addr: 117.50.11.11 }
+          - { proto: udp, addr: 52.80.66.66 }
+          - { proto: doh, addr: https://doh-family.onedns.net/dns-query }
+
+  - id: comodo
+    name: Comodo Secure DNS
+    note: только обычный DNS; шифрованных точек нет
+    site: https://www.comodo.com/secure-dns/
+    variants:
+      - id: default
+        name: обычный
+        filter: security
+        servers:
+          - { proto: udp, addr: 8.26.56.26 }
+          - { proto: udp, addr: 8.20.247.20 }
