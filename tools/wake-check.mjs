@@ -50,7 +50,7 @@ if (!(await listening())) {
   console.error("окно с отладочным портом не найдено.");
   console.error("следующий шаг: запустите `npm run dev`, затем");
   console.error("  set WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222");
-  console.error("  src-tauri/target/debug/umiray.exe --scheduled");
+  console.error("  src-tauri/target/debug/umiray-dev.exe --scheduled");
   process.exit(2);
 }
 

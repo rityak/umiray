@@ -175,7 +175,8 @@ const ru: Record<string, Entry> = {
     "Этот документ правится только текстом — выберите «Код».",
   "Something went wrong inside the client.": "Что-то пошло не так внутри клиента.",
   "settings and sources": "настройки и источники",
-  "mihomo core": "ядро mihomo",
+  "Mihomo core": "Ядро mihomo",
+  Client: "Клиент",
   "downloading mihomo — once on first launch":
     "скачивание ядра mihomo — один раз при первом запуске",
   "The core could not be downloaded automatically — VPN cannot start without it.":

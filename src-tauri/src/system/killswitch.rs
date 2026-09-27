@@ -39,7 +39,11 @@ use crate::error::{AppError, Result};
 
 /// Общее начало имён наших правил. По нему же они и удаляются — в том числе оставшиеся
 /// от прошлой жизни клиента, снимок которой потерян.
-const PREFIX: &str = "umiray killswitch";
+const PREFIX: &str = if cfg!(debug_assertions) {
+    "umiray-dev killswitch"
+} else {
+    "umiray killswitch"
+};
 
 /// Адреса самого туннеля. Ядро раздаёт их своему адаптеру, и трафик к ним обязан ходить
 /// даже когда всё остальное закрыто.

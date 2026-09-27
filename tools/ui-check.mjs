@@ -49,7 +49,9 @@ const head = await run(`
   const bar = document.querySelector('header');
   const status = bar.querySelector('[role="status"]');
   const grip = bar.querySelector('.rk-titlebar-center');
+  const logo = bar.querySelector('img[alt="umiray"]');
   return {
+    logo: !!logo?.complete && logo.naturalWidth > 0,
     status: status?.textContent.trim() ?? '',
     add: !!bar.querySelector('[aria-label="Добавить подписку или ссылку"]'),
     look: !!bar.querySelector('[aria-label="Оформление"]'),
@@ -59,6 +61,7 @@ const head = await run(`
     icons: [...document.querySelectorAll('.rk-dock-item')].every((b) => b.querySelector('svg')),
   };
 `);
+check("логотип в шапке загрузился", head.logo);
 check(
   "состояние в шапке названо словом",
   /Подключено|Отключено|Запуск|Ядро не найдено/.test(head.status),

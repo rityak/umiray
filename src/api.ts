@@ -571,6 +571,7 @@ export const presetsDelete = (id: string) => call(done, "presets_delete", { id }
 export const Ruleset = z.object({
   id: z.string(),
   title: z.string(),
+  titleEn: z.string().nullish(),
   on: z.boolean(),
   rules: z.array(z.string()),
 });

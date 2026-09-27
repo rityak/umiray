@@ -18,7 +18,7 @@ import { execSync, spawn } from "node:child_process";
 import { attach } from "./cdp.mjs";
 
 const PORT = Number(process.env.UI_CHECK_PORT ?? 9222);
-const EXE = "src-tauri/target/debug/umiray.exe";
+const EXE = "src-tauri/target/debug/umiray-dev.exe";
 let failed = 0;
 
 function check(name, ok, detail = "") {
@@ -57,7 +57,7 @@ function launch() {
 
 const kill = () => {
   try {
-    execSync("taskkill /IM umiray.exe /F", { stdio: "ignore" });
+    execSync("taskkill /IM umiray-dev.exe /F", { stdio: "ignore" });
   } catch {
     // Уже не работает — это и требовалось.
   }

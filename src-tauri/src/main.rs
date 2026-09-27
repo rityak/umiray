@@ -22,7 +22,7 @@ mod yaml;
 use tauri::Manager;
 
 use app::state::AppState;
-use app::{migrate, tray};
+use app::tray;
 
 fn main() {
     // Клиент должен работать с правами, а работает без них — поднимаем себя задачей
@@ -32,11 +32,6 @@ fn main() {
     if system::task::handoff() {
         return;
     }
-    // Разовый переезд на источники. Ошибка здесь не повод не открыть окно: без переезда
-    // клиент увидит пустой список, а старые файлы останутся лежать нетронутыми.
-    if let Err(why) = migrate::run() {
-        eprintln!("миграция не удалась: {why}");
-    }
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(app::updates::Updates::default())
@@ -45,10 +40,9 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             tray::show(app);
         }))
-        .manage(AppState::new())
         .setup(|app| {
             // Порядок шагов запуска — список, а не порядок строк здесь (D-101).
-            app::boot::run(app.handle());
+            app::boot::run(app.handle())?;
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -150,7 +144,7 @@ fn main() {
             commands::core::core_traffic,
             commands::core::core_flush_fake_ip
         ])
-        .build(tauri::generate_context!())
+        .build(app::boot::context())
         .expect("не удалось собрать приложение")
         .run(|app, event| {
             // Гасим ядро сами и снимаем системный прокси. Клетка (D-058) прибила бы его

@@ -9,7 +9,7 @@
 // `taskkill /F` — единственный способ не дать ему прибраться по-человечески. Поэтому он
 // отдельный, а не флаг в `ui-check`: тот смотрит в уже открытое окно и ничего не убивает.
 //
-// Проверка **отказывается идти, если `mihomo.exe` уже запущен**: своё она убивает по имени
+// Проверка **отказывается идти, если `mihomo-dev.exe` уже запущен**: своё она убивает по имени
 // файла — ровно как клиент, — и отличить чужое ядро от нашего осиротевшего не может.
 //
 // Побочные эффекты: ядро запускается в local-режиме и гасится, режим в «Настройках»
@@ -23,9 +23,9 @@ import { join } from "node:path";
 import { attach } from "./cdp.mjs";
 
 const PORT = Number(process.env.UI_CHECK_PORT ?? 9222);
-const EXE = "src-tauri/target/debug/umiray.exe";
+const EXE = "src-tauri/target/debug/umiray-dev.exe";
 // Каталог **отладочной** сборки: `EXE` выше — она же (D-116).
-const CORE = join(process.env.LOCALAPPDATA ?? "", "umiray-client-dev", "mihomo.exe");
+const CORE = join(process.env.LOCALAPPDATA ?? "", "umiray-dev", "mihomo-dev.exe");
 /// Каталог для подставного ядра: свой, чтобы не путаться с рабочим `run/` клиента.
 const ORPHANAGE = join(tmpdir(), "umiray-orphan-check");
 let failed = 0;
@@ -124,25 +124,25 @@ if (!existsSync(CORE)) {
   console.error(`ядра нет на диске (${CORE}): скачайте его в настройках, проверять нечего`);
   process.exit(2);
 }
-if (pids("mihomo.exe").length > 0) {
-  console.error("mihomo.exe уже запущен: он может быть чужой, а проверка убивает по имени");
+if (pids("mihomo-dev.exe").length > 0) {
+  console.error("mihomo-dev.exe уже запущен: он может быть чужой, а проверка убивает по имени");
   process.exit(2);
 }
 
-kill("umiray.exe");
+kill("umiray-dev.exe");
 await until(async () => !(await windowUp()), "прежнее окно закрылось", 10000);
 
 // --- осиротевшее ядро прибирается при запуске (D-059) -----------------------
 
 orphan();
 await wait(1500);
-check("подставное ядро живо", pids("mihomo.exe").length === 1, "иначе проверять нечего");
+check("подставное ядро живо", pids("mihomo-dev.exe").length === 1, "иначе проверять нечего");
 
 launch();
 if (!(await until(windowUp, "окно с отладочным портом"))) process.exit(2);
 check(
   "клиент прибрал осиротевшее ядро при запуске",
-  await until(() => pids("mihomo.exe").length === 0, "ядро исчезло", 10000),
+  await until(() => pids("mihomo-dev.exe").length === 0, "ядро исчезло", 10000),
 );
 rmSync(ORPHANAGE, { recursive: true, force: true });
 
@@ -154,15 +154,15 @@ console.log(`режим в файле до проверки: tun.enable ${was}`)
 
 await invoke(session, "mode_set", { mode: "local" });
 await invoke(session, "core_start");
-const before = pids("mihomo.exe");
+const before = pids("mihomo-dev.exe");
 check("ядро запущено", before.length === 1, `pid ${before[0]}`);
 
-kill("mihomo.exe");
+kill("mihomo-dev.exe");
 // Ждём **новый pid**, а не флаг `running`. Статус после `taskkill` отстаёт: убитый процесс
 // ещё не пожат, `try_wait` докладывает «жив», и первый же опрос — сразу после убийства —
 // возвращает `true`. Проверка на флаг ловила бы собственную гонку, а не подъём.
 const back = await until(() => {
-  const now = pids("mihomo.exe");
+  const now = pids("mihomo-dev.exe");
   return now.length === 1 && now[0] !== before[0];
 }, "ядро вернулось после падения");
 // Новый pid появляется **раньше**, чем подъём состоялся: супервизор ждёт от ядра ответа
@@ -173,7 +173,7 @@ await until(
   "ядро доложилось готовым",
   15000,
 );
-const after = pids("mihomo.exe");
+const after = pids("mihomo-dev.exe");
 check("ядро поднялось само после падения", back && after.length === 1, `pid ${after[0]}`);
 check("это новый процесс, а не тот же", after[0] !== before[0], `${before[0]} → ${after[0]}`);
 check(
@@ -192,14 +192,14 @@ check(
 // запуск ярлыка второй раз убивал бы ядро работающего клиента (D-046 + D-059).
 launch();
 await wait(4000);
-check("вторая копия не тронула работающее ядро", pids("mihomo.exe").length === 1);
-check("и не осталась висеть сама", pids("umiray.exe").length === 1);
+check("вторая копия не тронула работающее ядро", pids("mihomo-dev.exe").length === 1);
+check("и не осталась висеть сама", pids("umiray-dev.exe").length === 1);
 
 // Отрицательный контроль: без него «поднимается всегда» прошло бы проверку наравне
 // с «поднимается после падения», а это разные вещи — нажатая кнопка питания обязана выключать.
 await invoke(session, "core_stop");
 await wait(4000);
-check("штатное выключение ядро не воскрешает", pids("mihomo.exe").length === 0);
+check("штатное выключение ядро не воскрешает", pids("mihomo-dev.exe").length === 0);
 
 // Файл чужой — возвращаем как было, пока окно ещё живо.
 await invoke(session, "mode_set", { mode: was === "true" ? "tun" : "local" });
@@ -208,17 +208,17 @@ check("режим возвращён как был", (await fileMode(session)) =
 // --- падает клиент ----------------------------------------------------------
 
 await invoke(session, "core_start");
-check("ядро снова запущено", pids("mihomo.exe").length === 1);
+check("ядро снова запущено", pids("mihomo-dev.exe").length === 1);
 
 // Именно /F: штатный выход гасит ядро сам, и проверял бы он не клетку, а обработчик.
-kill("umiray.exe");
+kill("umiray-dev.exe");
 const gone = await until(
-  async () => pids("umiray.exe").length === 0 && pids("mihomo.exe").length === 0,
+  async () => pids("umiray-dev.exe").length === 0 && pids("mihomo-dev.exe").length === 0,
   "ядро ушло следом за клиентом",
   10000,
 );
-check("падение клиента убило ядро", gone, gone ? "" : `осталось: ${pids("mihomo.exe")}`);
-if (!gone) kill("mihomo.exe");
+check("падение клиента убило ядро", gone, gone ? "" : `осталось: ${pids("mihomo-dev.exe")}`);
+if (!gone) kill("mihomo-dev.exe");
 
 console.log(failed ? `\nпровалено проверок: ${failed}` : "\nвсе проверки прошли");
 process.exit(failed ? 1 : 0);

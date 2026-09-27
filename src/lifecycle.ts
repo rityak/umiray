@@ -102,7 +102,7 @@ on({
 /// и делать в окне тогда всё равно нечего: ни источников, ни ядра.
 on({
   id: "core",
-  label: tk("mihomo core"),
+  label: tk("Mihomo core"),
   async run(boot) {
     const status = await api.coreStatus().catch(() => null);
     if (status === null) return;

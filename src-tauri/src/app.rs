@@ -8,6 +8,7 @@
 pub mod boot;
 pub mod client;
 pub mod connect;
+pub mod data;
 pub mod guard;
 pub mod lifecycle;
 pub mod measure;

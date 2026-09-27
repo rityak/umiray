@@ -1,7 +1,7 @@
 // Что происходит с трафиком, когда ядро умирает при поднятом TUN (S-015).
 //
 //   node tools/killswitch.mjs
-//   ...и убить `mihomo.exe` (диспетчер задач → снять задачу). Именно ядро, не приложение:
+//   ...и убить `mihomo-dev.exe` (диспетчер задач → снять задачу). Именно ядро, не приложение:
 //   выход через окно — это штатная остановка, она давно проверена.
 //
 // Вопрос ровно один и он про безопасность: адаптер исчезает вместе с процессом, маршрут
@@ -19,9 +19,9 @@ const WINDOW_MS = 30000;
 
 const alive = () => {
   try {
-    return execSync('tasklist /FI "IMAGENAME eq mihomo.exe" /NH', { encoding: "latin1" }).includes(
-      "mihomo",
-    );
+    return execSync('tasklist /FI "IMAGENAME eq mihomo-dev.exe" /NH', {
+      encoding: "latin1",
+    }).includes("mihomo");
   } catch {
     return false;
   }
@@ -62,7 +62,7 @@ if (!alive()) {
   process.exit(2);
 }
 console.log(`через TUN сейчас: ${await ip()}`);
-console.log("\nжду смерти ядра — убейте mihomo.exe в диспетчере задач…");
+console.log("\nжду смерти ядра — убейте mihomo-dev.exe в диспетчере задач…");
 
 while (alive()) await new Promise((r) => setTimeout(r, 200));
 

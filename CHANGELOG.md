@@ -3,6 +3,35 @@
 The version comes from `package.json`, is mirrored in `Cargo.toml`, and appears in
 the subscription User-Agent as `umiray/<version>`.
 
+## 1.0.1
+
+### Fixes and settings
+
+- Fixed the missing app logo in GitHub builds.
+- Moved the client version and update controls into the Client section. Core maintenance
+  now has its own Mihomo core section.
+- Added English titles for built-in rule sets. The English interface uses the YAML
+  `title_en` field when present and falls back to `title`. Custom rules and renamed
+  rule sets are preserved.
+
+### Data and development
+
+- Stable data now lives in `%LOCALAPPDATA%\umiray`; dev data lives in
+  `%LOCALAPPDATA%\umiray-dev`. On first launch, missing files are copied from the old
+  directories. The originals are kept, and existing destination files are not overwritten.
+- Dev uses separate `umiray-dev.exe` and `mihomo-dev.exe` processes, settings, window,
+  autostart entries and firewall rules. Dev builds cannot install stable client updates.
+- New dev configurations use proxy port 3091; existing ports are preserved. Stable and
+  dev can run together in Proxy mode. System proxy, TUN and firewall policy remain shared
+  Windows resources.
+
+### Installation and updates
+
+For Windows x64, download `umiray_1.0.1_x64-setup.exe` from this release's assets.
+In an existing 1.0.0 installation, open Settings → Umiray Settings, select
+Check for updates and confirm installation. Settings, sources and the device ID
+are preserved. The `.sig` file and `latest.json` are used by the built-in updater.
+
 ## 1.0.0
 
 First stable release for Windows x64.

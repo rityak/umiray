@@ -1,6 +1,7 @@
 # Прямой выход для российских адресов: мимо VPN, а не через него.
 # Правится как обычный файл; `title` — наше поле, всё остальное ядро читает само.
 title: Россия — напрямую
+title_en: Russia — direct
 rules:
   - DOMAIN-SUFFIX,ru,DIRECT
   - DOMAIN-SUFFIX,xn--p1ai,DIRECT

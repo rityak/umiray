@@ -35,13 +35,14 @@ impl Look {
     ///
     /// Имена те же, что в шапке (D-066): значок и переключатель говорят об одном, и звать
     /// один и тот же режим в двух местах по-разному нельзя.
-    fn tooltip(self) -> &'static str {
-        match self {
-            Look::Off => "umiray — отключено",
-            Look::Local => "umiray — Proxy",
-            Look::Tun => "umiray — TUN",
-            Look::System => "umiray — System: прокси прописан в Windows",
-        }
+    fn tooltip(self) -> String {
+        let state = match self {
+            Look::Off => "отключено",
+            Look::Local => "Proxy",
+            Look::Tun => "TUN",
+            Look::System => "System: прокси прописан в Windows",
+        };
+        format!("{} — {state}", crate::paths::APP_NAME)
     }
 
     /// Значки различаются только цветом луча — форма одна, иначе в трее они читались бы

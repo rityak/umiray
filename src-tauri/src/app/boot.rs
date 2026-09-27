@@ -16,7 +16,25 @@ use tauri::{AppHandle, Manager};
 
 use crate::app::lifecycle::line;
 use crate::app::state::AppState;
-use crate::app::{connect, settings, status, tick, tray};
+use crate::app::{connect, data, migrate, settings, status, tick, tray};
+use crate::paths;
+
+/// У debug отдельны mutex одиночного запуска, хранилище WebView и имя окна (D-150).
+pub fn context() -> tauri::Context<tauri::Wry> {
+    let mut context = tauri::generate_context!();
+    if cfg!(debug_assertions) {
+        let config = context.config_mut();
+        config.identifier = "com.umiray.client.dev".into();
+        config.product_name = Some(paths::APP_NAME.into());
+        for window in &mut config.app.windows {
+            window.title = paths::APP_NAME.into();
+        }
+        if let Some(updater) = config.plugins.0.get_mut("updater") {
+            updater["pubkey"] = "".into();
+        }
+    }
+    context
+}
 
 /// Неудача шага — строка для человека. Своего варианта `AppError` тут не заводим:
 /// вариант существует под действие, которое предложит окно (D-028), а окну на запуске
@@ -90,10 +108,21 @@ const STEPS: &[Step] = &[
 ];
 
 /// Пройти запуск. Отказ никого не отменяет — только уезжает в лог.
-pub fn run(app: &AppHandle) {
+pub fn run(app: &AppHandle) -> crate::error::Result<()> {
+    // После single-instance и до чтения настроек. Ошибка копирования отменяет запуск:
+    // пустой клиент поверх недокопированной подписки выглядел бы потерей данных.
+    data::migrate()?;
+    if let Err(why) = migrate::run() {
+        eprintln!("миграция не удалась: {why}");
+    }
+    app.manage(AppState::new());
     // Первая строка журнала — номер версии. Без него разбор чужого лога начинается
     // с вопроса «а какая это сборка»; строка стоит ровно один `println!`.
-    eprintln!("umiray: запуск · версия {}", env!("CARGO_PKG_VERSION"));
+    eprintln!(
+        "{}: запуск · версия {}",
+        paths::APP_NAME,
+        env!("CARGO_PKG_VERSION")
+    );
     for step in STEPS {
         let began = Instant::now();
         let outcome = (step.run)(app);
@@ -103,6 +132,7 @@ pub fn run(app: &AppHandle) {
             app.state::<AppState>().supervisor.note(level, &text);
         }
     }
+    Ok(())
 }
 
 /// Окно показываем сами и первым делом: в конфиге оно объявлено скрытым, чтобы «тихий
@@ -219,5 +249,21 @@ mod tests {
         assert!(at("sources") < at("autoconnect"));
         assert!(at("system-proxy") < at("autoconnect"));
         assert!(at("kill-switch") < at("autoconnect"));
+    }
+    #[test]
+    fn debug_has_its_own_instance_and_cannot_install_stable_updates() {
+        let context = context();
+        let config = context.config();
+        if cfg!(debug_assertions) {
+            assert_eq!(config.identifier, "com.umiray.client.dev");
+            assert_eq!(config.app.windows[0].title, "umiray-dev");
+            assert_eq!(config.plugins.0["updater"]["pubkey"], "");
+            assert_eq!(paths::CORE_NAME, "mihomo-dev.exe");
+        } else {
+            assert_eq!(config.identifier, "com.umiray.client");
+            assert_ne!(config.plugins.0["updater"]["pubkey"], "");
+            assert_eq!(paths::CORE_NAME, "mihomo.exe");
+        }
+        assert_eq!(crate::system::task::NAME, paths::APP_NAME);
     }
 }

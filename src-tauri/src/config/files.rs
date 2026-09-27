@@ -22,7 +22,7 @@ use crate::error::{AppError, Result};
 
 /// Порт локального прокси. Живёт здесь, потому что здесь же стоит шаблон, который его
 /// пишет: держать число в точке сборки значило бы, что файл и сборка знают его порознь.
-pub const LOCAL_PROXY_PORT: u16 = 3090;
+pub const LOCAL_PROXY_PORT: u16 = if cfg!(debug_assertions) { 3091 } else { 3090 };
 use crate::paths;
 use crate::yaml::top_mapping;
 
@@ -362,7 +362,9 @@ wireguard-mask:
   h4: 0
 "#;
 
-const ADVANCED_DEFAULT: &str = r#"# Mihomo Settings — конфиг ядра целиком: всё, что не про источники, группы и маршрутизацию.
+macro_rules! advanced_default {
+    ($port:literal) => {
+        concat!(r#"# Mihomo Settings — конфиг ядра целиком: всё, что не про источники, группы и маршрутизацию.
 #
 # Файл и окно правят одно и то же. Переключатель режима в шапке пишет сюда `tun.enable`
 # сам, остальное ваше. При этой записи файл пересобирается, и комментарии теряются —
@@ -377,8 +379,8 @@ log-level: info
 allow-lan: false
 ipv6: false
 
-# Local Proxy: один порт сразу на http и socks. Адрес для браузера — 127.0.0.1:3090.
-mixed-port: 3090
+# Local Proxy: один порт сразу на http и socks. Адрес для браузера — 127.0.0.1, порт ниже.
+mixed-port: "#, $port, r#"
 
 # TUN: виртуальный адаптер, весь трафик машины. Нужны права администратора.
 tun:
@@ -405,7 +407,14 @@ dns:
 profile:
   store-selected: false
   store-fake-ip: true
-"#;
+"#)
+    };
+}
+
+#[cfg(debug_assertions)]
+const ADVANCED_DEFAULT: &str = advanced_default!("3091");
+#[cfg(not(debug_assertions))]
+const ADVANCED_DEFAULT: &str = advanced_default!("3090");
 
 const GROUPS_DEFAULT: &str = r#"# Группы узлов — ваши, и они общие: одни и те же во всех направлениях и во всех наборах
 # правил (D-075). Набор — это только маршрутизация.

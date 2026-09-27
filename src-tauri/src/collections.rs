@@ -145,6 +145,40 @@ pub fn fill_missing() -> Result<()> {
     Ok(())
 }
 
+/// Добавить перевод прежним стандартным наборам один раз; правки владельца сохраняются.
+pub fn adopt_rule_titles() -> Result<()> {
+    let marker = paths::collections_dir().join(".rule-titles-v1");
+    if marker.exists() {
+        return Ok(());
+    }
+    for (id, shipped) in RULES_SHIPPED {
+        let path = paths::collection_folder(RULES).join(format!("{id}.yaml"));
+        if path.exists() {
+            let text = std::fs::read_to_string(&path)?;
+            if let Some(updated) = translated_title(&text, shipped) {
+                crate::atomic::write(path, updated)?;
+            }
+        }
+    }
+    crate::atomic::write(marker, "1\n")?;
+    Ok(())
+}
+
+fn translated_title(text: &str, shipped: &str) -> Option<String> {
+    let map = crate::yaml::top_mapping(text).ok()?;
+    let sample = crate::yaml::top_mapping(shipped).ok()?;
+    let key = serde_yaml::Value::from("title_en");
+    if map.contains_key(&key)
+        || map.get(serde_yaml::Value::from("title")) != sample.get(serde_yaml::Value::from("title"))
+    {
+        return None;
+    }
+    let title = serde_yaml::to_string(sample.get(&key)?).ok()?;
+    let updated = format!("{text}\ntitle_en: {title}");
+    crate::yaml::top_mapping(&updated).ok()?;
+    Some(updated)
+}
+
 /// Прочитать коллекцию резолверов. Файла нет — читаем вшитый образец: она нужна окну
 /// и без диска, а первый запуск не должен показывать пустой список.
 pub fn dns() -> Result<Resolvers> {
@@ -205,7 +239,26 @@ mod tests {
         for (id, text) in RULES_SHIPPED {
             let value: serde_yaml::Value = serde_yaml::from_str(text).expect(id);
             assert!(value.get("title").is_some(), "{id}: нет заголовка");
+            assert!(
+                value.get("title_en").is_some(),
+                "{id}: нет английского заголовка"
+            );
             assert!(value.get("rules").is_some(), "{id}: нет правил");
         }
+    }
+
+    #[test]
+    fn adding_a_translation_preserves_user_rules_and_names() {
+        let shipped = RULES_SHIPPED[1].1;
+        let old = "# my comment\ntitle: Блокировка рекламы\nrules: [MATCH,DIRECT]\n";
+        let updated = translated_title(old, shipped).unwrap();
+        assert!(
+            updated.starts_with(old),
+            "содержимое и комментарии не переписываются"
+        );
+        assert!(updated.contains("title_en: Ad blocking"));
+        assert!(translated_title(&updated, shipped).is_none());
+        assert!(translated_title("title: Mine\nrules: [MATCH,DIRECT]", shipped).is_none());
+        assert!(translated_title("%%%", shipped).is_none());
     }
 }

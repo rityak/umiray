@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const answer = vi.hoisted(() => ({ value: undefined as unknown }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: async () => answer.value }));
 
-const { asAppError, nodesList, udpGet, updatesCheck, UpdateProgress } = await import("./api");
+const { asAppError, nodesList, udpGet, updatesCheck, UpdateProgress, rulesetsList } = await import(
+  "./api"
+);
 
 describe("the Rust boundary", () => {
   beforeEach(() => {
@@ -24,6 +26,16 @@ describe("the Rust boundary", () => {
   it("extra fields are dropped: the window is promised only what is declared", async () => {
     answer.value = { on: true, nodes: 3, secret: "x" };
     expect(await udpGet()).toEqual({ on: true, nodes: 3 });
+  });
+
+  it("rule sets accept optional English titles and reject invalid translations", async () => {
+    const set = { id: "ads", title: "Ads", on: false, rules: ["MATCH,DIRECT"] };
+    answer.value = [set];
+    expect(await rulesetsList()).toEqual(answer.value);
+    answer.value = [{ ...set, titleEn: "Ad blocking" }];
+    expect(await rulesetsList()).toEqual(answer.value);
+    answer.value = [{ ...set, titleEn: 123 }];
+    await expect(rulesetsList()).rejects.toMatchObject({ kind: "unexpected" });
   });
 
   it("update metadata and progress are validated before reaching the window", async () => {

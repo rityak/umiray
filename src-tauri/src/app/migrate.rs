@@ -44,6 +44,7 @@ pub fn run() -> Result<()> {
     // важен — раздача пропускает уже существующую папку, и переехавшее она не тронет.
     adopt_collections()?;
     crate::collections::seed()?;
+    crate::collections::adopt_rule_titles()?;
     rename_override()?;
     refresh_stale_templates()?;
     adopt_routing_files()?;

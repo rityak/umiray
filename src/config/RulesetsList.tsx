@@ -13,7 +13,7 @@ import {
   Text,
 } from "rootik";
 import * as api from "../api";
-import { t, tn } from "../i18n";
+import { getLang, t, tn } from "../i18n";
 import { failure, type Message } from "../shell/Banner";
 import CodeMirror from "./CodeMirror";
 
@@ -163,7 +163,7 @@ export default function RulesetsList({ active, onStatus, onMessage }: Props) {
           <div className="flex items-center gap-2.5">
             <Switch
               className="min-w-0 flex-1"
-              label={set.title}
+              label={getLang() === "en" ? (set.titleEn ?? set.title) : set.title}
               description={`${set.id} · ${tn(set.rules.length, "{n} rule", "{n} rules")}`}
               checked={set.on}
               disabled={busy !== null}
@@ -180,7 +180,9 @@ export default function RulesetsList({ active, onStatus, onMessage }: Props) {
               icon={<Trash2 />}
               disabled={busy !== null}
               confirmLabel={t("Delete for sure?")}
-              aria-label={t("Delete set {title}", { title: set.title })}
+              aria-label={t("Delete set {title}", {
+                title: getLang() === "en" ? (set.titleEn ?? set.title) : set.title,
+              })}
               onConfirm={() => remove(set)}
             >
               {t("Delete")}

@@ -29,8 +29,10 @@ const KEY: &str = "rulesets";
 pub struct Ruleset {
     /// Имя файла без расширения. Оно же то, что записано в `client.yaml`.
     pub id: String,
-    /// Наше поле поверх формата ядра: человеческое имя набора.
+    /// Человеческие имена набора: перевод выбирает окно (D-151).
     pub title: String,
+    #[serde(default)]
+    pub title_en: Option<String>,
     pub on: bool,
     /// Строки правил как есть — окно показывает их, когда набор раскрывают.
     pub rules: Vec<String>,
@@ -244,6 +246,11 @@ fn parse(id: &str, text: &str) -> Option<Ruleset> {
         return None;
     }
     Some(Ruleset {
+        title_en: map
+            .get(Value::from("title_en"))
+            .and_then(Value::as_str)
+            .filter(|title| !title.trim().is_empty())
+            .map(str::to_string),
         title: map
             .get(Value::from("title"))
             .and_then(Value::as_str)
@@ -268,6 +275,7 @@ mod tests {
     fn a_file_gives_its_title_and_its_rules() {
         let set = parse("direct-ru", DIRECT_RU).unwrap();
         assert_eq!(set.title, "Россия — напрямую");
+        assert_eq!(set.title_en.as_deref(), Some("Russia — direct"));
         assert_eq!(set.id, "direct-ru");
         assert!(set.rules.contains(&"DOMAIN-SUFFIX,ru,DIRECT".to_string()));
         assert!(
@@ -283,6 +291,13 @@ mod tests {
     fn a_set_without_a_title_is_shown_and_one_without_rules_is_not() {
         let named = parse("свой", "rules: [MATCH,DIRECT]").unwrap();
         assert_eq!(named.title, "свой");
+        assert_eq!(named.title_en, None);
+        assert_eq!(
+            parse("blank", "title_en: '  '\nrules: [MATCH,DIRECT]")
+                .unwrap()
+                .title_en,
+            None
+        );
         assert!(parse("пустой", "title: Пусто\nrules: []").is_none());
         assert!(parse("никакой", "title: Пусто\n").is_none());
         assert!(parse("сломанный", "%%%").is_none());

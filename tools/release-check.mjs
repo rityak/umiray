@@ -5,6 +5,14 @@ const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf
 const pkg = JSON.parse(read("package.json"));
 const lock = JSON.parse(read("package-lock.json"));
 const config = JSON.parse(read("src-tauri/tauri.conf.json"));
+const notes = read("CHANGELOG.md")
+  .split(/^## /m)
+  .find((section) => section.split(/\r?\n/, 1)[0] === pkg.version)
+  ?.slice(pkg.version.length)
+  .trim();
+assert.ok(notes, `CHANGELOG.md must contain release notes for ${pkg.version}`);
+for (const asset of ["public/ray-mark.svg", "public/ray.svg"])
+  assert.match(read(asset), /<svg\b/, `${asset} must contain the app icon`);
 assert.match(pkg.version, /^\d+\.\d+\.\d+$/, "Release version must be stable X.Y.Z");
 assert.equal(lock.version, pkg.version, "package-lock version differs");
 assert.equal(lock.packages[""].version, pkg.version, "package-lock root version differs");
@@ -18,6 +26,7 @@ assert.ok(
   "Cargo.lock version differs",
 );
 assert.equal(config.version, "../package.json");
+assert.equal(config.mainBinaryName, "umiray");
 assert.equal(config.bundle.createUpdaterArtifacts, true);
 assert.deepEqual(config.bundle.targets, ["nsis"]);
 assert.deepEqual(config.plugins.updater.endpoints, [
@@ -36,4 +45,8 @@ if (process.env.GITHUB_REPOSITORY)
     "rityak/umiray",
     "Updater endpoint belongs to another repository",
   );
-console.log(`Release v${pkg.version}: versions, signing key and updater endpoint agree.`);
+console.log(
+  process.argv.includes("--notes")
+    ? notes
+    : `Release v${pkg.version}: icons, versions, changelog, signing key and updater endpoint agree.`,
+);

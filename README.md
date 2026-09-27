@@ -9,7 +9,7 @@
   Tauri&nbsp;2 · Rust · React · <a href="https://github.com/rityak/rootik">Rootik</a>
 </p>
 
-<p align="center"><b>1.0.0</b> · <a href="README.ru.md">Русская версия</a></p>
+<p align="center"><b>1.0.1</b> · <a href="README.ru.md">Русская версия</a></p>
 
 ![Connection](screenshots/connection.png)
 
@@ -43,7 +43,7 @@ The client downloads mihomo from its official release page on first launch.
 TUN requires administrator rights. The client can create a scheduled task to launch
 with those rights without asking for UAC confirmation each time.
 
-Data is stored in `%LOCALAPPDATA%\umiray-client`.
+Data is stored in `%LOCALAPPDATA%\umiray`.
 
 The interface selects Russian when a Russian keyboard layout is installed; otherwise,
 it selects English. Override this in Settings → Umiray Settings → Interface language.

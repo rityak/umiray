@@ -1,9 +1,9 @@
 //! Где лежат файлы приложения. Единственная ответственность модуля — пути.
 //!
-//! Всё живёт под `%LOCALAPPDATA%\umiray-client` (D-014). Не `app_local_data_dir` из Tauri —
+//! Всё живёт под `%LOCALAPPDATA%\umiray` (D-150). Не `app_local_data_dir` из Tauri —
 //! тот подставил бы identifier из tauri.conf.json.
 //!
-//! **У отладочной сборки каталог свой** — `umiray-client-dev` (D-116). Разработка идёт
+//! **У отладочной сборки каталог свой** — `umiray-dev` (D-150). Разработка идёт
 //! на той же машине, где клиентом пользуются, и `tauri dev` иначе правил бы живые
 //! подписки, выбор узла и настройки того, кто просто хотел, чтобы VPN работал.
 //! Признак — профиль сборки, а не переменная окружения: забыть её ровно так же легко,
@@ -12,15 +12,30 @@
 use std::io;
 use std::path::PathBuf;
 
-const APP_DIR: &str = if cfg!(debug_assertions) {
-    "umiray-client-dev"
+pub const APP_NAME: &str = if cfg!(debug_assertions) {
+    "umiray-dev"
 } else {
-    "umiray-client"
+    "umiray"
+};
+
+pub const CORE_NAME: &str = if cfg!(debug_assertions) {
+    "mihomo-dev.exe"
+} else {
+    "mihomo.exe"
 };
 
 pub fn root() -> PathBuf {
     let base = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| ".".into());
-    PathBuf::from(base).join(APP_DIR)
+    PathBuf::from(base).join(APP_NAME)
+}
+
+/// Предыдущий каталог этого же окружения, только для разового переезда (D-150).
+pub fn legacy_root() -> PathBuf {
+    root().with_file_name(if cfg!(debug_assertions) {
+        "umiray-client-dev"
+    } else {
+        "umiray-client"
+    })
 }
 
 /// Конфиг до разделения на профиль и оверрайд. Остался только ради разовой миграции.
@@ -146,7 +161,7 @@ pub fn effective_config() -> PathBuf {
 }
 
 pub fn core() -> PathBuf {
-    root().join("mihomo.exe")
+    root().join(CORE_NAME)
 }
 
 /// Идентификатор установки для подписок с привязкой по устройству.

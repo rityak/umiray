@@ -517,12 +517,18 @@ export default function ClientForm({
           ],
         },
         {
-          id: "service-core",
-          label: t("mihomo core"),
+          id: "service-client",
+          label: t("Client"),
           settings: [
             {
               id: "client-update",
-              label: t("Client updates"),
+              label: t("Client version"),
+              hint: (
+                <>
+                  {t("This version is also sent to subscription providers:")}{" "}
+                  <Code>umiray/{api.VERSION}</Code>
+                </>
+              ),
               control: (
                 <ClientUpdate
                   info={updateInfo}
@@ -534,6 +540,12 @@ export default function ClientForm({
                 />
               ),
             },
+          ],
+        },
+        {
+          id: "service-core",
+          label: t("Mihomo core"),
+          settings: [
             {
               id: "install",
               label: t("Update core"),
@@ -551,17 +563,12 @@ export default function ClientForm({
                 </Button>
               ),
             },
-            {
-              id: "version",
-              label: t("Client version"),
-              hint: (
-                <>
-                  {t("This version is also sent to subscription providers:")}{" "}
-                  <Code>umiray/{api.VERSION}</Code>
-                </>
-              ),
-              control: <Code className="selectable">{api.VERSION}</Code>,
-            },
+          ],
+        },
+        {
+          id: "service-data",
+          label: t("Data"),
+          settings: [
             {
               id: "device",
               label: t("Device ID"),
@@ -576,12 +583,6 @@ export default function ClientForm({
                 </Tooltip>
               ),
             },
-          ],
-        },
-        {
-          id: "service-data",
-          label: t("Data"),
-          settings: [
             {
               id: "flush",
               label: t("Clear fake-IP mappings"),

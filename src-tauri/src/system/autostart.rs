@@ -22,7 +22,7 @@ use crate::system::{registry, task};
 const RUN: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 
 /// Имя записи. Совпадает с названием приложения — по нему её и узнают в диспетчере задач.
-const NAME: &str = "umiray";
+const NAME: &str = crate::paths::APP_NAME;
 
 /// Флаг, с которым клиента поднимает запись в `Run`: по нему `smart` узнаёт, что окно
 /// показывать не надо (D-129).

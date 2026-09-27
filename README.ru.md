@@ -9,7 +9,7 @@
   Tauri 2 · Rust · React · <a href="https://github.com/rityak/rootik">Rootik</a>
 </p>
 
-<p align="center">1.0.0 · <a href="README.md">English</a></p>
+<p align="center">1.0.1 · <a href="README.md">English</a></p>
 
 ![Соединение](screenshots/connection.png)
 
@@ -44,7 +44,7 @@
 Для TUN нужны права администратора. Клиент может создать задачу в планировщике,
 чтобы запускаться с правами без подтверждения UAC каждый раз.
 
-Данные хранятся в `%LOCALAPPDATA%\umiray-client`.
+Данные хранятся в `%LOCALAPPDATA%\umiray`.
 
 Если установлена русская раскладка клавиатуры, интерфейс выбирает русский язык.
 В остальных случаях — английский.

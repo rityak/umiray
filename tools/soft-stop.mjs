@@ -1,7 +1,7 @@
 // Мягкая остановка работает и из процесса **без своей консоли** (D-103, S-021).
 //
 //   npm run dev                      # окно грузится с localhost:1420 и в этой сборке тоже
-//   cargo build --release
+//   npm run tauri build -- --no-bundle
 //   node tools/soft-stop.mjs
 //
 // Зачем отдельно от `cargo test live`. Механизм проверен из тестового процесса, а у него
@@ -33,7 +33,7 @@ const PORT = Number(process.env.UI_CHECK_PORT ?? 9222);
 const EXE = "src-tauri/target/release/umiray.exe";
 // Каталог **релизной** сборки: проверка берёт релизный бинарь, а у него и каталог
 // боевой — отладочный свой (D-116).
-const CACHE = join(process.env.LOCALAPPDATA ?? "", "umiray-client", "run", "cache.db");
+const CACHE = join(process.env.LOCALAPPDATA ?? "", "umiray", "run", "cache.db");
 let failed = 0;
 
 function check(name, ok, detail = "") {
@@ -76,7 +76,7 @@ const kill = (image) => {
 // --- поехали ---------------------------------------------------------------
 
 if (!existsSync(EXE)) {
-  console.error(`нет релизной сборки: ${EXE} — сначала \`cargo build --release\``);
+  console.error(`нет релизной сборки: ${EXE} — сначала \`npm run tauri build -- --no-bundle\``);
   process.exit(2);
 }
 if (pids("mihomo.exe").length > 0) {

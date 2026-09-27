@@ -22,17 +22,18 @@ npm run updater:setup -- --github
 `GITHUB_TOKEN` предоставляет Actions. Отдельный сервер обновлений не нужен.
 В репозитории должны быть включены Actions; разрешение публикации задано в workflow.
 
-## Первый выпуск
+## Выпуск 1.0.1
 
 Из корня проекта в PowerShell, после добавления секрета:
 
 ```powershell
 npm run release:check
 git add .
-git commit -m "prepare 1.0 release and signed updates"
+git commit -m "fix: restore icons, reorganize settings and isolate dev" `
+  -m "Restore the app logo in GitHub builds. Move client version and update controls into the Client section. Add English rule-set titles. Separate stable/dev data, processes and autostart with safe migration of existing files. Publish release notes from CHANGELOG."
 git push -u origin HEAD
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.0.1
+git push origin v1.0.1
 ```
 
 В этой рабочей копии `origin` уже настроен на `https://github.com/rityak/umiray.git`.
@@ -40,16 +41,19 @@ git push origin v1.0.0
 `git remote add origin https://github.com/rityak/umiray.git`.
 Workflow сверяет тег, `package.json`, оба lock-файла и `Cargo.toml`.
 Сначала создаёт draft с установщиком, `.sig` и `latest.json`; успешная сборка публикует его.
-Устанавливается `umiray_1.0.0_x64-setup.exe`, не portable exe.
+Текст страницы релиза — английский раздел текущей версии из `CHANGELOG.md`, вместе с подзаголовками
+и инструкцией установки. `node tools/release-check.mjs --notes` показывает этот текст
+перед публикацией. Без непустого раздела текущей версии сборка не начинается.
+Устанавливается `umiray_1.0.1_x64-setup.exe`, не portable exe.
 Подпись обновления Tauri не является сертификатом Windows Authenticode.
 
 ## Следующие версии
 
-1. `npm version 1.0.1 --no-git-tag-version`.
+1. `npm version patch --no-git-tag-version`.
 2. Та же версия в `src-tauri/Cargo.toml`; `cargo check --manifest-path src-tauri/Cargo.toml`
    обновит `Cargo.lock`.
 3. Обновить CHANGELOG и версии в README; выполнить `npm run release:check`.
-4. Закоммитить, отправить код, создать и отправить тег `v1.0.1`.
+4. Закоммитить, отправить код, создать и отправить тег `v<номер из package.json>`.
 
 Нужен больший номер версии. Повторный тег или замена файлов старого релиза — не обновление.
 Этот workflow выпускает стабильные версии; beta-теги отклоняются проверкой.
@@ -87,3 +91,30 @@ npm run tauri build -- --bundles nsis -- --locked
 его в отдельном браузере с CDP-портом 9233 и выполните `node tools/update-check.mjs`.
 Тест отказывается работать в живом Tauri-клиенте; проверяет подтверждение, несохранённые
 формы и YAML, прогресс, блокировку Escape и повтор после ошибки загрузки.
+
+## Stable и dev
+
+Stable: `%LOCALAPPDATA%\umiray`, `umiray.exe`, `mihomo.exe`. Debug:
+`%LOCALAPPDATA%\umiray-dev`, `umiray-dev.exe`, `mihomo-dev.exe`.
+Прежние `umiray-client` и `umiray-client-dev` копируются при первом запуске;
+существующие файлы нового каталога и прежние папки сохраняются.
+Каталог выбирается профилем сборки, независимо от расположения exe. При установке
+в Program Files конфиги всё равно остаются в LocalAppData.
+
+`npm run tauri dev` собирает `src-tauri/target/debug/umiray-dev.exe`.
+Если нужен прямой запуск с CDP: `npm run dev` отдельно, затем
+`src-tauri\target\debug\umiray-dev.exe --scheduled`.
+Cargo называет бинарь `umiray-dev`; `tauri build` переименовывает release в `umiray.exe`.
+Задачи автозапуска, Run-записи, mutex, WebView и имена firewall-правил раздельные.
+Debug не устанавливает обновления stable. Новый dev-конфиг использует порт 3091;
+заданный пользователем порт не переписывается. Два Proxy работают одновременно,
+System/TUN и глобальная политика firewall остаются общими для Windows.
+
+После обеих сборок при работающем `npm run dev`: `node tools/dev-check.mjs`.
+Проверка оставляет работающий stable на месте; закрыть нужно только существующий dev.
+Порт тестового dev 3091 должен быть свободен; если stable не открыт, нужен и свободный 3090.
+Создаёт временные данные без подписок, проверяет миграцию, оба языка, кнопки версии,
+запуск dev, повторный запуск и сохранность stable после остановки dev. Если stable
+не открыт, поднимает обе тестовые сборки и проверяет их одновременную работу.
+Процессы и временные данные убирает. `UI_CHECK_CORE` задаёт путь к существующему ядру.
+`tools\stop-client.cmd dev` завершает только dev; без аргумента — только stable.

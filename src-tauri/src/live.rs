@@ -62,7 +62,7 @@ fn copy_tree(from: &Path, to: &Path) {
         if entry.file_type().unwrap().is_dir() {
             std::fs::create_dir_all(&target).unwrap();
             copy_tree(&entry.path(), &target);
-        } else if entry.file_name() == "mihomo.exe" {
+        } else if entry.file_name() == crate::paths::CORE_NAME {
             // Жёсткая ссылка вместо копии: тот же том, полсекунды против пятидесяти мегабайт.
             std::fs::hard_link(entry.path(), &target)
                 .or_else(|_| std::fs::copy(entry.path(), &target).map(|_| ()))
@@ -2007,7 +2007,7 @@ struct TaskGuard {
 }
 
 impl TaskGuard {
-    const NAME: &'static str = "umiray";
+    const NAME: &'static str = crate::system::task::NAME;
 
     fn snapshot() -> Self {
         let out = std::process::Command::new("schtasks.exe")

@@ -24,6 +24,14 @@ jobs:
           workspaces: src-tauri
       - run: npm ci
       - run: npm run release:check
+      - name: Read release notes from changelog
+        id: notes
+        shell: pwsh
+        run: |
+          $notes = (node tools/release-check.mjs --notes) -join "`n"
+          if ($LASTEXITCODE -ne 0) { throw 'Release notes check failed.' }
+          $delimiter = [guid]::NewGuid().ToString('N')
+          "body<<$delimiter", $notes, $delimiter | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
       - name: Require signing key
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -48,7 +56,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: umiray ${{ github.ref_name }}
-          releaseBody: 'Install the Windows x64 setup executable. Existing installations can update from Umiray Settings. User data is preserved.'
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
           prerelease: false
           uploadUpdaterJson: true
