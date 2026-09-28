@@ -3,6 +3,21 @@
 The version comes from `package.json`, is mirrored in `Cargo.toml`, and appears in
 the subscription User-Agent as `umiray/<version>`.
 
+## 1.1.0
+
+### New
+
+- Added qd as a second engine, with an engine switch in the title bar and dedicated
+  connection, source, routing, settings and log views.
+- Added qd core download, process management and per-app routing import/export.
+
+### Fixes
+
+- Fixed tray deadlock, flicker and blank tabs.
+
+For Windows x64, download `umiray_1.1.0_x64-setup.exe` from this release's assets.
+The built-in updater can install this release from an existing installation.
+
 ## 1.0.1
 
 ### Fixes and settings
