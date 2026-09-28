@@ -30,7 +30,8 @@ getrandom = "0.3"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 # rt и macros — только ради живых тестов, помеченных ignore; Tauri тянет их всё равно.
 # net — UDP для запросов к резолверам (D-097); остальное было и раньше.
-tokio = { version = "1", features = ["time", "rt", "macros", "net"] }
+tokio = { version = "1", features = ["time", "rt", "macros", "net", "sync"] }
+sha2 = "0.10"
 tauri-plugin-updater = "2"
 
 # Спрятанному в трей окну WebView2 говорят «тебя не видно» (`IsVisible`): иначе страница

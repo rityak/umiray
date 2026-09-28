@@ -13,6 +13,7 @@ import {
   Text,
 } from "rootik";
 import * as api from "../api";
+import { useCached } from "../hooks/useCached";
 import { getLang, t, tn } from "../i18n";
 import { failure, type Message } from "../shell/Banner";
 import CodeMirror from "./CodeMirror";
@@ -30,7 +31,7 @@ type Props = {
  * `collections/rules/` (D-104); "Save" applies it too.
  */
 export default function RulesetsList({ active, onStatus, onMessage }: Props) {
-  const [sets, setSets] = useState<api.Ruleset[]>([]);
+  const [sets, setSets] = useCached<api.Ruleset[]>("rulesets", []);
   const [busy, setBusy] = useState<string | null>(null);
   const [shown, setShown] = useState<string | null>(null);
   /// The draft of the expanded set. One: only one is ever open.

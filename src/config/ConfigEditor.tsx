@@ -34,11 +34,12 @@ type Props = {
   /// Всё, что нужно форме «Клиента»: статус, настройки и действия над системой (D-089).
   /// Едет одним объектом транзитом — сам редактор про них ничего не знает.
   client: ClientProps;
+  own?: { id: string; render: (start: React.ReactNode) => React.ReactNode };
 };
 
 /// Значок документа. Список закрытый: документов в «Настройках» ровно два (D-117),
 /// и знать их в лицо — работа этой полосы, а не повод заводить реестр.
-const ICONS: Record<string, typeof Cpu> = { client: Sparkles, advanced: Cpu };
+const ICONS: Record<string, typeof Cpu> = { client: Sparkles, advanced: Cpu, qd: Cpu };
 
 /// Документ настроек клиента. Идентификаторы документов знает и окно — так же, как знает
 /// их значки: список закрытый, и второй способ его узнать был бы лишним запросом.
@@ -86,6 +87,7 @@ export default function ConfigEditor({
   onSections,
   onMessage,
   client,
+  own,
 }: Props) {
   const [docId, setDocId] = useState(section.docs[0].id);
   /// Вид — один на раздел, а не на документ (решение пользователя): переключатель стоит
@@ -115,11 +117,12 @@ export default function ConfigEditor({
   /// поверх него откатывало бы их обратно — то есть окно тихо отменяло бы собственный
   /// переключатель.
   const reload = useCallback(() => {
+    if (doc.id === own?.id) return;
     api.configRead(doc.id).then(
       (text) => onDisk(doc.id, text),
       (e) => onMessage(failure(e)),
     );
-  }, [doc.id, onDisk, onMessage]);
+  }, [doc.id, own?.id, onDisk, onMessage]);
 
   useEffect(reload, [reload]);
 
@@ -248,7 +251,7 @@ export default function ConfigEditor({
   // на одном месте в каждом разделе.
   const start = (
     <>
-      <ViewSwitch value={view} onChange={setView} />
+      {doc.id !== own?.id && <ViewSwitch value={view} onChange={setView} />}
       {section.presets ? (
         // Наборы — выпадающим списком, действия над ними — в меню рядом (D-075).
         <PresetPicker
@@ -279,6 +282,10 @@ export default function ConfigEditor({
 
   // «Настройки» формой — страница с оглавлением; кнопки записи у «Ядра» свои, у «Клиента»
   // их нет вовсе: каждая галка пишется сразу (D-117).
+  if (own && doc.id === own.id) {
+    return <>{own.render(start)}</>;
+  }
+
   if (view === "visual" && (doc.id === CLIENT || doc.id === ADVANCED)) {
     return doc.id === CLIENT ? (
       // Форма пишет в тот же документ, что открыт в коде, — после записи его перечитать (D-052).

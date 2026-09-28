@@ -15,6 +15,7 @@ pub mod groups;
 pub mod mode;
 pub mod nodes;
 pub mod presets;
+pub mod qd;
 pub mod rules;
 pub mod rulesets;
 pub mod settings;

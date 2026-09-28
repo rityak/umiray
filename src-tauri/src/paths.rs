@@ -44,6 +44,20 @@ pub fn legacy_config() -> PathBuf {
 }
 
 /// Настройки приложения: поведение, переживающее перезапуск (D-024).
+pub const QD_NAME: &str = if cfg!(debug_assertions) {
+    "qd-dev.exe"
+} else {
+    "qd.exe"
+};
+
+pub fn qd() -> PathBuf {
+    root().join(QD_NAME)
+}
+
+pub fn qd_dir() -> PathBuf {
+    root().join("qd")
+}
+
 pub fn settings() -> PathBuf {
     root().join("settings.json")
 }

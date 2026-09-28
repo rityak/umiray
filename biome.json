@@ -7,7 +7,15 @@
   },
   "linter": {
     "rules": {
-      "recommended": true
+      "recommended": true,
+      "correctness": {
+        "useExhaustiveDependencies": {
+          "level": "error",
+          "options": {
+            "hooks": [{ "name": "useCached", "stableResult": [1] }]
+          }
+        }
+      }
     }
   },
   "css": {

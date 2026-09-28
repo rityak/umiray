@@ -4,6 +4,7 @@ import { Button, Card, EmptyState, Field, IconButton, NumberInput, Select, Text 
 import * as api from "../api";
 import { importSummary } from "../api";
 import type { Drafts } from "../config/draft";
+import { useCached } from "../hooks/useCached";
 import { useNow } from "../hooks/useNow";
 import { t } from "../i18n";
 import { failure, type Message, notice } from "../shell/Banner";
@@ -88,7 +89,7 @@ export default function Sources({
   const [opened, setOpened] = useState<string | null>(null);
   /// Узлы — чтобы показать, из чего источник состоит. Спрашиваем при открытии раздела
   /// и после каждой правки состава, а не опросом: список меняется только от них.
-  const [nodes, setNodes] = useState<api.Node[]>([]);
+  const [nodes, setNodes] = useCached<api.Node[]>("sources.nodes", []);
   /// «Через 20 мин» считается от часов, а не от данных — пересчитываем раз в полминуты.
   const now = useNow(30_000);
 

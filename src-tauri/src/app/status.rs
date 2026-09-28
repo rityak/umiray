@@ -87,6 +87,17 @@ pub fn proxy_address(core: &core::Status) -> Option<String> {
 
 /// Как должен выглядеть значок при таком статусе. Отдельная функция, потому что состояние
 /// меняется в четырёх местах, и повторять этот разбор в каждом — способ их рассинхронизировать.
+pub fn shown_look(state: &AppState, status: &Status) -> tray::Look {
+    if state.settings().engine == crate::app::settings::Engine::Qd {
+        return if state.qd.connected() {
+            tray::Look::Qd
+        } else {
+            tray::Look::Off
+        };
+    }
+    look(status)
+}
+
 pub fn look(status: &Status) -> tray::Look {
     if !status.running {
         return tray::Look::Off;

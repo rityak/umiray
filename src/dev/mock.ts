@@ -32,6 +32,7 @@ let status: api.Status = {
 
 let settings: api.Settings = {
   version: 1,
+  engine: "mihomo",
   refresh: { onStart: true, everyMinutes: 1440 },
   theme: "midnight",
   scene: true,
@@ -303,6 +304,101 @@ const status_ = () => ({ ...status, started: status.running ? status.started : n
 
 type Args = Record<string, unknown>;
 
+let qdUp = false;
+let qdFlags = { egress: false, adblock: true };
+const qdNodes = [
+  { id: 1, name: "Entry A", role: "ingress", reachable: true, selected: true, latencyMs: 9 },
+  { id: 2, name: "Entry B", role: "ingress", reachable: true, selected: false, latencyMs: 41 },
+];
+let qdRouting = {
+  defaultRole: "direct",
+  allowExit: true,
+  rules: [
+    {
+      id: 1,
+      process: "chrome.exe",
+      path: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+      role: "tunnel",
+    },
+    { id: 2, process: "Telegram.exe", role: "egress" },
+  ],
+};
+let qdSettings = { refreshMinutes: 480, refreshPinned: false, fixedRate: 0, ratePinned: false };
+const qdState = () => ({
+  imported: true,
+  connected: qdUp,
+  node: qdUp ? qdNodes[0] : null,
+  nodes: { total: qdNodes.length, reachable: qdNodes.length },
+  ...qdFlags,
+  allowExit: true,
+  subscription: {
+    lastRefresh: Date.now() - 3_600_000,
+    intervalMinutes: qdSettings.refreshMinutes,
+    expiresAt: Date.now() + 30 * 86_400_000,
+  },
+  failed: false,
+});
+const qdCall = (method: string, path: string, body: Record<string, unknown> | null): unknown => {
+  const at = path.replace("/client/api/", "");
+  if (at === "state") return qdState();
+  if (at === "connect" || at === "disconnect") {
+    qdUp = at === "connect";
+    return qdState();
+  }
+  if (at === "toggle") {
+    qdFlags = { ...qdFlags, ...body };
+    return qdState();
+  }
+  if (at === "nodes") return qdNodes;
+  if (at.startsWith("history/"))
+    return {
+      window: 60,
+      points: Array.from({ length: 60 }, (_, i) => ({
+        t: i,
+        down: qdUp ? 40_000 + ((i * 7919) % 90_000) : 0,
+        up: qdUp ? 8_000 + ((i * 104729) % 20_000) : 0,
+      })),
+    };
+  if (at === "about")
+    return {
+      tag: "demo",
+      createdAt: Date.now() - 86_400_000,
+      up: 180_000_000,
+      down: 2_400_000_000,
+      expiresAt: Date.now() + 30 * 86_400_000,
+    };
+  if (at === "settings") {
+    if (method === "POST") qdSettings = { ...qdSettings, ...body };
+    return qdSettings;
+  }
+  if (at === "routing") {
+    if (method === "POST") qdRouting = { ...qdRouting, ...(body as typeof qdRouting) };
+    return qdRouting;
+  }
+  if (at === "routing/processes")
+    return [
+      {
+        name: "firefox.exe",
+        path: "C:\\Program Files\\Mozilla Firefox\\firefox.exe",
+        connections: 4,
+      },
+      ...Array.from({ length: 5 }, () => ({
+        name: "chrome.exe",
+        path: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+        connections: 3,
+      })),
+      {
+        name: "Telegram.exe",
+        path: "C:\\Users\\demo\\AppData\\Roaming\\Telegram Desktop\\Telegram.exe",
+      },
+      { name: "svchost.exe", path: "C:\\Windows\\System32\\svchost.exe" },
+    ];
+  if (at === "subscription/refresh") return { nodes: qdNodes.length };
+  if (at === "routing/export") return { code: "qdr", name: "rules.qdr" };
+  if (at === "routing/import") return { rules: 2 };
+  return qdState();
+};
+
 const HANDLERS: Record<string, (args: Args) => unknown> = {
   core_status: status_,
   core_start: () => {
@@ -517,6 +613,21 @@ const HANDLERS: Record<string, (args: Args) => unknown> = {
   system_relaunch_elevated: () => null,
   updates_check: () => ({ enabled: false, version: null, notes: null }),
   updates_install: () => null,
+  qd_status: () => ({
+    present: true,
+    elevated: true,
+    running: true,
+    state: qdState(),
+    problem: null,
+  }),
+  qd_call: ({ method, path, body }) =>
+    qdCall(String(method), String(path), (body as Record<string, unknown>) ?? null),
+  qd_start: () => qdCall("POST", "/client/api/connect", null),
+  qd_stop: () => qdCall("POST", "/client/api/disconnect", null),
+  qd_install: () => "v0.1.4-alpha",
+  qd_rules_export: () => "C:\\Users\\demo\\rules.qdr",
+  qd_rules_import: () => ({ rules: 2 }),
+  qd_logs: () => ["qd  embedded: api on 127.0.0.1:52100", "tunnel  up via Entry A, 9 ms"],
   diag_tools: () => tools,
   diag_run: ({ id }) => ({
     tool: id,

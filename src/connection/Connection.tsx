@@ -1,5 +1,6 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import * as api from "../api";
+import { useCached } from "../hooks/useCached";
 import { unchanged, usePoll } from "../hooks/usePoll";
 import { useLive } from "../hooks/useTraffic";
 import { failure, type Message } from "../shell/Banner";
@@ -45,15 +46,14 @@ export default function Connection({
   onAdd,
   onMessage,
 }: Props) {
-  const [nodes, setNodes] = useState<api.Node[]>([]);
+  const [nodes, setNodes] = useCached<api.Node[]>("connection.nodes", []);
   /// Выход от выбранного до узла: `["AUTO", "Poland 1"]` (D-145). Первое звено — что
   /// выбрано, последнее — через кого трафик уходит на самом деле.
-  const [route, setRoute] = useState<string[]>([]);
-  const [direction, setDirection] = useState<api.Direction>("direct");
+  const [route, setRoute] = useCached<string[]>("connection.route", []);
+  const [direction, setDirection] = useCached<api.Direction>("connection.direction", "direct");
   /// Чем меряем задержку (D-069). Спрашиваем опросом, а не помним: способ правится
   /// в другом разделе, и вернуться оттуда с устаревшим заголовком колонки нельзя.
-  const [ping, setPing] = useState<api.PingMethod>("tcp");
-  const [routeBusy, setRouteBusy] = useState(false);
+  const [ping, setPing] = useCached<api.PingMethod>("connection.ping", "tcp");
   /// Трафик — из хранилища, которое наполняет опрос `App` (D-076): история графика
   /// переживает уход в другой раздел, а перерисовывается от неё только этот.
   const live = useLive();
@@ -65,9 +65,12 @@ export default function Connection({
   /// после обновления подписки, и тогда оттуда честно придёт `auto` вместо `manual` (D-056).
   /// Всё одним вызовом (D-145), а раскладываем по своим состояниям: смена выхода не должна
   /// перерисовывать список узлов, который не менялся.
+  const generation = useRef(0);
   const poll = useCallback(() => {
+    const asked = generation.current;
     api.connectionSnapshot().then(
       (snapshot) => {
+        if (asked !== generation.current) return;
         unchanged(setNodes)(snapshot.nodes);
         unchanged(setRoute)(snapshot.route);
         setDirection(snapshot.direction);
@@ -83,7 +86,7 @@ export default function Connection({
   /// и он же поправит направление, если выбранного узла больше нет.
   const choose = useCallback(
     async (next: api.Direction, node?: string) => {
-      setRouteBusy(true);
+      generation.current++;
       setDirection(next);
       if (node) setRoute([node]);
       try {
@@ -91,7 +94,7 @@ export default function Connection({
       } catch (e) {
         onMessage(failure(e));
       } finally {
-        setRouteBusy(false);
+        generation.current++;
         poll();
       }
     },
@@ -143,7 +146,7 @@ export default function Connection({
           selected={nodes.find((node) => node.name === exit) ?? null}
           total={nodes.filter((node) => node.supported).length}
           hidden={hidden}
-          busy={appBusy || routeBusy}
+          busy={appBusy}
           powering={powering}
           onPower={onPower}
           onMode={onMode}

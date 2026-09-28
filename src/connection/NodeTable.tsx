@@ -11,12 +11,13 @@ import { nowText } from "./rate";
 type Props = {
   nodes: api.Node[];
   selected: string | null;
-  method: api.PingMethod;
+  method?: api.PingMethod;
   sourceName: (id: string) => string;
   hidden: boolean;
   rates: Record<string, NodeSpeed>;
+  plain?: boolean;
   onSelect: (node: string) => void;
-  onEdit: (node: string) => void;
+  onEdit?: (node: string) => void;
 };
 
 const key = (node: api.Node) => `${node.source}/${node.name}`;
@@ -33,6 +34,7 @@ export default function NodeTable({
   sourceName,
   hidden,
   rates,
+  plain,
   onSelect,
   onEdit,
 }: Props) {
@@ -50,7 +52,13 @@ export default function NodeTable({
       <DataTable
         sticky
         maxHeight="100%"
-        hiddenColumns={box.width > 0 && box.width < WIDE ? ["address", "source"] : undefined}
+        hiddenColumns={
+          plain
+            ? ["kind", "address", "source", "now"]
+            : box.width > 0 && box.width < WIDE
+              ? ["address", "source"]
+              : undefined
+        }
         density="compact"
         rows={nodes}
         rowKey={key}
@@ -60,6 +68,7 @@ export default function NodeTable({
         rowProps={(node) => ({
           "data-node": node.name,
           onContextMenu: (event) => {
+            if (!onEdit) return;
             event.preventDefault();
             onEdit(node.name);
           },
@@ -99,7 +108,7 @@ export default function NodeTable({
           },
           {
             key: "delay",
-            header: t("Delay · {method}", { method: api.PING_LABEL[method] }),
+            header: method ? t("Delay · {method}", { method: api.PING_LABEL[method] }) : t("Delay"),
             sortable: true,
             align: "end",
             value: (node) => node.delay ?? Number.POSITIVE_INFINITY,
@@ -129,23 +138,27 @@ export default function NodeTable({
             value: rate,
             cell: (node) => nowText(rates[node.name]),
           },
-          {
-            key: "edit",
-            header: "",
-            width: 44,
-            cell: (node) => (
-              <IconButton
-                size="sm"
-                variant="ghost"
-                icon={<Pencil />}
-                label={t("Edit {name}", { name: node.name })}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onEdit(node.name);
-                }}
-              />
-            ),
-          },
+          ...(onEdit
+            ? [
+                {
+                  key: "edit",
+                  header: "",
+                  width: 44,
+                  cell: (node: api.Node) => (
+                    <IconButton
+                      size="sm"
+                      variant="ghost"
+                      icon={<Pencil />}
+                      label={t("Edit {name}", { name: node.name })}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onEdit(node.name);
+                      }}
+                    />
+                  ),
+                },
+              ]
+            : []),
         ]}
       />
     </div>

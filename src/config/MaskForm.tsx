@@ -2,6 +2,7 @@ import { Dices, Save, Undo2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button, Code, Field, NumberInput, Switch, Text } from "rootik";
 import * as api from "../api";
+import { useCached } from "../hooks/useCached";
 import { t } from "../i18n";
 import { failure, type Message, notice } from "../shell/Banner";
 import { Rows, type Setting } from "./Page";
@@ -33,8 +34,8 @@ const randomHeaders = () => {
  * Save explicitly so typing 40 never writes an intermediate jmin of 4.
  */
 export default function MaskForm({ onMessage, onSaved, onUnsavedChange }: Props) {
-  const [disk, setDisk] = useState<api.Mask | null>(null);
-  const [draft, setDraft] = useState<api.Mask | null>(null);
+  const [disk, setDisk] = useCached<api.Mask | null>("mask.disk", null);
+  const [draft, setDraft] = useCached<api.Mask | null>("mask.draft", null);
   const [busy, setBusy] = useState(false);
   /// Keep the opt-in visible before numbers are entered; disk stores the fields (D-131).
   const [amnezia, setAmnezia] = useState(false);

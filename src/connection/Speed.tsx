@@ -10,7 +10,7 @@ type Props = {
   current: Rate;
   /// Cumulative traffic since the core started.
   totals: Rate | null;
-  connections: number | null;
+  connections?: number | null;
 };
 
 const perSecond = (value: number) => t("{rate}/s", { rate: formatBytes(value) });
@@ -18,17 +18,20 @@ const perSecond = (value: number) => t("{rate}/s", { rate: formatBytes(value) })
 /// Hide charts that would collapse into a strip.
 const MIN_CHART = 56;
 
-/// Compact labels fit the kit's 32px axis. Switch units at 2048 to avoid tiny fractions.
-const AXIS = ["B", "KB", "MB", "GB"];
+/// Compact labels fit the kit's 32px axis: units switch at 1000, so a label is at most "999K".
+const AXIS = ["", "K", "M", "G"];
 function axis(peak: number) {
   const top = Math.max(peak, 1000);
   let step = 0;
   let unit = 1;
-  while (top / unit >= 2048 && step < AXIS.length - 1) {
+  while (top / unit >= 1000 && step < AXIS.length - 1) {
     unit *= 1024;
     step += 1;
   }
-  return { unit, format: (value: number) => `${Number(value.toPrecision(3))}${AXIS[step]}` };
+  return {
+    unit,
+    format: (value: number) => (value === 0 ? "0" : `${Number(value.toPrecision(3))}${AXIS[step]}`),
+  };
 }
 
 /// Stats share the series colors, making a separate legend redundant.
@@ -51,7 +54,7 @@ export default function Speed({ running, history, current, totals, connections }
   const summary = running
     ? [
         !stats && `↓ ${perSecond(current.down)} ↑ ${perSecond(current.up)}`,
-        t("connections {n}", { n: connections ?? "—" }),
+        connections !== undefined && t("connections {n}", { n: connections ?? "—" }),
         totals && t("session {size}", { size: formatBytes(totals.down + totals.up) }),
       ]
         .filter(Boolean)
@@ -67,12 +70,14 @@ export default function Speed({ running, history, current, totals, connections }
               <div className="flex h-full flex-col gap-3">
                 <div className="grid grid-cols-2 gap-3">
                   <Stat
+                    className="um-rate"
                     size="sm"
                     label={t("Download")}
                     value={perSecond(current.down)}
                     icon={<ArrowDown style={{ color: DOWN }} />}
                   />
                   <Stat
+                    className="um-rate"
                     size="sm"
                     label={t("Upload")}
                     value={perSecond(current.up)}

@@ -38,6 +38,7 @@ type Props = {
   onChanged: () => void;
   onAdd: () => void;
   onMessage: (message: Message) => void;
+  qd?: { onRefresh: () => Promise<void> };
 };
 
 type Sort = "source" | "name" | "delay";
@@ -66,8 +67,9 @@ export default function Nodes({
   onChanged,
   onAdd,
   onMessage,
+  qd,
 }: Props) {
-  const [sort, setSort] = useState<Sort>("source");
+  const [sort, setSort] = useState<Sort>(qd ? "delay" : "source");
   const [view, setView] = useState<View>("tiles");
   const [measuring, setMeasuring] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -112,6 +114,17 @@ export default function Nodes({
   /// Refresh subscriptions and the node list, then measure latency again.
   const refresh = async () => {
     setRefreshing(true);
+    if (qd) {
+      try {
+        await qd.onRefresh();
+        onChanged();
+      } catch (e) {
+        onMessage(failure(e));
+      } finally {
+        setRefreshing(false);
+      }
+      return;
+    }
     try {
       const failures = await api.sourcesRefreshAll();
       onChanged();
@@ -130,14 +143,14 @@ export default function Nodes({
   /// Measure an unchecked list once, then only on request to avoid repeated pings.
   const measured = useRef(false);
   useEffect(() => {
-    if (measured.current || nodes.length === 0) return;
+    if (qd || measured.current || nodes.length === 0) return;
     if (nodes.some((node) => node.delay !== null)) {
       measured.current = true;
       return;
     }
     measured.current = true;
     measure.current(false);
-  }, [nodes]);
+  }, [nodes, qd]);
 
   const select = useCallback(
     (node: string) => {
@@ -156,7 +169,11 @@ export default function Nodes({
         <EmptyState
           icon={<Server />}
           title={t("No nodes")}
-          hint={t("Add a subscription or a link — the core will load it.")}
+          hint={
+            qd
+              ? t("Add the qd:// link in Sources.")
+              : t("Add a subscription or a link — the core will load it.")
+          }
           action={
             <Button variant="primary" onClick={onAdd}>
               {t("Add source")}
@@ -187,7 +204,7 @@ export default function Nodes({
             value={sort}
             onChange={setSort}
             options={[
-              { value: "source", label: t("by source") },
+              ...(qd ? [] : [{ value: "source" as const, label: t("by source") }]),
               { value: "name", label: t("by name") },
               { value: "delay", label: t("by latency") },
             ]}
@@ -202,44 +219,51 @@ export default function Nodes({
               { value: "table", icon: <Table2 />, hint: t("Table") },
             ]}
           />
-          <IconButton
-            size="sm"
-            variant="ghost"
-            icon={hidden ? <EyeOff /> : <Eye />}
-            active={hidden}
-            label={
-              hidden
-                ? t("Show addresses and subscription names")
-                : t("Hide addresses and subscription names")
-            }
-            onClick={onHidden}
-          />
+          {!qd && (
+            <IconButton
+              size="sm"
+              variant="ghost"
+              icon={hidden ? <EyeOff /> : <Eye />}
+              active={hidden}
+              label={
+                hidden
+                  ? t("Show addresses and subscription names")
+                  : t("Hide addresses and subscription names")
+              }
+              onClick={onHidden}
+            />
+          )}
           <IconButton
             size="sm"
             variant="ghost"
             icon={<RefreshCw />}
             loading={refreshing}
             disabled={measuring}
-            label={t("Refresh subscriptions and measure latency again")}
+            label={
+              qd
+                ? t("Refresh the qd subscription")
+                : t("Refresh subscriptions and measure latency again")
+            }
             onClick={refresh}
           />
           <span className="flex-1" />
-          {/* Use the same kit tooltip as neighboring controls. */}
-          <Tooltip
-            content={t("Latency to each server: {method}. Change the method in Settings", {
-              method: api.PING_LABEL[method],
-            })}
-          >
-            <Button
-              size="sm"
-              icon={<Gauge />}
-              loading={measuring}
-              disabled={refreshing}
-              onClick={() => measure.current(true)}
+          {!qd && (
+            <Tooltip
+              content={t("Latency to each server: {method}. Change the method in Settings", {
+                method: api.PING_LABEL[method],
+              })}
             >
-              {t("Check latency")}
-            </Button>
-          </Tooltip>
+              <Button
+                size="sm"
+                icon={<Gauge />}
+                loading={measuring}
+                disabled={refreshing}
+                onClick={() => measure.current(true)}
+              >
+                {t("Check latency")}
+              </Button>
+            </Tooltip>
+          )}
         </div>
         {rules && !rulesHintHidden && (
           <Callout
@@ -274,19 +298,21 @@ export default function Nodes({
               sourceName={sourceName}
               hidden={hidden}
               rates={rates}
+              plain={Boolean(qd)}
               onSelect={select}
-              onEdit={setEditing}
+              onEdit={qd ? undefined : setEditing}
             />
           ) : (
             <NodeTable
               nodes={visible}
               selected={selected}
-              method={method}
+              method={qd ? undefined : method}
               sourceName={sourceName}
               hidden={hidden}
               rates={rates}
+              plain={Boolean(qd)}
               onSelect={select}
-              onEdit={setEditing}
+              onEdit={qd ? undefined : setEditing}
             />
           )}
         </div>

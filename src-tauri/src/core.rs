@@ -8,6 +8,7 @@
 pub mod apply;
 pub mod controller;
 pub mod download;
+pub mod qd;
 pub mod supervisor;
 
 pub use supervisor::{Status, Supervisor};
