@@ -360,6 +360,30 @@ fn shown(app: &AppHandle, state: &AppState) -> Status {
     current
 }
 
+async fn qd_flip(app: &AppHandle, state: &AppState) -> Result<()> {
+    let connected = state
+        .qd
+        .call("GET", "/client/api/state", None)
+        .await?
+        .get("connected")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    if connected {
+        state
+            .qd
+            .call("POST", "/client/api/disconnect", None)
+            .await?;
+        shown(app, state);
+        return Ok(());
+    }
+    if state.supervisor.status().running {
+        stop(app, state).await;
+    }
+    state.qd.call("POST", "/client/api/connect", None).await?;
+    shown(app, state);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -426,28 +450,4 @@ mod tests {
         quiet(&mut watch, HEALTHY);
         assert_eq!(watch.step(true), Step::Raise);
     }
-}
-
-async fn qd_flip(app: &AppHandle, state: &AppState) -> Result<()> {
-    let connected = state
-        .qd
-        .call("GET", "/client/api/state", None)
-        .await?
-        .get("connected")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false);
-    if connected {
-        state
-            .qd
-            .call("POST", "/client/api/disconnect", None)
-            .await?;
-        shown(app, state);
-        return Ok(());
-    }
-    if state.supervisor.status().running {
-        stop(app, state).await;
-    }
-    state.qd.call("POST", "/client/api/connect", None).await?;
-    shown(app, state);
-    Ok(())
 }
