@@ -16,6 +16,7 @@ import {
 import { useEffect, useState } from "react";
 import { Button, ChoiceCards, Code, ConfirmButton, Select, Switch, Tooltip } from "rootik";
 import * as api from "../api";
+import { useCached } from "../hooks/useCached";
 import { type LanguagePreference, languagePreference, t, tk } from "../i18n";
 import { failure, type Message } from "../shell/Banner";
 import SectionBar from "../shell/SectionBar";
@@ -104,10 +105,34 @@ const GEO = [
   { hours: 720, label: tk("Every month") },
 ];
 
+const MIHOMO_ONLY = new Set([
+  "guard",
+  "antidpi",
+  "nodes",
+  "service-rules",
+  "service-core",
+  "device",
+  "flush",
+]);
+
+function forQd(groups: Group[]): Group[] {
+  return groups
+    .filter((group) => !MIHOMO_ONLY.has(group.id))
+    .map((group) => ({
+      ...group,
+      parts: group.parts
+        .filter((part) => !MIHOMO_ONLY.has(part.id))
+        .map((part) => ({
+          ...part,
+          settings: part.settings.filter((setting) => !MIHOMO_ONLY.has(setting.id)),
+        })),
+    }));
+}
+
 const LAUNCHES: { id: api.Launch; label: string; hint: string }[] = [
   {
     id: "smart",
-    label: "Smart",
+    label: tk("Smart"),
     hint: tk("With Windows: start in tray. From a shortcut: open the window"),
   },
   { id: "window", label: tk("Open window"), hint: tk("Start with the window open") },
@@ -180,11 +205,11 @@ export default function ClientForm({
   start,
   hint,
 }: Props) {
-  const [method, setMethod] = useState<api.PingMethod | null>(null);
-  const [health, setHealth] = useState<string | null>(null);
-  const [udp, setUdp] = useState<api.Udp | null>(null);
-  const [geo, setGeo] = useState<number | null>(null);
-  const [device, setDevice] = useState<string | null>(null);
+  const [method, setMethod] = useCached<api.PingMethod | null>("client.ping", null);
+  const [health, setHealth] = useCached<string | null>("client.health", null);
+  const [udp, setUdp] = useCached<api.Udp | null>("client.udp", null);
+  const [geo, setGeo] = useCached<number | null>("client.geo", null);
+  const [device, setDevice] = useCached<string | null>("client.device", null);
   const [flushing, setFlushing] = useState(false);
 
   useEffect(() => {
@@ -629,7 +654,7 @@ export default function ClientForm({
 
   return (
     <Page
-      groups={groups}
+      groups={settings.engine === "qd" ? forQd(groups) : groups}
       // Кнопок записи нет: каждая настройка клиента пишется сразу (D-117).
       bar={<SectionBar start={start} hint={hint} />}
     />

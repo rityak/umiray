@@ -12,6 +12,7 @@ import {
   Tooltip,
 } from "rootik";
 import * as api from "../api";
+import { useCached } from "../hooks/useCached";
 import { t } from "../i18n";
 import { failure, type Message } from "../shell/Banner";
 import Scroll from "../shell/Scroll";
@@ -41,11 +42,11 @@ type Props = {
  * ходит в сеть сама по себе, — это уже не диагностика, а фоновый трафик.
  */
 export default function Tools({ onMessage }: Props) {
-  const [tools, setTools] = useState<api.Tool[]>([]);
-  const [reports, setReports] = useState<Record<string, api.Report>>({});
-  const [entries, setEntries] = useState<Entry[]>([]);
+  const [tools, setTools] = useCached<api.Tool[]>("tools.list", []);
+  const [reports, setReports] = useCached<Record<string, api.Report>>("tools.reports", {});
+  const [entries, setEntries] = useCached<Entry[]>("tools.entries", []);
   const [running, setRunning] = useState<string | null>(null);
-  const [picked, setPicked] = useState<string | null>(null);
+  const [picked, setPicked] = useCached<string | null>("tools.picked", null);
   const [domain, setDomain] = useState("");
   const [domains, setDomains] = useState("");
   const [host, setHost] = useState("");

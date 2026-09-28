@@ -4,7 +4,7 @@ use tauri::State;
 
 use crate::app::connect;
 use crate::app::state::AppState;
-use crate::app::status::{look, status, Status};
+use crate::app::status::{shown_look, status, Status};
 use crate::app::tray;
 use crate::core::controller::Traffic;
 use crate::core::download;
@@ -15,7 +15,7 @@ use crate::error::Result;
 pub fn core_status(app: tauri::AppHandle, state: State<AppState>) -> Status {
     let current = status(&state);
     // Значок догоняет здесь же: ядро может упасть само, и об этом никто больше не скажет.
-    tray::refresh(&app, look(&current));
+    tray::refresh(&app, shown_look(&state, &current));
     current
 }
 

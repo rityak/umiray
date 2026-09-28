@@ -16,8 +16,9 @@ type Props = {
   /// Private mode (D-127): the address is covered with dots.
   hidden: boolean;
   rates: Record<string, NodeSpeed>;
+  plain?: boolean;
   onSelect: (node: string) => void;
-  onEdit: (node: string) => void;
+  onEdit?: (node: string) => void;
 };
 
 /// Nodes as tiles: "pick a server with the mouse" (D-079). Comparing by column is the table's job.
@@ -27,6 +28,7 @@ export default function NodeTiles({
   sourceName,
   hidden,
   rates,
+  plain,
   onSelect,
   onEdit,
 }: Props) {
@@ -40,6 +42,7 @@ export default function NodeTiles({
           source={sourceName(node.source)}
           hidden={hidden}
           rate={rates[node.name]}
+          plain={plain}
           onSelect={onSelect}
           onEdit={onEdit}
         />
@@ -54,8 +57,9 @@ type TileProps = {
   source: string;
   hidden: boolean;
   rate: NodeSpeed | undefined;
+  plain?: boolean;
   onSelect: (node: string) => void;
-  onEdit: (node: string) => void;
+  onEdit?: (node: string) => void;
 };
 
 /// One tile. Separate and under `memo`: rates arrive every poll tick but change for one or
@@ -66,6 +70,7 @@ const Tile = memo(function Tile({
   source,
   hidden,
   rate,
+  plain,
   onSelect,
   onEdit,
 }: TileProps) {
@@ -77,23 +82,28 @@ const Tile = memo(function Tile({
       // A node the core will not bring up cannot be selected (D-063).
       disabled={!node.supported}
       onClick={() => onSelect(node.name)}
-      onContextMenu={(event) => {
-        event.preventDefault();
-        onEdit(node.name);
-      }}
-      media={<Flag country={node.country} />}
+      onContextMenu={
+        onEdit &&
+        ((event) => {
+          event.preventDefault();
+          onEdit(node.name);
+        })
+      }
+      media={plain ? undefined : <Flag country={node.country} />}
       title={node.name}
       // Three lines, as before (D-085): who in the title; how and where; what now and from where.
       description={
-        <>
-          <span className="block truncate">
-            {hide(node.address, hidden) ?? "—"} · {node.kind}
-          </span>
-          <span className="block truncate">
-            {nowText(rate)}
-            {rate && ` · ${t("{n} conn.", { n: rate.connections })}`} · {source}
-          </span>
-        </>
+        !plain && (
+          <>
+            <span className="block truncate">
+              {hide(node.address, hidden) ?? "—"} · {node.kind}
+            </span>
+            <span className="block truncate">
+              {rate && `${nowText(rate)} · ${t("{n} conn.", { n: rate.connections })} · `}
+              {source}
+            </span>
+          </>
+        )
       }
       meta={
         <span className="flex flex-col items-end gap-1">
@@ -111,13 +121,15 @@ const Tile = memo(function Tile({
         </span>
       }
       actions={
-        <IconButton
-          size="sm"
-          variant="ghost"
-          icon={<Pencil />}
-          label={t("Edit {name}", { name: node.name })}
-          onClick={() => onEdit(node.name)}
-        />
+        onEdit && (
+          <IconButton
+            size="sm"
+            variant="ghost"
+            icon={<Pencil />}
+            label={t("Edit {name}", { name: node.name })}
+            onClick={() => onEdit(node.name)}
+          />
+        )
       }
     />
   );

@@ -93,6 +93,7 @@ export type Launch = z.infer<typeof Launch>;
 
 export const Settings = z.object({
   version: z.number(),
+  engine: z.enum(["mihomo", "qd"]).catch("mihomo"),
   refresh: Refresh,
   theme: Theme,
   // Намерение «прописывать ли прокси в систему» бэкенд тоже хранит, но окну оно не нужно
@@ -128,6 +129,7 @@ export type Settings = z.infer<typeof Settings>;
 
 /// Что меняем в настройках. Присылаем только изменившееся — остальное бэкенд не тронет.
 export type SettingsPatch = {
+  engine?: "mihomo" | "qd";
   refresh?: Refresh;
   theme?: Theme;
   scene?: boolean;
@@ -318,7 +320,7 @@ export const updatesInstall = (onProgress: (progress: UpdateProgress) => void) =
  * теперь команда отказывает сразу, с именем поля в подробностях — тем же путём, что
  * и любая ошибка бэкенда (D-028, D-144). Лишние поля схема отбрасывает: окну они не обещаны.
  */
-async function call<T extends z.ZodType>(
+export async function call<T extends z.ZodType>(
   schema: T,
   command: string,
   args?: InvokeArgs,

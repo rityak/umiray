@@ -21,6 +21,14 @@ pub const VERSION: u32 = 2;
 /// поэтому в настройках она одно поле, а не набор цветов: цвета знает фронтенд.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+pub enum Engine {
+    #[default]
+    Mihomo,
+    Qd,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Theme {
     #[default]
     Midnight,
@@ -160,6 +168,8 @@ pub struct Settings {
     /// и означает «запрет наш», в том числе после падения.
     #[serde(default)]
     pub kill_switch_backup: Option<crate::system::killswitch::Backup>,
+    #[serde(default)]
+    pub engine: Engine,
 }
 
 /// Что меняем в настройках. Ровно одна команда на все опции: с ростом их числа отдельная
@@ -171,6 +181,7 @@ pub struct Settings {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Patch {
     pub refresh: Option<Refresh>,
+    pub engine: Option<Engine>,
     pub theme: Option<Theme>,
     pub scene: Option<bool>,
     pub scene_blur: Option<u8>,
@@ -186,6 +197,9 @@ pub struct Patch {
 impl Patch {
     /// Накладывает только то, что пришло: отсутствующее поле остаётся прежним.
     pub fn apply(self, settings: &mut Settings) {
+        if let Some(engine) = self.engine {
+            settings.engine = engine;
+        }
         if let Some(refresh) = self.refresh {
             settings.refresh = refresh;
         }
@@ -242,6 +256,7 @@ impl Default for Settings {
             auto_connect: false,
             launch: Launch::default(),
             admin_offer: true,
+            engine: Engine::default(),
         }
     }
 }
@@ -326,6 +341,7 @@ mod tests {
             auto_connect: true,
             launch: Launch::Tray,
             admin_offer: false,
+            engine: Engine::Qd,
         };
         let json = serde_json::to_string_pretty(&settings).unwrap();
         assert_eq!(decode(&json), settings);

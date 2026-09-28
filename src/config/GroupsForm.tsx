@@ -2,6 +2,7 @@ import { Layers, Plus } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Card, EmptyState } from "rootik";
 import * as api from "../api";
+import { useCached } from "../hooks/useCached";
 import { t } from "../i18n";
 import { failure, type Message } from "../shell/Banner";
 import BuiltinGroups from "./BuiltinGroups";
@@ -19,6 +20,8 @@ type Props = {
 type Row = { key: number; group: api.Group; selection: Selection };
 
 const EMPTY: Choices = { sources: [], nodes: [] };
+
+let kept: { text: string; rows: Row[] } | null = null;
 
 function fresh(key: number): Row {
   return {
@@ -44,8 +47,10 @@ function fresh(key: number): Row {
  * Edits update the shared draft; Save, Revert and Ctrl+S also serve code view.
  */
 export default function GroupsForm({ text, onDraft, onMessage }: Props) {
-  const [rows, setRows] = useState<Row[]>([]);
-  const [choices, setChoices] = useState<Choices>(EMPTY);
+  const [rows, setRows] = useState<Row[]>(() => (kept?.text === text ? kept.rows : []));
+  const [choices, setChoices] = useCached<Choices>("groups.choices", EMPTY);
+  const cached = useRef(kept?.text === text);
+  kept = { text, rows };
   const [open, setOpen] = useState<number | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
   const next = useRef(0);
@@ -75,6 +80,10 @@ export default function GroupsForm({ text, onDraft, onMessage }: Props) {
     // Compare only with our output. Revert restores base and must reparse it.
     if (text === ours.current) return;
     base.current = text;
+    if (cached.current) {
+      cached.current = false;
+      return;
+    }
     let alive = true;
     api.groupsParse(text).then(
       (groups) => {

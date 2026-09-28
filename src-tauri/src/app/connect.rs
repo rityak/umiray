@@ -17,7 +17,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::app::lifecycle::{self, Ctx, Phase};
 use crate::app::state::AppState;
-use crate::app::status::{look, status, Status};
+use crate::app::status::{shown_look, status, Status};
 use crate::app::tray;
 use crate::error::Result;
 
@@ -39,6 +39,7 @@ const FAREWELL: usize = 3;
 /// Отказ «до»-шага уезжает наружу как есть: вариант ошибки — это кнопка, которую покажет
 /// окно (D-028).
 pub async fn start(app: &AppHandle, state: &AppState) -> Result<Status> {
+    state.qd.shutdown().await;
     let _transition = state.transition().await;
     start_locked(app, state).await
 }
@@ -211,6 +212,14 @@ pub fn toggle(app: &AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let state = app.state::<AppState>();
+        if state.settings().engine == crate::app::settings::Engine::Qd {
+            if let Err(why) = qd_flip(&app, &state).await {
+                state
+                    .supervisor
+                    .note("error", &format!("qd из трея не переключился: {why}"));
+            }
+            return;
+        }
         if state.supervisor.status().running {
             stop(&app, &state).await;
         } else if let Err(why) = start(&app, &state).await {
@@ -232,6 +241,14 @@ pub fn autoconnect(app: AppHandle) {
         if !state.settings().auto_connect {
             return;
         }
+        if state.settings().engine == crate::app::settings::Engine::Qd {
+            if let Err(why) = state.qd.call("POST", "/client/api/connect", None).await {
+                state
+                    .supervisor
+                    .note("error", &format!("автоподключение qd не удалось: {why}"));
+            }
+            return;
+        }
         if let Err(why) = start(&app, &state).await {
             state
                 .supervisor
@@ -250,6 +267,12 @@ pub fn watch(app: AppHandle) {
         loop {
             tokio::time::sleep(TICK).await;
             let state = app.state::<AppState>();
+            if state.settings().engine == crate::app::settings::Engine::Qd
+                && state.qd.running().await
+            {
+                let _ = state.qd.call("GET", "/client/api/state", None).await;
+                shown(&app, &state);
+            }
             match watch.step(state.supervisor.crashed()) {
                 Step::Idle => continue,
                 Step::GiveUp => {
@@ -333,7 +356,7 @@ impl Watch {
 /// как «не сработало».
 fn shown(app: &AppHandle, state: &AppState) -> Status {
     let current = status(state);
-    tray::refresh(app, look(&current));
+    tray::refresh(app, shown_look(state, &current));
     current
 }
 
@@ -403,4 +426,28 @@ mod tests {
         quiet(&mut watch, HEALTHY);
         assert_eq!(watch.step(true), Step::Raise);
     }
+}
+
+async fn qd_flip(app: &AppHandle, state: &AppState) -> Result<()> {
+    let connected = state
+        .qd
+        .call("GET", "/client/api/state", None)
+        .await?
+        .get("connected")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    if connected {
+        state
+            .qd
+            .call("POST", "/client/api/disconnect", None)
+            .await?;
+        shown(app, state);
+        return Ok(());
+    }
+    if state.supervisor.status().running {
+        stop(app, state).await;
+    }
+    state.qd.call("POST", "/client/api/connect", None).await?;
+    shown(app, state);
+    Ok(())
 }

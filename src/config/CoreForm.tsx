@@ -2,6 +2,7 @@ import { Cable, Globe, ScrollText } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ChoiceCards, Code, Input, NumberInput, Select, Spinner, Switch, Textarea } from "rootik";
 import * as api from "../api";
+import { useCached } from "../hooks/useCached";
 import { t, tk } from "../i18n";
 import { failure, type Message, notice } from "../shell/Banner";
 import SaveActions from "../shell/SaveActions";
@@ -66,8 +67,8 @@ const cards = <T extends string>(items: { id: T; label: string; hint: string }[]
  */
 export default function CoreForm({ onMessage, onSaved, start, hint, onUnsavedChange }: Props) {
   /// Keep the disk snapshot for revert and dirty detection.
-  const [disk, setDisk] = useState<api.Advanced | null>(null);
-  const [draft, setDraft] = useState<api.Advanced | null>(null);
+  const [disk, setDisk] = useCached<api.Advanced | null>("core.disk", null);
+  const [draft, setDraft] = useCached<api.Advanced | null>("core.draft", null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {

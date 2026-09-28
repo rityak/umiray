@@ -311,7 +311,7 @@ fn start_port<'a, 'b>(ctx: &'a mut Ctx<'b>) -> Step<'a> {
         Err(AppError::CoreFailed {
             message: format!(
                 "Порт {port} уже занят{holder}. Закройте ту программу или смените порт \
-                 в «Настройки» → Mihomo Settings → Локальный прокси."
+                 в «Настройки» → «Настройки mihomo» → «Локальный прокси»."
             ),
             log: vec![format!("{address}: {why}")],
         })

@@ -19,6 +19,7 @@ type Props = {
   onRemove: () => void;
   /// Only record sources allow removal: subscription nodes return on refresh (D-121).
   onDropNode: (node: string) => void;
+  note?: string;
 };
 
 /// Hide the token-bearing URL tail in screenshots and screen sharing (D-081).
@@ -54,6 +55,7 @@ export default function SourceCard({
   onRefresh,
   onRemove,
   onDropNode,
+  note,
 }: Props) {
   const kinds = protocols(nodes);
 
@@ -79,7 +81,9 @@ export default function SourceCard({
         <>
           {tn(source.nodes, "{n} node", "{n} nodes")} ·{" "}
           {source.url !== null
-            ? `${updatedLabel(source)} · ${hide(shortUrl(source.url), hidden)}`
+            ? [updatedLabel(source), note ?? hide(shortUrl(source.url), hidden)]
+                .filter(Boolean)
+                .join(" · ")
             : source.records
               ? t("added here manually or from a file")
               : t("collected from individual links")}

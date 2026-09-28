@@ -12,6 +12,7 @@ import {
   Text,
 } from "rootik";
 import * as api from "../api";
+import { useCached } from "../hooks/useCached";
 import { t } from "../i18n";
 import { failure, type Message } from "../shell/Banner";
 import BuiltinRules from "./BuiltinRules";
@@ -48,6 +49,8 @@ const TARGETS = ["umiray", "AUTO", "DIRECT", "REJECT"];
 
 const EMPTY: api.Routing = { rules: [], fallback: "umiray" };
 
+let kept: { text: string; routing: api.Routing } | null = null;
+
 /// Список без повторов, порядок первого появления.
 function unique(items: string[]): string[] {
   return items.filter((item, at) => items.indexOf(item) === at);
@@ -61,11 +64,14 @@ function unique(items: string[]): string[] {
  * списка, и по ним видно, что выше и что ниже спрятанного.
  */
 export default function RulesForm({ text, onDraft, onMessage, onPending }: Props) {
-  const [routing, setRouting] = useState<api.Routing>(EMPTY);
-  const [groups, setGroups] = useState<string[]>([]);
+  const [routing, setRouting] = useState<api.Routing>(() =>
+    kept?.text === text ? kept.routing : EMPTY,
+  );
+  kept = { text, routing };
+  const [groups, setGroups] = useCached<string[]>("rules.groups", []);
   /// Узлы как второй список «куда» (D-082). Спрашиваем у бэкенда, а не считаем из групп:
   /// состав узлов знает каталог источников, а не документ.
-  const [nodes, setNodes] = useState<string[]>([]);
+  const [nodes, setNodes] = useCached<string[]>("rules.nodes", []);
   const [filter, setFilter] = useState("all");
   const [probe, setProbe] = useState("");
   const [refused, setRefused] = useState<string | null>(null);

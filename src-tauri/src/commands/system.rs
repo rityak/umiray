@@ -5,7 +5,7 @@ use tauri::State;
 use crate::app::settings;
 use crate::app::state::AppState;
 use crate::app::status::{
-    engage_kill_switch, look, release_kill_switch, release_system_proxy, status, Status,
+    engage_kill_switch, release_kill_switch, release_system_proxy, shown_look, status, Status,
 };
 use crate::app::{reset, tray};
 use crate::error::Result;
@@ -28,7 +28,7 @@ pub async fn system_reset(app: tauri::AppHandle, state: State<'_, AppState>) -> 
     reset::run()?;
     state.reload_settings();
     let current = status(&state);
-    tray::refresh(&app, look(&current));
+    tray::refresh(&app, shown_look(&state, &current));
     Ok(current)
 }
 
@@ -72,7 +72,7 @@ pub async fn system_kill_switch_set(
         release_kill_switch(&state)?;
     }
     let current = status(&state);
-    tray::refresh(&app, look(&current));
+    tray::refresh(&app, shown_look(&state, &current));
     Ok(current)
 }
 

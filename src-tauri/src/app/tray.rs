@@ -28,6 +28,7 @@ pub enum Look {
     /// Local proxy, прописанный в систему: для пользователя это отдельное состояние —
     /// от него зависит, идёт трафик браузера через нас или нет.
     System,
+    Qd,
 }
 
 impl Look {
@@ -41,6 +42,7 @@ impl Look {
             Look::Local => "Proxy",
             Look::Tun => "TUN",
             Look::System => "System: прокси прописан в Windows",
+            Look::Qd => "qd",
         };
         format!("{} — {state}", crate::paths::APP_NAME)
     }
@@ -57,6 +59,8 @@ impl Look {
             (Look::Local, true) => include_bytes!("../../icons/tray/light/local.png"),
             (Look::Tun, true) => include_bytes!("../../icons/tray/light/tun.png"),
             (Look::System, true) => include_bytes!("../../icons/tray/light/system.png"),
+            (Look::Qd, false) => include_bytes!("../../icons/tray/dark/tun.png"),
+            (Look::Qd, true) => include_bytes!("../../icons/tray/light/tun.png"),
         }
     }
 }
@@ -155,6 +159,11 @@ pub fn show<R: Runtime>(app: &AppHandle<R>) {
 /// Ошибки глотаем: значок в трее — это индикация, и её пропажа не повод завалить
 /// запуск или остановку ядра.
 pub fn refresh<R: Runtime>(app: &AppHandle<R>, look: Look) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || apply(&handle, look));
+}
+
+fn apply<R: Runtime>(app: &AppHandle<R>, look: Look) {
     let mut shown = SHOWN.lock().unwrap();
     let light = light_taskbar();
     if *shown == Some((look, light)) {

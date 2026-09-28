@@ -14,6 +14,12 @@ import { record } from "./hooks/useTraffic";
 import { saveLanguagePreference, t, tk } from "./i18n";
 import * as lifecycle from "./lifecycle";
 import Logs from "./logs/Logs";
+import * as qd from "./qd/api";
+import QdConnection from "./qd/QdConnection";
+import QdLogs from "./qd/QdLogs";
+import QdRouting from "./qd/QdRouting";
+import QdSettings from "./qd/QdSettings";
+import QdSource from "./qd/QdSource";
 import Settings from "./settings/Settings";
 import AdminOffer from "./shell/AdminOffer";
 import Banner, { failure, type Message, notice } from "./shell/Banner";
@@ -53,6 +59,7 @@ const LAST: DockItem[] = [
 /// схему файла знает бэкенд.
 const LOADING: api.Settings = {
   version: 0,
+  engine: "mihomo",
   refresh: { onStart: true, everyMinutes: 1440 },
   theme: "midnight",
   scene: true,
@@ -155,6 +162,11 @@ export default function App() {
 
   // Статус приходит каждый такт, но меняется редко: одинаковый ответ окно не перерисовывает.
   usePoll(() => api.coreStatus().then(unchanged(setStatus), () => {}));
+
+  const onQd = settings.engine === "qd";
+  const [qdStatus, setQdStatus] = useState<qd.Status | null>(null);
+  const reloadQd = useCallback(() => qd.status().then(unchanged(setQdStatus), () => {}), []);
+  usePoll(reloadQd, onQd);
 
   const configOpen = sections.some((section) => section.id === tab);
   usePoll(reloadSections, configOpen);
@@ -353,18 +365,44 @@ export default function App() {
   );
 
   /// Питание. Одна кнопка на оба направления: она же индикатор состояния (D-060).
+  const qdConnected = qdStatus?.state?.connected ?? false;
   const power = useCallback(async () => {
     setJob("power");
     setMessage(null);
     try {
-      setStatus(status.running ? await api.coreStop() : await api.coreStart());
+      if (onQd) {
+        if (qdConnected) await qd.stop();
+        else await qd.start();
+      } else {
+        setStatus(status.running ? await api.coreStop() : await api.coreStart());
+      }
     } catch (e) {
       setMessage(failure(e));
-      setStatus(await api.coreStatus());
     } finally {
+      setStatus(await api.coreStatus());
+      reloadQd();
       setJob(null);
     }
-  }, [status.running]);
+  }, [onQd, qdConnected, status.running, reloadQd]);
+
+  const installQd = useCallback(async () => {
+    setMessage(null);
+    try {
+      setMessage(notice(t("qd {version} downloaded", { version: await qd.install() })));
+    } catch (e) {
+      setMessage(failure(e));
+    } finally {
+      reloadQd();
+    }
+  }, [reloadQd]);
+
+  const chooseEngine = useCallback(
+    async (engine: "mihomo" | "qd") => {
+      await update({ engine });
+      setTab((was) => (engine === "qd" && was === "groups" ? "connection" : was));
+    },
+    [update],
+  );
 
   /// Перезапуск: то, что ядро читает на старте, доезжает только так (D-010).
   const restart = useCallback(async () => {
@@ -438,9 +476,32 @@ export default function App() {
           kind: "restartNeeded",
         }
       : null);
+  const shownSections = onQd
+    ? sections
+        .filter((item) => item.id !== "groups")
+        .map((item) =>
+          item.id === "rules"
+            ? { ...item, docs: [] }
+            : item.id === "advanced"
+              ? {
+                  ...item,
+                  docs: [
+                    ...item.docs.filter((doc) => doc.id === "client"),
+                    {
+                      id: "qd",
+                      label: t("qd Settings"),
+                      hint: t("qd client settings"),
+                      core: false,
+                      applied: false,
+                    },
+                  ],
+                }
+              : item,
+        )
+    : sections;
   const tabs: DockItem[] = [
     ...FIRST.map((item) => ({ ...item, label: t(item.label) })),
-    ...sections.map((section) => ({
+    ...shownSections.map((section) => ({
       value: section.id,
       label: section.label,
       icon: ICONS[section.id],
@@ -454,7 +515,7 @@ export default function App() {
     ...LAST.map((item) => ({ ...item, label: t(item.label) })),
   ];
   /// Dock виден только над разделами: настройки и отладка занимают окно целиком.
-  const section = sections.find((item) => item.id === tab);
+  const section = shownSections.find((item) => item.id === tab);
   /// Переход в раздел закрывает оформление и отладку: они занимают место раздела.
   const navigate = (id: string) => {
     setSettingsOpen(false);
@@ -476,6 +537,9 @@ export default function App() {
         <TitleBar
           status={status}
           powering={job === "power"}
+          engine={settings.engine}
+          onEngine={chooseEngine}
+          qd={qdStatus}
           onAdd={add}
           onSettings={() => {
             opener.current = document.activeElement as HTMLElement | null;
@@ -569,88 +633,132 @@ export default function App() {
           <>
             {/* Подложку несёт каждая карточка раздела сама (D-142): листа под разделом нет. */}
             <section
+              key={`${tab}-${settings.engine}`}
               id="section-panel"
               role="tabpanel"
               aria-labelledby={`tab-${tab}`}
-              className="flex min-h-0 flex-1 flex-col gap-3"
+              className="um-section flex min-h-0 flex-1 flex-col gap-3"
             >
-              {tab === "connection" && (
-                <Connection
-                  status={status}
-                  mode={mode}
-                  busy={busy}
-                  powering={job === "power"}
-                  onMode={choose}
-                  onPower={power}
-                  sources={sources}
-                  hidden={settings.private}
-                  onHidden={() => update({ private: !settings.private })}
-                  onStatus={setStatus}
-                  onAdd={add}
-                  onMessage={setMessage}
-                />
-              )}
-              {tab === "sources" && (
-                <Sources
-                  sources={sources}
-                  hidden={settings.private}
-                  onHidden={() => update({ private: !settings.private })}
-                  focus={focusAdd}
-                  onFocused={onFocused}
-                  schedule={settings.refresh}
-                  onSchedule={(refresh) => update({ refresh })}
-                  drafts={sourceDrafts}
-                  onDraft={onSourceDraft}
-                  onDisk={onSourceDisk}
-                  onChanged={reloadSources}
-                  onMessage={setMessage}
-                />
-              )}
-              {section && (
-                <ConfigEditor
-                  section={section}
-                  drafts={configs}
-                  onDraft={onDraft}
-                  onDisk={onDisk}
-                  onSections={reloadSections}
-                  onMessage={setMessage}
-                  client={{
-                    settings,
-                    status,
-                    busy,
-                    installing: job === "install",
-                    updateInfo,
-                    checkingUpdate,
-                    updateProgress,
-                    onCheckUpdate: checkUpdate,
-                    onClientUpdate: installUpdate,
-                    onUnsavedChange: setFormDirty,
-                    onChange: update,
-                    onInstall: install,
-                    onAutostart: autostart,
-                    onAlwaysAdmin: alwaysAdmin,
-                    onKillSwitch: killSwitch,
-                    onReset: reset,
-                    onStatus: setStatus,
-                    onLanguageChange: (language) => {
-                      if (Object.values(configs).some((draft) => draft.text !== draft.saved)) {
-                        setMessage(
-                          notice(t("Save or discard your edits before changing the language.")),
-                        );
-                        return;
-                      }
-                      try {
-                        saveLanguagePreference(language);
-                        window.location.reload();
-                      } catch (error) {
-                        setMessage(failure(error));
-                      }
-                    },
-                  }}
-                />
-              )}
+              {tab === "connection" &&
+                (onQd ? (
+                  <QdConnection
+                    status={qdStatus}
+                    otherRunning={status.running}
+                    powering={job === "power"}
+                    onPower={power}
+                    onChanged={reloadQd}
+                    onInstall={installQd}
+                    onElevate={elevate}
+                    onAdd={add}
+                    onMessage={setMessage}
+                  />
+                ) : (
+                  <Connection
+                    status={status}
+                    mode={mode}
+                    busy={busy}
+                    powering={job === "power"}
+                    onMode={choose}
+                    onPower={power}
+                    sources={sources}
+                    hidden={settings.private}
+                    onHidden={() => update({ private: !settings.private })}
+                    onStatus={setStatus}
+                    onAdd={add}
+                    onMessage={setMessage}
+                  />
+                ))}
+              {tab === "sources" &&
+                (onQd ? (
+                  <QdSource
+                    state={qdStatus?.state ?? null}
+                    hidden={settings.private}
+                    onHidden={() => update({ private: !settings.private })}
+                    focus={focusAdd}
+                    onFocused={onFocused}
+                    onChanged={reloadQd}
+                    onMessage={setMessage}
+                  />
+                ) : (
+                  <Sources
+                    sources={sources}
+                    hidden={settings.private}
+                    onHidden={() => update({ private: !settings.private })}
+                    focus={focusAdd}
+                    onFocused={onFocused}
+                    schedule={settings.refresh}
+                    onSchedule={(refresh) => update({ refresh })}
+                    drafts={sourceDrafts}
+                    onDraft={onSourceDraft}
+                    onDisk={onSourceDisk}
+                    onChanged={reloadSources}
+                    onMessage={setMessage}
+                  />
+                ))}
+              {section &&
+                (onQd && section.id === "rules" ? (
+                  <QdRouting live={Boolean(qdStatus?.state)} onMessage={setMessage} />
+                ) : (
+                  <ConfigEditor
+                    section={section}
+                    own={
+                      onQd
+                        ? {
+                            id: "qd",
+                            render: (start) => (
+                              <QdSettings
+                                live={Boolean(qdStatus?.state)}
+                                start={start}
+                                onInstall={installQd}
+                                onMessage={setMessage}
+                              />
+                            ),
+                          }
+                        : undefined
+                    }
+                    drafts={configs}
+                    onDraft={onDraft}
+                    onDisk={onDisk}
+                    onSections={reloadSections}
+                    onMessage={setMessage}
+                    client={{
+                      settings,
+                      status,
+                      busy,
+                      installing: job === "install",
+                      updateInfo,
+                      checkingUpdate,
+                      updateProgress,
+                      onCheckUpdate: checkUpdate,
+                      onClientUpdate: installUpdate,
+                      onUnsavedChange: setFormDirty,
+                      onChange: update,
+                      onInstall: install,
+                      onAutostart: autostart,
+                      onAlwaysAdmin: alwaysAdmin,
+                      onKillSwitch: killSwitch,
+                      onReset: reset,
+                      onStatus: setStatus,
+                      onLanguageChange: (language) => {
+                        if (Object.values(configs).some((draft) => draft.text !== draft.saved)) {
+                          setMessage(
+                            notice(t("Save or discard your edits before changing the language.")),
+                          );
+                          return;
+                        }
+                        try {
+                          saveLanguagePreference(language);
+                          window.location.reload();
+                        } catch (error) {
+                          setMessage(failure(error));
+                        }
+                      },
+                    }}
+                  />
+                ))}
               {tab === "diag" && <Tools onMessage={setMessage} />}
-              {tab === "logs" && <Logs hidden={settings.private} />}
+              {tab === "logs" &&
+                (onQd ? <QdLogs hidden={settings.private} /> : <Logs hidden={settings.private} />)}
             </section>
           </>
         )}

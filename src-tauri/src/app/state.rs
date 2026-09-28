@@ -14,6 +14,7 @@ use crate::nodes::ping;
 
 pub struct AppState {
     pub supervisor: Supervisor,
+    pub qd: crate::core::qd::Qd,
     /// Один переход подключения за раз. Замок охватывает не только процесс, но и хуки
     /// вокруг него: иначе параллельные start/stop успевают рассинхронизировать ядро,
     /// системный прокси и брандмауэр.
@@ -36,6 +37,7 @@ impl AppState {
     pub fn new() -> Self {
         Self {
             supervisor: Supervisor::new(),
+            qd: crate::core::qd::Qd::new(),
             transition: tokio::sync::Mutex::new(()),
             settings: Mutex::new(settings::load()),
             pings: Mutex::new(ping::Table::new()),

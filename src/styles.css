@@ -42,6 +42,44 @@
     padding-bottom: calc(var(--rk-dock-height) + var(--rk-shell-gap) * 2);
   }
 
+  .um-rate.rk-stat {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    column-gap: 10px;
+    row-gap: 2px;
+  }
+
+  .um-rate .rk-stat-head {
+    display: contents;
+  }
+
+  .um-rate .rk-stat-icon {
+    grid-row: 1 / 3;
+    width: 34px;
+    height: 34px;
+  }
+
+  .um-rate .rk-stat-value {
+    grid-column: 2;
+  }
+
+  .um-section {
+    animation: um-enter var(--rk-dur) var(--rk-ease-out);
+  }
+
+  @keyframes um-enter {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+  }
+
+  .um-shell .rk-dock-item[aria-selected="true"]:hover {
+    background: transparent;
+    color: var(--rk-on-inverse);
+  }
+
   /* A multi-line value field must not grow into a capsule with the pill preset. */
   .um-rule-values {
     border-radius: min(var(--rk-radius-control), calc(var(--rk-h-md) / 2));
