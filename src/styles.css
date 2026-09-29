@@ -80,9 +80,12 @@
     color: var(--rk-on-inverse);
   }
 
-  /* A multi-line value field must not grow into a capsule with the pill preset. */
-  .um-rule-values {
+  /* Multi-line fields must not clip their text with the pill preset. */
+  .rk-textarea {
     border-radius: min(var(--rk-radius-control), calc(var(--rk-h-md) / 2));
+  }
+
+  .um-rule-values {
     min-height: 150px;
     max-height: 320px;
   }

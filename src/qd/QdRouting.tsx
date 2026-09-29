@@ -34,10 +34,10 @@ import { useCached } from "../hooks/useCached";
 import { unchanged, usePoll } from "../hooks/usePoll";
 import { t, tk } from "../i18n";
 import { failure, type Message, notice } from "../shell/Banner";
+import ProcessPicker from "../shell/ProcessPicker";
 import Scroll from "../shell/Scroll";
 import SectionBar from "../shell/SectionBar";
 import * as qd from "./api";
-import ProcessPicker from "./ProcessPicker";
 
 type Props = {
   live: boolean;
@@ -58,6 +58,9 @@ const LOOK: Record<qd.Role, { label: string; word: string; tone: Tone; Icon: Luc
 
 const plain = (role: qd.Role) => role === "direct" || role === "tunnel";
 
+/// qd's rules: app → role, MATCH holds the default (QD.md). Looks like the mihomo rules on purpose.
+// ponytail: the frame (summary, filter chips, numbered cards, MATCH) is a copy of RulesForm's —
+// the rule models differ. Lift it into a shared list when a third engine brings rules of its own.
 export default function QdRouting({ live, onMessage }: Props) {
   const [routing, setRouting] = useCached<qd.Routing | null>("qd.routing", null);
   const [picking, setPicking] = useState(false);
@@ -306,7 +309,15 @@ export default function QdRouting({ live, onMessage }: Props) {
             {t("Rule")}
           </Button>
           {picking && (
-            <ProcessPicker taken={taken} onPick={add} onClose={() => setPicking(false)} />
+            <ProcessPicker
+              taken={taken}
+              onPick={add}
+              onClose={() => setPicking(false)}
+              load={qd.processes}
+              cacheKey="qd.processes"
+              title={t("New rule")}
+              searchLabel={t("Search by name or path")}
+            />
           )}
 
           <Divider label={t("below your rules — MATCH")} />

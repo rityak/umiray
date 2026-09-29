@@ -61,13 +61,8 @@ const ru: Record<string, Entry> = {
   "below your rules — built-in sets and MATCH": "ниже ваших правил — готовые наборы и MATCH",
   "everything that did not match above": "всё, что не совпало выше",
   "Where to send everything else": "Куда отправить всё остальное",
-  "Domain route lookup": "Куда пойдёт домен",
-  "domain rules only; IP, country and process matching require the core":
-    "по доменным правилам; IP, страну и процесс проверяет только ядро",
-  "Domain to check": "Домен для проверки",
-  "rule {n}": "правило {n}",
-  "no match → MATCH": "ни одно не совпало → MATCH",
-  "IP, country and process rules skipped: {n}": "правил по IP, стране и процессу пропущено: {n}",
+  "Choose running process": "Выбрать запущенный процесс",
+  "Search by name": "Поиск по имени",
   Domain: "Домен",
   Utilities: "Список утилит",
   Config: "Конфиг",
@@ -554,7 +549,6 @@ const ru: Record<string, Entry> = {
   "Rule {no} kind": "Вид правила {no}",
   "Rule {no} values": "Значения правила {no}",
   "Where to send, rule {no}": "Куда отправить, правило {no}",
-  "will match": "сработает",
   "Move rule {no} up": "Поднять правило {no}",
   "Move rule {no} down": "Опустить правило {no}",
   "Delete rule {no}": "Удалить правило {no}",
@@ -826,8 +820,8 @@ const ru: Record<string, Entry> = {
   "It captures traffic through WinDivert, which only works for an elevated process.":
     "Он перехватывает трафик через WinDivert, а это работает только с правами администратора.",
   "Restart as administrator": "Перезапустить от администратора",
-  "mihomo is running now": "Сейчас работает mihomo",
-  "Turning qd on stops mihomo first.": "Включение qd сначала остановит mihomo.",
+  "{engine} is running now": "Сейчас работает {engine}",
+  "Turning qd on stops {engine} first.": "Включение qd сначала остановит {engine}.",
   "qd link imported": "Ссылка qd импортирована",
   "Replace the qd link": "Заменить ссылку qd",
   "One qd:// link from your provider. It carries the entry nodes and the network key.":
@@ -889,11 +883,9 @@ const ru: Record<string, Entry> = {
   "Downloads the latest qd release and checks it against the published checksum. The connection drops for a moment.":
     "Скачивает последний релиз qd и сверяет контрольную сумму. Подключение на мгновение прервётся.",
   "qd updated": "qd обновлён",
-  "qd has not run yet — nothing to show.": "qd ещё не запускался — показывать нечего.",
-  "qd log": "Лог qd",
   "qd connection failed": "qd не подключился",
   Engine: "Ядро",
-  "qd {version} downloaded": "qd {version} скачан",
+  "{engine} {version} downloaded": "{engine} {version} скачан",
 };
 
 export default ru;

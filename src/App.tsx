@@ -1,25 +1,27 @@
 import { Activity, Layers, Network, Route, Rss, ScrollText, SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppShell, Button, Callout, Dialog, Dock, type DockItem } from "rootik";
-import type { Choice } from "./api";
-import * as api from "./api";
+import type * as api from "./api";
 import TitleBar from "./chrome/TitleBar";
 import ClientUpdate from "./config/ClientUpdate";
 import ConfigEditor from "./config/ConfigEditor";
-import { type Drafts, dirty, fromDisk } from "./config/draft";
 import Connection from "./connection/Connection";
+import { useConnectionActions } from "./controllers/useConnectionActions";
+import { useDrafts } from "./controllers/useDrafts";
+import { useJob } from "./controllers/useJob";
+import { useSections } from "./controllers/useSections";
+import { useSettings } from "./controllers/useSettings";
+import { useSources } from "./controllers/useSources";
+import { useStatus } from "./controllers/useStatus";
+import { useSystemActions } from "./controllers/useSystemActions";
+import { useUpdates } from "./controllers/useUpdates";
 import Tools from "./diag/Tools";
-import { unchanged, usePoll } from "./hooks/usePoll";
-import { record } from "./hooks/useTraffic";
+import { ENGINES } from "./engines";
 import { saveLanguagePreference, t, tk } from "./i18n";
 import * as lifecycle from "./lifecycle";
 import Logs from "./logs/Logs";
-import * as qd from "./qd/api";
-import QdConnection from "./qd/QdConnection";
-import QdLogs from "./qd/QdLogs";
-import QdRouting from "./qd/QdRouting";
-import QdSettings from "./qd/QdSettings";
-import QdSource from "./qd/QdSource";
+import QdSection from "./qd/QdSection";
+import { useQd } from "./qd/useQd";
 import Settings from "./settings/Settings";
 import AdminOffer from "./shell/AdminOffer";
 import Banner, { failure, type Message, notice } from "./shell/Banner";
@@ -55,66 +57,53 @@ const LAST: DockItem[] = [
   { value: "logs", label: tk("Logs"), icon: ICONS.logs },
 ];
 
-/// До первого ответа с диска. `version` тут нулевая намеренно: обратно её никто не шлёт,
-/// схему файла знает бэкенд.
-const LOADING: api.Settings = {
-  version: 0,
-  engine: "mihomo",
-  refresh: { onStart: true, everyMinutes: 1440 },
-  theme: "midnight",
-  scene: true,
-  sceneBlur: 3,
-  effects: true,
-  private: false,
-  killSwitch: false,
-  autoConnect: false,
-  launch: "smart",
-  // Пока настройки не приехали, предложение не показываем: иначе оно мигало бы
-  // на долю секунды у тех, кто от него уже отказался.
-  adminOffer: false,
-};
-
+/**
+ * Оболочка окна (D-155): раскладка, навигация по разделам и баннер. Состояние живёт
+ * в контроллерах по доменам (`src/controllers/`), а разделы ядер выбираются в одном месте.
+ */
 export default function App() {
-  const [status, setStatus] = useState<api.Status>({
-    running: false,
-    mode: null,
-    desiredMode: "local",
-    restartReason: null,
-    trouble: null,
-    port: null,
-    corePresent: true,
-    elevated: false,
-    alwaysAdmin: false,
-    systemProxy: false,
-    foreignProxy: null,
-    autostart: false,
-    killSwitch: false,
-    started: null,
-  });
-  const [settings, setSettings] = useState<api.Settings>(LOADING);
-  const [sources, setSources] = useState<api.Source[]>([]);
-  const [sections, setSections] = useState<api.ConfigSection[]>([]);
   const [message, setMessage] = useState<Message | null>(null);
-  /// Чем окно занято, а не просто «занято»: одного флага мало — от него зависит и что
-  /// заблокировать (всё три раза одно и то же), и что написать на кнопке, а это разное.
-  /// Из-за общего флага сброс подписывался «Скачивание…».
-  const [job, setJob] = useState<"power" | "mode" | "install" | "reset" | "update" | null>(null);
-  const [updateInfo, setUpdateInfo] = useState<api.UpdateInfo | null>(null);
-  const [checkingUpdate, setCheckingUpdate] = useState(false);
-  const [updatesOpen, setUpdatesOpen] = useState(false);
-  const [formDirty, setFormDirty] = useState(false);
-  const [updateProgress, setUpdateProgress] = useState<api.UpdateProgress | null>(null);
-  const busy = job !== null;
-  useEffect(() => {
-    if (job !== "update") return;
-    // Removing the confirm button moves focus outside the dialog; capture Escape on the window.
-    const preventEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") event.preventDefault();
-    };
-    window.addEventListener("keydown", preventEscape, true);
-    return () => window.removeEventListener("keydown", preventEscape, true);
-  }, [job]);
   const [tab, setTab] = useState("connection");
+  const { status, setStatus } = useStatus(setMessage);
+  const { settings, setSettings, update } = useSettings(setMessage);
+  const { sources, setSources, reload: reloadSources } = useSources();
+  const { sections, setSections, reload: reloadSections } = useSections(tab);
+  const drafts = useDrafts();
+  const { job, setJob, busy } = useJob();
+  /// Несохранённое в форме клиента: она пишет сразу, но пока поле редактируется —
+  /// обновление клиента его бы потеряло.
+  const [formDirty, setFormDirty] = useState(false);
+  const updates = useUpdates({
+    job,
+    setJob,
+    unsaved: () => formDirty || drafts.unsaved,
+    report: setMessage,
+    setStatus,
+  });
+  /// Какое ядро показывают разделы (D-154). Работающее может быть другим — о нём шапка.
+  const engine = ENGINES[settings.engine];
+  const qd = useQd(settings.engine === "qd" || status.active === "qd");
+  const connection = useConnectionActions({
+    status,
+    setStatus,
+    engine: settings.engine,
+    setJob,
+    report: setMessage,
+    afterPower: qd.reload,
+  });
+  const { clear: clearDrafts } = drafts;
+  const afterReset = useCallback(async () => {
+    clearDrafts();
+    await reloadSources();
+  }, [clearDrafts, reloadSources]);
+  const system = useSystemActions({
+    setStatus,
+    setSettings,
+    setJob,
+    report: setMessage,
+    afterReset,
+  });
+
   /// Настройки — не раздел (D-054): они не про то, куда идёт трафик, и место в одном ряду
   /// с «Соединением» занимали зря. Открываются во весь экран под шапкой (D-081).
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -129,26 +118,11 @@ export default function App() {
   /// а не только до раздела. Флаг гасит сам раздел, иначе фокус уезжал бы туда при каждом
   /// возврате в «Источники».
   const [focusAdd, setFocusAdd] = useState(false);
-  /// Куда пользователь целится, пока идёт запись. Без этого переключатель на мгновение
-  /// отскакивал бы обратно: статус ещё прежний, а нажатие уже произошло.
-  const [pending, setPending] = useState<Choice | null>(null);
-  /// Черновики редактора живут здесь, а не в самом редакторе (D-040): уход в другой
-  /// раздел размонтирует его, и несохранённый YAML пропал бы вместе с ним.
-  const [configs, setConfigs] = useState<Drafts>({});
-  // Черновик переживает смену источника и раздела; private не читает raw вовсе (D-138).
-  const [sourceDrafts, setSourceDrafts] = useState<Drafts>({});
-
-  // Стабильная ссылка: её держат в зависимостях обработчики разделов.
-  const reloadSources = useCallback(() => api.sourcesList().then(setSources, () => {}), []);
-  /// Состав документов меняется от действий пользователя: завели набор, применили другой
-  /// (D-071). Перечитывает их владелец списка, а не тот раздел, который нажал.
-  const reloadSections = useCallback(() => {
-    api.configList().then(unchanged(setSections), () => {});
-  }, []);
 
   /// Запуск — список хуков, а не ветка в этом файле (D-095). Окно не знает, из чего он
   /// состоит: оно даёт хукам, куда положить добытое, и ждёт, пока они снимут заставку.
   /// Порядок шагов и их сообщения живут в `lifecycle.ts`.
+  const { setInfo: setUpdateInfo } = updates;
   useEffect(() => {
     lifecycle.boot({
       settings: setSettings,
@@ -158,76 +132,7 @@ export default function App() {
       message: setMessage,
       updates: setUpdateInfo,
     });
-  }, []);
-
-  // Статус приходит каждый такт, но меняется редко: одинаковый ответ окно не перерисовывает.
-  usePoll(() => api.coreStatus().then(unchanged(setStatus), () => {}));
-
-  const onQd = settings.engine === "qd";
-  const [qdStatus, setQdStatus] = useState<qd.Status | null>(null);
-  const reloadQd = useCallback(() => qd.status().then(unchanged(setQdStatus), () => {}), []);
-  usePoll(reloadQd, onQd);
-
-  const configOpen = sections.some((section) => section.id === tab);
-  usePoll(reloadSections, configOpen);
-
-  /// Трафик опрашиваем всё время, пока ядро работает, а не только в открытом разделе:
-  /// обнулять историю графика при уходе в «Логи» и обратно значит врать про прошедшие
-  /// полминуты (D-076). Отсчёты уходят в хранилище, а не в состояние окна, — иначе
-  /// каждый такт перерисовывал бы всё окно, а не только «Соединение».
-  usePoll(() => {
-    api.coreTraffic().then(record, () => {});
-  }, status.running);
-
-  useEffect(() => {
-    if (!status.running) record(null);
-  }, [status.running]);
-
-  /// Чужой системный прокси при запуске (D-115): трафик машины уже куда-то идёт, и об этом
-  /// говорят один раз. Именно один: запись в реестре — состояние, и висящий из-за неё
-  /// баннер перекрывал бы всё остальное, пока у человека работает второй VPN.
-  const told = useRef(false);
-  useEffect(() => {
-    if (told.current || status.foreignProxy === null) return;
-    told.current = true;
-    setMessage(
-      notice(
-        t(
-          "System proxy is already set to {proxy}. Switch to System to take over, or check which app configured it.",
-          { proxy: status.foreignProxy },
-        ),
-      ),
-    );
-  }, [status.foreignProxy]);
-
-  /// Одна команда на все настройки (D-037). Показываем выбор сразу, но если запись
-  /// не удалась — возвращаем то, что лежит на диске: окно не должно врать.
-  const update = useCallback(async (patch: api.SettingsPatch) => {
-    setSettings((current) => ({ ...current, ...patch }));
-    try {
-      setSettings(await api.settingsUpdate(patch));
-    } catch (e) {
-      setSettings(await api.settingsGet());
-      setMessage(failure(e));
-    }
-  }, []);
-
-  const onDraft = useCallback((id: string, text: string) => {
-    setConfigs((current) => ({ ...current, [id]: { ...current[id], text } }));
-  }, []);
-
-  /// Файл прочитан с диска — правила слияния с черновиком живут в `fromDisk`.
-  const onDisk = useCallback((id: string, text: string) => {
-    setConfigs((current) => ({ ...current, [id]: fromDisk(current[id], text) }));
-  }, []);
-
-  const onSourceDraft = useCallback((id: string, text: string) => {
-    setSourceDrafts((current) => ({ ...current, [id]: { ...current[id], text } }));
-  }, []);
-
-  const onSourceDisk = useCallback((id: string, text: string) => {
-    setSourceDrafts((current) => ({ ...current, [id]: fromDisk(current[id], text) }));
-  }, []);
+  }, [setSettings, setSections, setSources, setStatus, setUpdateInfo]);
 
   const onFocused = useCallback(() => setFocusAdd(false), []);
 
@@ -238,220 +143,21 @@ export default function App() {
     setFocusAdd(true);
   }, []);
 
-  const install = useCallback(async () => {
-    setJob("install");
-    setMessage(null);
-    try {
-      setMessage(notice(await api.coreInstall()));
-      setStatus(await api.coreStatus());
-    } catch (e) {
-      setMessage(failure(e));
-    } finally {
-      setJob(null);
-    }
-  }, []);
-
-  const autostart = useCallback(async (on: boolean) => {
-    setMessage(null);
-    try {
-      setStatus(await api.systemAutostartSet(on));
-    } catch (e) {
-      setMessage(failure(e));
-    }
-  }, []);
-
-  /// «Всегда от администратора» — заведение или снятие задачи в планировщике (D-087).
-  /// Оба действия требуют прав, поэтому отказ приезжает `NeedsElevation` — у баннера
-  /// на него уже есть кнопка.
-  const alwaysAdmin = useCallback(async (on: boolean) => {
-    setMessage(null);
-    try {
-      setStatus(await api.systemAlwaysAdminSet(on));
-      // Предлагать больше нечего: решение принято в любую сторону.
-      setSettings(await api.settingsUpdate({ adminOffer: false }));
-      if (on) {
-        setMessage(
-          notice(
-            t(
-              "The client will launch as administrator without a UAC prompt. The task is named umiray in Task Scheduler.",
-            ),
-          ),
-        );
-      }
-    } catch (e) {
-      setMessage(failure(e));
-      setStatus(await api.coreStatus());
-    }
-  }, []);
-
-  /// Kill switch меняет и настройку, и брандмауэр, поэтому перечитываем оба: галка живёт
-  /// в настройках (намерение), а «в силе ли» приходит в статусе (D-073).
-  const killSwitch = useCallback(async (on: boolean) => {
-    setMessage(null);
-    try {
-      setStatus(await api.systemKillSwitchSet(on));
-      setSettings(await api.settingsGet());
-    } catch (e) {
-      setMessage(failure(e));
-    }
-  }, []);
-
-  /// Сброс останавливает ядро и стирает источники, поэтому после него перечитываем всё:
-  /// в окне не должно остаться ничего от прошлой жизни.
-  const reset = useCallback(async () => {
-    setJob("reset");
-    setMessage(null);
-    try {
-      setStatus(await api.systemReset());
-      setSettings(await api.settingsGet());
-      setConfigs({});
-      setSourceDrafts({});
-      await reloadSources();
-      setMessage(notice(t("Defaults restored. The core and device identifier were kept.")));
-    } catch (e) {
-      setMessage(failure(e));
-    } finally {
-      setJob(null);
-    }
-  }, [reloadSources]);
-
-  const elevate = useCallback(async () => {
-    setMessage(null);
-    try {
-      await api.systemRelaunchElevated();
-    } catch (e) {
-      setMessage(failure(e));
-    }
-  }, []);
-
-  /// Режим перехвата (D-060). Работающее ядро бэкенд доводит до него сам: TUN —
-  /// перезапуском, System и Proxy — реестром; открытые соединения рвутся (D-143).
-  const choose = useCallback(
-    async (choice: Choice) => {
-      setJob("mode");
-      setPending(choice);
-      setMessage(null);
-      try {
-        const next = await api.modeSet(choice);
-        setStatus(next);
-        // Про системный прокси молчать нельзя ни в одну сторону (D-047): не прописался —
-        // «Подключено» ещё не значит, что трафик идёт; заменили чужой — это чужой VPN,
-        // и его поломка выглядела бы нашей виной.
-        if (choice === "system" && next.running && !next.systemProxy) {
-          setMessage(
-            notice(
-              t("Could not set the Windows proxy — enter the address in your browser manually."),
-            ),
-          );
-        } else if (choice === "system" && status.foreignProxy !== null) {
-          setMessage(
-            notice(
-              t(
-                "System proxy was {proxy} — it will be replaced on connection and restored on disconnect.",
-                { proxy: status.foreignProxy },
-              ),
-            ),
-          );
-        }
-      } catch (e) {
-        setMessage(failure(e));
-        setStatus(await api.coreStatus());
-      } finally {
-        setJob(null);
-        setPending(null);
-      }
-    },
-    [status.foreignProxy],
-  );
-
-  /// Питание. Одна кнопка на оба направления: она же индикатор состояния (D-060).
-  const qdConnected = qdStatus?.state?.connected ?? false;
-  const power = useCallback(async () => {
-    setJob("power");
-    setMessage(null);
-    try {
-      if (onQd) {
-        if (qdConnected) await qd.stop();
-        else await qd.start();
-      } else {
-        setStatus(status.running ? await api.coreStop() : await api.coreStart());
-      }
-    } catch (e) {
-      setMessage(failure(e));
-    } finally {
-      setStatus(await api.coreStatus());
-      reloadQd();
-      setJob(null);
-    }
-  }, [onQd, qdConnected, status.running, reloadQd]);
-
-  const installQd = useCallback(async () => {
-    setMessage(null);
-    try {
-      setMessage(notice(t("qd {version} downloaded", { version: await qd.install() })));
-    } catch (e) {
-      setMessage(failure(e));
-    } finally {
-      reloadQd();
-    }
-  }, [reloadQd]);
-
+  /// Переключатель ядер — вид, а не питание (D-154). Раздела, которого у ядра нет,
+  /// не остаётся на экране.
   const chooseEngine = useCallback(
-    async (engine: "mihomo" | "qd") => {
-      await update({ engine });
-      setTab((was) => (engine === "qd" && was === "groups" ? "connection" : was));
+    async (next: api.Engine) => {
+      await update({ engine: next });
+      setTab((was) =>
+        sections.some((item) => item.id === was) &&
+        !ENGINES[next].sections(sections).some((item) => item.id === was)
+          ? "connection"
+          : was,
+      );
     },
-    [update],
+    [update, sections],
   );
 
-  /// Перезапуск: то, что ядро читает на старте, доезжает только так (D-010).
-  const restart = useCallback(async () => {
-    setJob("power");
-    setMessage(null);
-    try {
-      setStatus(await api.coreRestart());
-    } catch (e) {
-      setMessage(failure(e));
-      setStatus(await api.coreStatus());
-    } finally {
-      setJob(null);
-    }
-  }, []);
-
-  const mode: Choice = pending ?? status.desiredMode;
-  const checkUpdate = async () => {
-    setCheckingUpdate(true);
-    try {
-      setUpdateInfo(await api.updatesCheck());
-    } catch (error) {
-      setMessage(failure(error));
-    } finally {
-      setCheckingUpdate(false);
-    }
-  };
-  const installUpdate = async () => {
-    if (busy) return;
-    if (
-      formDirty ||
-      Object.values(configs).some(dirty) ||
-      Object.values(sourceDrafts).some(dirty)
-    ) {
-      setMessage(notice(t("Save or discard your edits before updating the client.")));
-      return;
-    }
-    setJob("update");
-    setMessage(null);
-    setUpdateProgress({ phase: "download", downloaded: 0, total: null });
-    try {
-      await api.updatesInstall(setUpdateProgress);
-    } catch (error) {
-      setMessage(failure(error));
-    } finally {
-      setJob(null);
-      setUpdateProgress(null);
-      api.coreStatus().then(setStatus, () => {});
-    }
-  };
   /// Сообщение о нужном перезапуске принадлежит состоянию, а не событию: оно висит,
   /// пока расхождение есть, и пропадает само, когда его не станет. Своё сообщение
   /// пользователя при этом главнее — его вызвали только что.
@@ -476,29 +182,13 @@ export default function App() {
           kind: "restartNeeded",
         }
       : null);
-  const shownSections = onQd
-    ? sections
-        .filter((item) => item.id !== "groups")
-        .map((item) =>
-          item.id === "rules"
-            ? { ...item, docs: [] }
-            : item.id === "advanced"
-              ? {
-                  ...item,
-                  docs: [
-                    ...item.docs.filter((doc) => doc.id === "client"),
-                    {
-                      id: "qd",
-                      label: t("qd Settings"),
-                      hint: t("qd client settings"),
-                      core: false,
-                      applied: false,
-                    },
-                  ],
-                }
-              : item,
-        )
-    : sections;
+  const shownSections = engine.sections(sections);
+  /// Шапка говорит о работающем ядре; ничего не работает — о выбранном.
+  const headline = ENGINES[status.active ?? settings.engine].headline({
+    status,
+    qd: qd.status,
+    powering: job === "power",
+  });
   const tabs: DockItem[] = [
     ...FIRST.map((item) => ({ ...item, label: t(item.label) })),
     ...shownSections.map((section) => ({
@@ -508,7 +198,9 @@ export default function App() {
       // Несохранённое в **любом** документе раздела: точка на вкладке отвечает за раздел
       // целиком, иначе правка в «Клиенте» была бы не видна из «Соединения».
       badge: section.docs.some(
-        (doc) => configs[doc.id] !== undefined && configs[doc.id].text !== configs[doc.id].saved,
+        (doc) =>
+          drafts.configs[doc.id] !== undefined &&
+          drafts.configs[doc.id].text !== drafts.configs[doc.id].saved,
       ),
       badgeLabel: t("unsaved changes"),
     })),
@@ -526,6 +218,51 @@ export default function App() {
     setMessage((current) => (current?.details.length ? current : null));
   };
   const current = settingsOpen || dev ? null : tab;
+  /// Общий редактор разделов конфига. Ядро может добавить в него свой документ — форму
+  /// над собственным API (D-154).
+  const config = (own?: React.ComponentProps<typeof ConfigEditor>["own"]) =>
+    section && (
+      <ConfigEditor
+        section={section}
+        own={own}
+        drafts={drafts.configs}
+        onDraft={drafts.onDraft}
+        onDisk={drafts.onDisk}
+        onSections={reloadSections}
+        onMessage={setMessage}
+        client={{
+          settings,
+          status,
+          busy,
+          installing: job === "install",
+          updateInfo: updates.info,
+          checkingUpdate: updates.checking,
+          updateProgress: updates.progress,
+          onCheckUpdate: updates.check,
+          onClientUpdate: updates.install,
+          onUnsavedChange: setFormDirty,
+          onChange: update,
+          onInstall: connection.install,
+          onAutostart: system.autostart,
+          onAlwaysAdmin: system.alwaysAdmin,
+          onKillSwitch: system.killSwitch,
+          onReset: system.reset,
+          onStatus: setStatus,
+          onLanguageChange: (language) => {
+            if (Object.values(drafts.configs).some((draft) => draft.text !== draft.saved)) {
+              setMessage(notice(t("Save or discard your edits before changing the language.")));
+              return;
+            }
+            try {
+              saveLanguagePreference(language);
+              window.location.reload();
+            } catch (error) {
+              setMessage(failure(error));
+            }
+          },
+        }}
+      />
+    );
 
   return (
     // Раскладку (islands / inset), материал и тему решает оформление rootik (D-142).
@@ -535,11 +272,9 @@ export default function App() {
       dimWhenInactive
       header={
         <TitleBar
-          status={status}
-          powering={job === "power"}
+          headline={headline}
           engine={settings.engine}
           onEngine={chooseEngine}
-          qd={qdStatus}
           onAdd={add}
           onSettings={() => {
             opener.current = document.activeElement as HTMLElement | null;
@@ -564,22 +299,22 @@ export default function App() {
         />
       }
     >
-      {(updatesOpen || updateProgress) && (
+      {(updates.open || updates.progress) && (
         <Dialog
           title={t("Client updates")}
           onClose={() => {
-            if (!updateProgress) setUpdatesOpen(false);
+            if (!updates.progress) updates.setOpen(false);
           }}
-          dismissible={!updateProgress}
-          hideClose={updateProgress !== null}
+          dismissible={!updates.progress}
+          hideClose={updates.progress !== null}
         >
           <ClientUpdate
-            info={updateInfo}
-            checking={checkingUpdate}
-            progress={updateProgress}
+            info={updates.info}
+            checking={updates.checking}
+            progress={updates.progress}
             busy={busy}
-            onCheck={checkUpdate}
-            onInstall={installUpdate}
+            onCheck={updates.check}
+            onInstall={updates.install}
           />
         </Dialog>
       )}
@@ -594,25 +329,25 @@ export default function App() {
               это уже не предложение. */}
         {status.elevated && !status.alwaysAdmin && settings.adminOffer && (
           <AdminOffer
-            onAccept={() => alwaysAdmin(true)}
+            onAccept={() => system.alwaysAdmin(true)}
             onDismiss={() => update({ adminOffer: false })}
           />
         )}
 
         <Banner
           message={banner}
-          onInstall={install}
-          onElevate={elevate}
-          onRestart={restart}
+          onInstall={connection.install}
+          onElevate={system.elevate}
+          onRestart={connection.restart}
           onDismiss={message ? () => setMessage(null) : undefined}
         />
 
-        {updateInfo?.version && job !== "update" && (
+        {updates.info?.version && job !== "update" && (
           <Callout
             tone="info"
-            title={t("umiray {version} is available", { version: updateInfo.version })}
+            title={t("umiray {version} is available", { version: updates.info.version })}
             actions={
-              <Button size="sm" onClick={() => setUpdatesOpen(true)}>
+              <Button size="sm" onClick={() => updates.setOpen(true)}>
                 {t("Client updates")}
               </Button>
             }
@@ -639,126 +374,63 @@ export default function App() {
               aria-labelledby={`tab-${tab}`}
               className="um-section flex min-h-0 flex-1 flex-col gap-3"
             >
-              {tab === "connection" &&
-                (onQd ? (
-                  <QdConnection
-                    status={qdStatus}
-                    otherRunning={status.running}
-                    powering={job === "power"}
-                    onPower={power}
-                    onChanged={reloadQd}
-                    onInstall={installQd}
-                    onElevate={elevate}
-                    onAdd={add}
-                    onMessage={setMessage}
-                  />
-                ) : (
-                  <Connection
-                    status={status}
-                    mode={mode}
-                    busy={busy}
-                    powering={job === "power"}
-                    onMode={choose}
-                    onPower={power}
-                    sources={sources}
-                    hidden={settings.private}
-                    onHidden={() => update({ private: !settings.private })}
-                    onStatus={setStatus}
-                    onAdd={add}
-                    onMessage={setMessage}
-                  />
-                ))}
-              {tab === "sources" &&
-                (onQd ? (
-                  <QdSource
-                    state={qdStatus?.state ?? null}
-                    hidden={settings.private}
-                    onHidden={() => update({ private: !settings.private })}
-                    focus={focusAdd}
-                    onFocused={onFocused}
-                    onChanged={reloadQd}
-                    onMessage={setMessage}
-                  />
-                ) : (
-                  <Sources
-                    sources={sources}
-                    hidden={settings.private}
-                    onHidden={() => update({ private: !settings.private })}
-                    focus={focusAdd}
-                    onFocused={onFocused}
-                    schedule={settings.refresh}
-                    onSchedule={(refresh) => update({ refresh })}
-                    drafts={sourceDrafts}
-                    onDraft={onSourceDraft}
-                    onDisk={onSourceDisk}
-                    onChanged={reloadSources}
-                    onMessage={setMessage}
-                  />
-                ))}
-              {section &&
-                (onQd && section.id === "rules" ? (
-                  <QdRouting live={Boolean(qdStatus?.state)} onMessage={setMessage} />
-                ) : (
-                  <ConfigEditor
-                    section={section}
-                    own={
-                      onQd
-                        ? {
-                            id: "qd",
-                            render: (start) => (
-                              <QdSettings
-                                live={Boolean(qdStatus?.state)}
-                                start={start}
-                                onInstall={installQd}
-                                onMessage={setMessage}
-                              />
-                            ),
-                          }
-                        : undefined
-                    }
-                    drafts={configs}
-                    onDraft={onDraft}
-                    onDisk={onDisk}
-                    onSections={reloadSections}
-                    onMessage={setMessage}
-                    client={{
-                      settings,
-                      status,
-                      busy,
-                      installing: job === "install",
-                      updateInfo,
-                      checkingUpdate,
-                      updateProgress,
-                      onCheckUpdate: checkUpdate,
-                      onClientUpdate: installUpdate,
-                      onUnsavedChange: setFormDirty,
-                      onChange: update,
-                      onInstall: install,
-                      onAutostart: autostart,
-                      onAlwaysAdmin: alwaysAdmin,
-                      onKillSwitch: killSwitch,
-                      onReset: reset,
-                      onStatus: setStatus,
-                      onLanguageChange: (language) => {
-                        if (Object.values(configs).some((draft) => draft.text !== draft.saved)) {
-                          setMessage(
-                            notice(t("Save or discard your edits before changing the language.")),
-                          );
-                          return;
-                        }
-                        try {
-                          saveLanguagePreference(language);
-                          window.location.reload();
-                        } catch (error) {
-                          setMessage(failure(error));
-                        }
-                      },
-                    }}
-                  />
-                ))}
+              {/* Одна точка выбора ядра (D-154): свои разделы у каждого, общие — ниже. */}
+              {settings.engine === "qd" ? (
+                <QdSection
+                  tab={tab}
+                  section={section}
+                  qd={qd}
+                  status={status}
+                  powering={job === "power"}
+                  onPower={connection.power}
+                  hidden={settings.private}
+                  onHidden={() => update({ private: !settings.private })}
+                  focus={focusAdd}
+                  onFocused={onFocused}
+                  onAdd={add}
+                  onElevate={system.elevate}
+                  onMessage={setMessage}
+                  config={config}
+                />
+              ) : (
+                <>
+                  {tab === "connection" && (
+                    <Connection
+                      status={status}
+                      mode={connection.mode}
+                      busy={busy}
+                      powering={job === "power"}
+                      onMode={connection.choose}
+                      onPower={connection.power}
+                      sources={sources}
+                      hidden={settings.private}
+                      onHidden={() => update({ private: !settings.private })}
+                      onStatus={setStatus}
+                      onAdd={add}
+                      onMessage={setMessage}
+                    />
+                  )}
+                  {tab === "sources" && (
+                    <Sources
+                      sources={sources}
+                      hidden={settings.private}
+                      onHidden={() => update({ private: !settings.private })}
+                      focus={focusAdd}
+                      onFocused={onFocused}
+                      schedule={settings.refresh}
+                      onSchedule={(refresh) => update({ refresh })}
+                      drafts={drafts.sources}
+                      onDraft={drafts.onSourceDraft}
+                      onDisk={drafts.onSourceDisk}
+                      onChanged={reloadSources}
+                      onMessage={setMessage}
+                    />
+                  )}
+                  {config()}
+                </>
+              )}
               {tab === "diag" && <Tools onMessage={setMessage} />}
-              {tab === "logs" &&
-                (onQd ? <QdLogs hidden={settings.private} /> : <Logs hidden={settings.private} />)}
+              {tab === "logs" && <Logs engine={settings.engine} hidden={settings.private} />}
             </section>
           </>
         )}

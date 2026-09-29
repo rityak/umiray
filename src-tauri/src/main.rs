@@ -9,6 +9,9 @@ mod core;
 mod diag;
 mod error;
 mod http;
+// Проверка слоёв (D-155): подсистема знает только нижние. В сборку не входит.
+#[cfg(test)]
+mod layers;
 // Живые проверки: настоящий каталог, настоящее ядро, настоящая сеть. В сборку не входят.
 #[cfg(test)]
 mod live;
@@ -25,11 +28,16 @@ use app::state::AppState;
 use app::tray;
 
 fn main() {
+    // Stable runs from its installation directory. A build launched elsewhere hands off
+    // before the scheduled task and the single-instance plugin see the wrong binary.
+    if system::install::Installation::handoff() {
+        return;
+    }
     // Клиент должен работать с правами, а работает без них — поднимаем себя задачей
     // планировщика и уходим (D-087). Самым первым делом: вторая копия появится через
     // мгновение, и успей эта объявиться плагином одиночного запуска, новая просто
     // показала бы ей окно и умерла — то есть повышения так и не случилось бы.
-    if system::task::handoff() {
+    if system::task::SchedulerTask::handoff() {
         return;
     }
     tauri::Builder::default()
@@ -38,11 +46,11 @@ fn main() {
         // Вторая копия не поднимается: она показывает окно уже работающей. Без этого
         // трей ломает обычный сценарий — «закрыл окно, запустил ярлык снова» (D-046).
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            tray::show(app);
+            tray::Tray::show(app);
         }))
         .setup(|app| {
             // Порядок шагов запуска — список, а не порядок строк здесь (D-101).
-            app::boot::run(app.handle())?;
+            app::boot::Boot::run(app.handle())?;
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -63,7 +71,7 @@ fn main() {
             let shown =
                 window.is_visible().unwrap_or(true) && !window.is_minimized().unwrap_or(false);
             if let Some(webview) = window.app_handle().get_webview_window(window.label()) {
-                system::webview::set_visible(&webview, shown);
+                system::webview::Webview::set_visible(&webview, shown);
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -103,6 +111,7 @@ fn main() {
             commands::rulesets::rulesets_set,
             commands::rules::rules_parse,
             commands::rules::rules_render,
+            commands::rules::rules_processes,
             commands::core::core_install,
             commands::sources::sources_list,
             commands::sources::sources_add,
@@ -142,17 +151,13 @@ fn main() {
             commands::core::core_stop,
             commands::qd::qd_status,
             commands::qd::qd_call,
-            commands::qd::qd_start,
-            commands::qd::qd_stop,
-            commands::qd::qd_install,
             commands::qd::qd_rules_export,
             commands::qd::qd_rules_import,
-            commands::qd::qd_logs,
             commands::core::core_restart,
             commands::core::core_traffic,
             commands::core::core_flush_fake_ip
         ])
-        .build(app::boot::context())
+        .build(app::boot::Boot::context())
         .expect("не удалось собрать приложение")
         .run(|app, event| {
             // Гасим ядро сами и снимаем системный прокси. Клетка (D-058) прибила бы его
@@ -161,7 +166,7 @@ fn main() {
                 let state = app.state::<AppState>();
                 // Выход приходит на главный поток, а фаза остановки асинхронна (D-101):
                 // ждём её здесь, иначе процесс уйдёт раньше, чем ядро погашено.
-                tauri::async_runtime::block_on(app::connect::stop(app, &state));
+                tauri::async_runtime::block_on(state.connection.stop(app, &state));
             }
         });
 }

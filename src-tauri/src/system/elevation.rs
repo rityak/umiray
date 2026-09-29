@@ -21,37 +21,41 @@ use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 /// ShellExecuteW отдаёт код <= 32, если запустить не удалось.
 const SHELL_EXECUTE_MIN_SUCCESS: isize = 32;
 
-/// Права процесса не меняются на ходу, поэтому считаем один раз: статус опрашивается часто.
-pub fn is_elevated() -> bool {
-    static CACHED: OnceLock<bool> = OnceLock::new();
-    *CACHED.get_or_init(query_elevation)
-}
+pub struct Elevation;
 
-/// Запускает вторую копию приложения через UAC и оставляет вызывающему решение о выходе.
-///
-/// Права нельзя добавить работающему процессу — можно только стартовать новый с нужным токеном.
-pub fn relaunch_as_admin() -> Result<()> {
-    let exe = std::env::current_exe()?;
-
-    let verb = wide("runas");
-    let file = wide(&exe.to_string_lossy());
-    let result = unsafe {
-        ShellExecuteW(
-            std::ptr::null_mut(),
-            verb.as_ptr(),
-            file.as_ptr(),
-            std::ptr::null(),
-            std::ptr::null(),
-            SW_SHOWNORMAL,
-        )
-    };
-
-    if (result as isize) <= SHELL_EXECUTE_MIN_SUCCESS {
-        return Err(AppError::NeedsElevation {
-            message: "Запуск с правами администратора отклонён".into(),
-        });
+impl Elevation {
+    /// Права процесса не меняются на ходу, поэтому считаем один раз: статус опрашивается часто.
+    pub fn is_elevated() -> bool {
+        static CACHED: OnceLock<bool> = OnceLock::new();
+        *CACHED.get_or_init(query_elevation)
     }
-    Ok(())
+
+    /// Запускает вторую копию приложения через UAC и оставляет вызывающему решение о выходе.
+    ///
+    /// Права нельзя добавить работающему процессу — можно только стартовать новый с нужным токеном.
+    pub fn relaunch_as_admin() -> Result<()> {
+        let exe = std::env::current_exe()?;
+
+        let verb = wide("runas");
+        let file = wide(&exe.to_string_lossy());
+        let result = unsafe {
+            ShellExecuteW(
+                std::ptr::null_mut(),
+                verb.as_ptr(),
+                file.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                SW_SHOWNORMAL,
+            )
+        };
+
+        if (result as isize) <= SHELL_EXECUTE_MIN_SUCCESS {
+            return Err(AppError::NeedsElevation {
+                message: "Запуск с правами администратора отклонён".into(),
+            });
+        }
+        Ok(())
+    }
 }
 
 fn query_elevation() -> bool {

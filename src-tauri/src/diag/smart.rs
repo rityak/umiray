@@ -9,20 +9,26 @@
 //! проходит сколько угодно времени, а записать в конфиг вчерашнего победителя — ровно
 //! тот случай, когда клиент делает хуже молча.
 
-use crate::config::advanced;
+use crate::config::advanced::Advanced;
+use crate::diag::dns::DnsProbe;
+use crate::diag::pmtu::PmtuProbe;
 use crate::diag::report::{Report, Tone, Verdict};
 use crate::diag::{dns, pmtu, Args};
 use crate::error::{AppError, Result};
 
-/// Выполнить действие утилиты. Отчёт — тот же тип, что у самой утилиты: окно показывает
-/// его той же консолью, и рассказывать про «что я поменял» ему отдельным способом не нужно.
-pub async fn apply(id: &str, args: Args) -> Result<Report> {
-    match id {
-        "dns-race" => resolvers(args).await,
-        "pmtu" => mtu(args),
-        other => Err(AppError::invalid(format!(
-            "У утилиты «{other}» нет действия"
-        ))),
+pub struct Smart;
+
+impl Smart {
+    /// Выполнить действие утилиты. Отчёт — тот же тип, что у самой утилиты: окно показывает
+    /// его той же консолью, и рассказывать про «что я поменял» ему отдельным способом не нужно.
+    pub async fn apply(id: &str, args: Args) -> Result<Report> {
+        match id {
+            "dns-race" => resolvers(args).await,
+            "pmtu" => mtu(args),
+            other => Err(AppError::invalid(format!(
+                "У утилиты «{other}» нет действия"
+            ))),
+        }
     }
 }
 
@@ -34,14 +40,14 @@ pub async fn apply(id: &str, args: Args) -> Result<Report> {
 async fn resolvers(args: Args) -> Result<Report> {
     let began = std::time::Instant::now();
     let mut report = Report::new("dns-race");
-    let shots = dns::race(
+    let shots = DnsProbe::race(
         &args.domain(),
         args.timeout(),
         args.all,
         args.core.unwrap_or(true),
     )
     .await?;
-    let picked: Vec<String> = dns::fastest(&shots, dns::BEST)
+    let picked: Vec<String> = DnsProbe::fastest(&shots, dns::BEST)
         .into_iter()
         .map(|index| shots[index].candidate.addr.clone())
         .collect();
@@ -53,9 +59,9 @@ async fn resolvers(args: Args) -> Result<Report> {
         ));
     }
 
-    let mut options = advanced::read()?;
+    let mut options = Advanced::read()?;
     let was = std::mem::replace(&mut options.nameserver, picked.clone());
-    advanced::write(&options)?;
+    Advanced::write(&options)?;
 
     report.say(Tone::Info, format!("было: {}", list(&was)));
     Ok(report.finish(
@@ -74,7 +80,7 @@ fn mtu(args: Args) -> Result<Report> {
     let began = std::time::Instant::now();
     let mut report = Report::new("pmtu");
     let host = args.host();
-    let Some(path) = pmtu::path(&host)? else {
+    let Some(path) = PmtuProbe::path(&host)? else {
         return Ok(report.finish(
             Verdict::Idle,
             format!("{host} молчит по ICMP — подбирать нечего"),
@@ -83,10 +89,10 @@ fn mtu(args: Args) -> Result<Report> {
     };
     let advice = path.saturating_sub(pmtu::TUNNEL);
 
-    let mut options = advanced::read()?;
+    let mut options = Advanced::read()?;
     let was = options.mtu;
     options.mtu = advice;
-    advanced::write(&options)?;
+    Advanced::write(&options)?;
 
     report.say(
         Tone::Info,

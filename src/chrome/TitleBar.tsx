@@ -8,10 +8,9 @@ import {
   SegmentedControl,
   StatusDot,
 } from "rootik";
-import { type Status, statusView, type Tone } from "../api";
+import type { Engine, Tone } from "../api";
+import { ENGINE_IDS, ENGINES, type Headline } from "../engines";
 import { t } from "../i18n";
-import type * as qd from "../qd/api";
-import Uptime from "../shell/Uptime";
 
 // A plain browser serves as a responsive-layout bench. It has no Tauri window, so the
 // window buttons simply do nothing there.
@@ -24,11 +23,11 @@ const appWindow = (() => {
 })();
 
 type Props = {
-  status: Status;
-  powering: boolean;
-  engine: "mihomo" | "qd";
-  onEngine: (engine: "mihomo" | "qd") => void;
-  qd: qd.Status | null;
+  /// State of the running engine, in words (D-154): the window names it, the frame shows it.
+  headline: Headline;
+  /// The engine the sections show. A view switch, not power: the running one keeps running.
+  engine: Engine;
+  onEngine: (engine: Engine) => void;
   onAdd: () => void;
   onSettings: () => void;
   onDev?: () => void;
@@ -44,27 +43,14 @@ const TONE: Record<Tone, KitTone> = {
 
 /** The window frame (D-141, D-142). VPN controls live in the connection path. */
 export default function TitleBar({
-  status,
-  powering,
+  headline: view,
   engine,
   onEngine,
-  qd: qdStatus,
   onAdd,
   onSettings,
   onDev,
   dev,
 }: Props) {
-  const state = qdStatus?.state ?? null;
-  const view: { tone: Tone; label: string } =
-    engine === "qd"
-      ? powering
-        ? { tone: "connecting", label: t("Starting…") }
-        : state?.failed
-          ? { tone: "error", label: t("qd connection failed") }
-          : state?.connected
-            ? { tone: "on", label: `${t("Connected")} · qd` }
-            : { tone: "off", label: t("Disconnected") }
-      : statusView(status, powering);
   const maximized = useMaximized();
 
   return (
@@ -86,13 +72,7 @@ export default function TitleBar({
               label={view.label}
             />
             <span className="truncate text-xs text-(--rk-text-2) max-[819px]:hidden">
-              {engine === "qd" ? (
-                (state?.connected && state.node?.name) || t("qd stopped")
-              ) : status.running ? (
-                <Uptime started={status.started} fallback={t("just now")} />
-              ) : (
-                t("core stopped")
-              )}
+              {view.detail}
             </span>
           </span>
         </div>
@@ -102,10 +82,7 @@ export default function TitleBar({
           <SegmentedControl
             size="sm"
             aria-label={t("Engine")}
-            options={[
-              { value: "mihomo", label: "mihomo" },
-              { value: "qd", label: "qd" },
-            ]}
+            options={ENGINE_IDS.map((id) => ({ value: id, label: ENGINES[id].label }))}
             value={engine}
             onChange={onEngine}
           />

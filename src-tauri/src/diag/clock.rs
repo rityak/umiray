@@ -28,13 +28,48 @@ const CLOSE: i64 = 10;
 /// около двух минут в обе стороны.
 const TOLERATED: i64 = 60;
 
-/// Замер: насколько часы машины разошлись с эталоном. Плюс — спешат, пусто — сверять
-/// не с чем (эталон молчит или ответ не разобрался).
-///
-/// Типизированный слой поверх той же пробы (D-097): его спрашивает код, которому нужно
-/// решение, — например шаг «после пробуждения» (D-115). Отчёт для окна собран поверх него.
-pub async fn skew() -> Option<i64> {
-    measure().await.skew
+pub struct ClockProbe;
+
+impl ClockProbe {
+    /// Замер: насколько часы машины разошлись с эталоном. Плюс — спешат, пусто — сверять
+    /// не с чем (эталон молчит или ответ не разобрался).
+    ///
+    /// Типизированный слой поверх той же пробы (D-097): его спрашивает код, которому нужно
+    /// решение, — например шаг «после пробуждения» (D-115). Отчёт для окна собран поверх него.
+    pub async fn skew() -> Option<i64> {
+        measure().await.skew
+    }
+
+    pub async fn check() -> Result<Report> {
+        let mut report = Report::new("clock");
+        report.say(Tone::Dim, format!("эталон: {REFERENCE}"));
+
+        let shot = measure().await;
+        let Some(date) = shot.date else {
+            return Ok(report.finish(
+                Verdict::Idle,
+                "Эталон времени не ответил — сверять не с чем",
+                shot.ms,
+            ));
+        };
+        report.say(Tone::Dim, format!("ответ: {date}"));
+
+        let Some(skew) = shot.skew else {
+            return Ok(report.finish(
+                Verdict::Bad,
+                format!("Не разобрали время ответа: {date}"),
+                shot.ms,
+            ));
+        };
+        let (verdict, headline) = tell(skew);
+        Ok(report.finish(verdict, headline, shot.ms))
+    }
+
+    /// Жалоба для окна: пусто — часы в порядке или сверить не удалось. Порог тот же,
+    /// что у красного вердикта: предупреждение в баннер не выносим — оно ничему не мешает.
+    pub fn complaint(skew: i64) -> Option<String> {
+        (skew.abs() > TOLERATED).then(|| tell(skew).1)
+    }
 }
 
 /// Что увидели: расхождение, сам заголовок и сколько шёл ответ.
@@ -47,7 +82,7 @@ struct Shot {
 async fn measure() -> Shot {
     let began = std::time::Instant::now();
     // Мимо системного прокси: часы сверяют с интернетом, а не с нашим туннелем.
-    let date = crate::http::direct()
+    let date = crate::http::Http::direct()
         .ok()
         .map(|client| client.head(REFERENCE).send());
     let date = match date {
@@ -61,40 +96,9 @@ async fn measure() -> Shot {
     let skew = date
         .as_deref()
         .and_then(epoch)
-        .zip(crate::stamp::now())
+        .zip(crate::stamp::Stamp::now())
         .map(|(theirs, ours)| ours as i64 - theirs as i64);
     Shot { skew, date, ms }
-}
-
-pub async fn check() -> Result<Report> {
-    let mut report = Report::new("clock");
-    report.say(Tone::Dim, format!("эталон: {REFERENCE}"));
-
-    let shot = measure().await;
-    let Some(date) = shot.date else {
-        return Ok(report.finish(
-            Verdict::Idle,
-            "Эталон времени не ответил — сверять не с чем",
-            shot.ms,
-        ));
-    };
-    report.say(Tone::Dim, format!("ответ: {date}"));
-
-    let Some(skew) = shot.skew else {
-        return Ok(report.finish(
-            Verdict::Bad,
-            format!("Не разобрали время ответа: {date}"),
-            shot.ms,
-        ));
-    };
-    let (verdict, headline) = tell(skew);
-    Ok(report.finish(verdict, headline, shot.ms))
-}
-
-/// Жалоба для окна: пусто — часы в порядке или сверить не удалось. Порог тот же,
-/// что у красного вердикта: предупреждение в баннер не выносим — оно ничему не мешает.
-pub fn complaint(skew: i64) -> Option<String> {
-    (skew.abs() > TOLERATED).then(|| tell(skew).1)
 }
 
 /// Вердикт по расхождению. Знак наш: плюс — часы машины впереди эталона.

@@ -10,8 +10,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::direction::Direction;
 use crate::config::mode::Mode;
+use crate::core::EngineId;
 use crate::error::{AppError, Result};
-use crate::paths;
+use crate::paths::Paths;
 
 /// Версия схемы. Растёт, когда меняется **смысл** существующего поля. Добавление нового поля
 /// с `#[serde(default)]` версию не двигает: старый файл читается как есть.
@@ -19,14 +20,6 @@ pub const VERSION: u32 = 2;
 
 /// Оформление окна. Тема — это фоновая картинка плюс палитра, больше в ней ничего нет,
 /// поэтому в настройках она одно поле, а не набор цветов: цвета знает фронтенд.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Engine {
-    #[default]
-    Mihomo,
-    Qd,
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Theme {
@@ -169,7 +162,8 @@ pub struct Settings {
     #[serde(default)]
     pub kill_switch_backup: Option<crate::system::killswitch::Backup>,
     #[serde(default)]
-    pub engine: Engine,
+    /// Какое ядро показывают разделы и поднимет кнопка питания (D-154).
+    pub engine: EngineId,
 }
 
 /// Что меняем в настройках. Ровно одна команда на все опции: с ростом их числа отдельная
@@ -181,7 +175,7 @@ pub struct Settings {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Patch {
     pub refresh: Option<Refresh>,
-    pub engine: Option<Engine>,
+    pub engine: Option<EngineId>,
     pub theme: Option<Theme>,
     pub scene: Option<bool>,
     pub scene_blur: Option<u8>,
@@ -256,25 +250,76 @@ impl Default for Settings {
             auto_connect: false,
             launch: Launch::default(),
             admin_offer: true,
-            engine: Engine::default(),
+            engine: EngineId::default(),
         }
     }
 }
 
-/// Читает настройки с диска. **Не падает никогда**: настройки — это поведение, и битый файл
-/// должен стоить сброса к умолчаниям, а не неработающего приложения.
-pub fn load() -> Settings {
-    match std::fs::read_to_string(paths::settings()) {
-        Ok(text) => decode(&text),
-        Err(_) => Settings::default(),
+impl SettingsStore {
+    /// Читает настройки с диска. **Не падает никогда**: настройки — это поведение, и битый файл
+    /// должен стоить сброса к умолчаниям, а не неработающего приложения.
+    pub fn load() -> Settings {
+        match std::fs::read_to_string(Paths::settings()) {
+            Ok(text) => decode(&text),
+            Err(_) => Settings::default(),
+        }
+    }
+
+    pub fn save(settings: &Settings) -> Result<()> {
+        Paths::ensure_root()?;
+        let text = serde_json::to_string_pretty(settings)
+            .map_err(|e| AppError::Io(format!("Не удалось записать настройки: {e}")))?;
+        Ok(crate::atomic::AtomicFile::write(Paths::settings(), text)?)
+    }
+
+    pub fn load_v1() -> Option<V1> {
+        let text = std::fs::read_to_string(Paths::settings()).ok()?;
+        let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+        if value.get("version")?.as_u64()? != 1 {
+            return None;
+        }
+        serde_json::from_value(value).ok()
     }
 }
 
-pub fn save(settings: &Settings) -> Result<()> {
-    paths::ensure_root()?;
-    let text = serde_json::to_string_pretty(settings)
-        .map_err(|e| AppError::Io(format!("Не удалось записать настройки: {e}")))?;
-    Ok(crate::atomic::write(paths::settings(), text)?)
+/// Хранилище настроек клиента (D-155): единственный, кто знает, где они лежат на диске.
+///
+/// В памяти, а не чтением файла на каждый вызов: статус опрашивается раз в 1.5 с,
+/// а меняются настройки только по действию пользователя. Диск читается один раз при старте.
+pub struct SettingsStore(std::sync::Mutex<Settings>);
+
+impl SettingsStore {
+    pub fn open() -> Self {
+        Self(std::sync::Mutex::new(SettingsStore::load()))
+    }
+
+    pub fn get(&self) -> Settings {
+        self.0.lock().unwrap().clone()
+    }
+
+    pub fn patch(&self, patch: Patch) -> Result<()> {
+        self.update(|settings| patch.apply(settings))
+    }
+
+    /// Перечитать с диска. Нужно после сброса: файл переписали мимо `update`, и копия
+    /// в памяти иначе осталась бы от прошлой жизни.
+    pub fn reload(&self) {
+        *self.0.lock().unwrap() = SettingsStore::load();
+    }
+
+    /// Сначала диск, потом память: если запись не удалась, они не должны разъехаться.
+    ///
+    /// Замок держится и на время записи: импорт подписки — асинхронная команда, и переключение
+    /// режима во время неё выполнится параллельно. Читать-менять-писать без замка означало бы
+    /// потерянное обновление. Запись короткая, дожидаться её не жалко.
+    pub fn update(&self, change: impl FnOnce(&mut Settings)) -> Result<()> {
+        let mut current = self.0.lock().unwrap();
+        let mut next = current.clone();
+        change(&mut next);
+        SettingsStore::save(&next)?;
+        *current = next;
+        Ok(())
+    }
 }
 
 /// Настройки версии 1: адрес подписки лежал здесь, пока не было профилей.
@@ -285,15 +330,6 @@ pub struct V1 {
     pub mode: Mode,
     #[serde(default)]
     pub subscription: Option<String>,
-}
-
-pub fn load_v1() -> Option<V1> {
-    let text = std::fs::read_to_string(paths::settings()).ok()?;
-    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
-    if value.get("version")?.as_u64()? != 1 {
-        return None;
-    }
-    serde_json::from_value(value).ok()
 }
 
 /// Разбор отделён от чтения файла, чтобы правила проверялись обычным `cargo test`,
@@ -341,7 +377,7 @@ mod tests {
             auto_connect: true,
             launch: Launch::Tray,
             admin_offer: false,
-            engine: Engine::Qd,
+            engine: EngineId::Qd,
         };
         let json = serde_json::to_string_pretty(&settings).unwrap();
         assert_eq!(decode(&json), settings);

@@ -14,6 +14,7 @@ import {
 } from "./api";
 
 const status = (over: Partial<Status> = {}): Status => ({
+  active: null,
   running: false,
   mode: null,
   desiredMode: "local",

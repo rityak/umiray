@@ -17,14 +17,14 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
-use crate::config::presets;
 use crate::error::{AppError, Result};
 
 /// Порт локального прокси. Живёт здесь, потому что здесь же стоит шаблон, который его
 /// пишет: держать число в точке сборки значило бы, что файл и сборка знают его порознь.
 pub const LOCAL_PROXY_PORT: u16 = if cfg!(debug_assertions) { 3091 } else { 3090 };
-use crate::paths;
-use crate::yaml::top_mapping;
+use crate::config::presets::PresetStore;
+use crate::paths::Paths;
+use crate::yaml::Yaml;
 
 /// Файл расширенных настроек. В него же пишет переключатель режима (D-052), поэтому
 /// идентификатор нужен не только окну.
@@ -58,7 +58,7 @@ const FILES: [File; 3] = [
         label: "Mihomo Settings",
         hint: "the full core config; capture controls also write here",
         core: true,
-        path: paths::advanced,
+        path: Paths::advanced,
         default: ADVANCED_DEFAULT,
         keys: &[],
     },
@@ -67,7 +67,7 @@ const FILES: [File; 3] = [
         label: "Umiray Settings",
         hint: "client settings; this file is never sent to the core",
         core: false,
-        path: paths::client,
+        path: Paths::client,
         default: CLIENT_DEFAULT,
         keys: &[],
     },
@@ -76,7 +76,7 @@ const FILES: [File; 3] = [
         label: "Groups",
         hint: "your node groups, shared across routes; AUTO and umiray are assembled by the client",
         core: true,
-        path: paths::groups,
+        path: Paths::groups,
         default: GROUPS_DEFAULT,
         keys: &["proxy-groups"],
     },
@@ -140,7 +140,7 @@ fn find(id: &str) -> Result<Target> {
             .ok_or_else(|| AppError::invalid(format!("Неизвестный раздел конфига: {part}")))?;
         // Набор проверяет себя сам: форма идентификатора у него закрытая, и несуществующий
         // отвергается здесь же, а не превращается в путь.
-        presets::get(preset)?;
+        PresetStore::get(preset)?;
         return Ok(Target::Part {
             part: known.id,
             preset: preset.to_string(),
@@ -153,44 +153,140 @@ fn find(id: &str) -> Result<Target> {
         .ok_or_else(|| AppError::invalid(format!("Неизвестный документ конфига: {id}")))
 }
 
-/// Разделы окна с документами внутри.
-///
-/// Какой набор применён, приходит снаружи: это настройка клиента, а `config` про настройки
-/// не знает — иначе получился бы круг `config → app → config`.
-pub fn list(applied: Option<&str>) -> Vec<Section> {
-    let presets = presets::list();
-    let mut sections = vec![Section {
-        // «Группы» — один документ клиента и никаких наборов (D-075): группы общие.
-        id: GROUPS.into(),
-        label: "Groups".into(),
-        presets: false,
-        docs: vec![doc(GROUPS)],
-    }];
-    sections.extend(ROUTING.iter().map(|routing| {
-        Section {
-            id: routing.id.into(),
-            label: routing.label.into(),
-            presets: true,
-            docs: presets
-                .iter()
-                .map(|preset| Doc {
-                    id: format!("{}/{}", routing.id, preset.id),
-                    label: preset.name.clone(),
-                    hint: routing.hint.into(),
-                    core: true,
-                    applied: applied == Some(preset.id.as_str()),
-                })
-                .collect(),
+pub struct Documents;
+
+impl Documents {
+    /// Разделы окна с документами внутри.
+    ///
+    /// Какой набор применён, приходит снаружи: это настройка клиента, а `config` про настройки
+    /// не знает — иначе получился бы круг `config → app → config`.
+    pub fn list(applied: Option<&str>) -> Vec<Section> {
+        let presets = PresetStore::list();
+        let mut sections = vec![Section {
+            // «Группы» — один документ клиента и никаких наборов (D-075): группы общие.
+            id: GROUPS.into(),
+            label: "Groups".into(),
+            presets: false,
+            docs: vec![doc(GROUPS)],
+        }];
+        sections.extend(ROUTING.iter().map(|routing| {
+            Section {
+                id: routing.id.into(),
+                label: routing.label.into(),
+                presets: true,
+                docs: presets
+                    .iter()
+                    .map(|preset| Doc {
+                        id: format!("{}/{}", routing.id, preset.id),
+                        label: preset.name.clone(),
+                        hint: routing.hint.into(),
+                        core: true,
+                        applied: applied == Some(preset.id.as_str()),
+                    })
+                    .collect(),
+            }
+        }));
+        sections.push(Section {
+            id: ADVANCED.into(),
+            label: "Settings".into(),
+            presets: false,
+            // Клиент первым: свои настройки открывают чаще, чем конфиг ядра (D-117).
+            docs: vec![doc(CLIENT), doc(ADVANCED)],
+        });
+        sections
+    }
+
+    /// Часть и набор, к которым ведёт документ. Пусто — это файл клиента, наборам он
+    /// не принадлежит.
+    pub fn part_and_preset(id: &str) -> Option<(&'static str, String)> {
+        match find(id) {
+            Ok(Target::Part { part, preset }) => Some((part, preset)),
+            _ => None,
         }
-    }));
-    sections.push(Section {
-        id: ADVANCED.into(),
-        label: "Settings".into(),
-        presets: false,
-        // Клиент первым: свои настройки открывают чаще, чем конфиг ядра (D-117).
-        docs: vec![doc(CLIENT), doc(ADVANCED)],
-    });
-    sections
+    }
+
+    /// Читает документ. Файл клиента при этом заводится из шаблона, если его ещё нет;
+    /// у части набора отсутствие файла означает пустой документ.
+    pub fn read(id: &str) -> Result<String> {
+        match find(id)? {
+            Target::Client(file) => {
+                let path = (file.path)();
+                if !path.exists() {
+                    Paths::ensure_root()?;
+                    crate::atomic::AtomicFile::write(&path, file.default)?;
+                }
+                Ok(std::fs::read_to_string(path)?)
+            }
+            Target::Part { part, preset } => PresetStore::read(&preset, part),
+        }
+    }
+
+    pub fn write(id: &str, text: &str) -> Result<()> {
+        // Проверяем до записи: битый YAML на диске означал бы, что ядро не поднимется,
+        // а причина будет видна только в логе при следующем запуске.
+        Yaml::top_mapping(text)?;
+        match find(id)? {
+            Target::Client(file) => {
+                Paths::ensure_root()?;
+                Ok(crate::atomic::AtomicFile::write((file.path)(), text)?)
+            }
+            Target::Part { part, preset } => PresetStore::write(&preset, part, text),
+        }
+    }
+
+    /// Возвращает файл клиента к шаблону — и отдаёт его же, чтобы окно показало результат
+    /// без второго чтения. Часть набора сюда не попадает: её умолчание — то, что собирает
+    /// клиент, а собирает его рендер, поэтому сброс набора живёт в `crate::render::effective::ConfigRenderer::reset`.
+    pub fn reset(id: &str) -> Result<String> {
+        match find(id)? {
+            Target::Client(file) => {
+                Paths::ensure_root()?;
+                crate::atomic::AtomicFile::write((file.path)(), file.default)?;
+                Ok(file.default.into())
+            }
+            Target::Part { .. } => Err(AppError::invalid(
+                "Часть набора сбрасывается к собранному клиентом",
+            )),
+        }
+    }
+
+    /// Шаблон файла клиента. Нужен переезду: старый override.yaml подкладывается под него,
+    /// чтобы у обновившихся расширенное тоже стало полноценным.
+    pub fn template(id: &str) -> Result<&'static str> {
+        match find(id)? {
+            Target::Client(file) => Ok(file.default),
+            Target::Part { .. } => Err(AppError::invalid("У части набора шаблона нет")),
+        }
+    }
+
+    /// Документы с шаблоном — те, что переезд имеет право освежить.
+    pub fn templated() -> Vec<&'static str> {
+        FILES.iter().map(|file| file.id).collect()
+    }
+
+    /// Ключи собранного конфига, относящиеся к документу. Пустой ответ означает «всё, что
+    /// не забрали остальные»: у расширенного своего списка нет, потому что оно и есть остаток.
+    pub fn keys(id: &str) -> Result<&'static [&'static str]> {
+        Ok(match find(id)? {
+            Target::Client(file) => file.keys,
+            Target::Part { part, .. } => ROUTING
+                .iter()
+                .find(|routing| routing.id == part)
+                .map(|routing| routing.keys)
+                .unwrap_or(&[]),
+        })
+    }
+
+    /// Ключи, занятые **другими** документами. Нужны ровно для этого остатка.
+    pub fn keys_of_others(id: &str) -> Vec<&'static str> {
+        let mine = Documents::keys(id).unwrap_or(&[]);
+        ROUTING
+            .iter()
+            .flat_map(|routing| routing.keys.iter().copied())
+            .chain(FILES.iter().flat_map(|file| file.keys.iter().copied()))
+            .filter(|key| !mine.contains(key))
+            .collect()
+    }
 }
 
 /// Документ окна по файлу клиента. Порядок вкладок задаётся списком в `list`, а не порядком
@@ -204,98 +300,6 @@ fn doc(id: &str) -> Doc {
         core: file.core,
         applied: false,
     }
-}
-
-/// Часть и набор, к которым ведёт документ. Пусто — это файл клиента, наборам он
-/// не принадлежит.
-pub fn part_and_preset(id: &str) -> Option<(&'static str, String)> {
-    match find(id) {
-        Ok(Target::Part { part, preset }) => Some((part, preset)),
-        _ => None,
-    }
-}
-
-/// Читает документ. Файл клиента при этом заводится из шаблона, если его ещё нет;
-/// у части набора отсутствие файла означает пустой документ.
-pub fn read(id: &str) -> Result<String> {
-    match find(id)? {
-        Target::Client(file) => {
-            let path = (file.path)();
-            if !path.exists() {
-                paths::ensure_root()?;
-                crate::atomic::write(&path, file.default)?;
-            }
-            Ok(std::fs::read_to_string(path)?)
-        }
-        Target::Part { part, preset } => presets::read(&preset, part),
-    }
-}
-
-pub fn write(id: &str, text: &str) -> Result<()> {
-    // Проверяем до записи: битый YAML на диске означал бы, что ядро не поднимется,
-    // а причина будет видна только в логе при следующем запуске.
-    top_mapping(text)?;
-    match find(id)? {
-        Target::Client(file) => {
-            paths::ensure_root()?;
-            Ok(crate::atomic::write((file.path)(), text)?)
-        }
-        Target::Part { part, preset } => presets::write(&preset, part, text),
-    }
-}
-
-/// Возвращает файл клиента к шаблону — и отдаёт его же, чтобы окно показало результат
-/// без второго чтения. Часть набора сюда не попадает: её умолчание — то, что собирает
-/// клиент, а собирает его рендер, поэтому сброс набора живёт в `crate::render::effective::reset`.
-pub fn reset(id: &str) -> Result<String> {
-    match find(id)? {
-        Target::Client(file) => {
-            paths::ensure_root()?;
-            crate::atomic::write((file.path)(), file.default)?;
-            Ok(file.default.into())
-        }
-        Target::Part { .. } => Err(AppError::invalid(
-            "Часть набора сбрасывается к собранному клиентом",
-        )),
-    }
-}
-
-/// Шаблон файла клиента. Нужен переезду: старый override.yaml подкладывается под него,
-/// чтобы у обновившихся расширенное тоже стало полноценным.
-pub fn template(id: &str) -> Result<&'static str> {
-    match find(id)? {
-        Target::Client(file) => Ok(file.default),
-        Target::Part { .. } => Err(AppError::invalid("У части набора шаблона нет")),
-    }
-}
-
-/// Документы с шаблоном — те, что переезд имеет право освежить.
-pub fn templated() -> Vec<&'static str> {
-    FILES.iter().map(|file| file.id).collect()
-}
-
-/// Ключи собранного конфига, относящиеся к документу. Пустой ответ означает «всё, что
-/// не забрали остальные»: у расширенного своего списка нет, потому что оно и есть остаток.
-pub fn keys(id: &str) -> Result<&'static [&'static str]> {
-    Ok(match find(id)? {
-        Target::Client(file) => file.keys,
-        Target::Part { part, .. } => ROUTING
-            .iter()
-            .find(|routing| routing.id == part)
-            .map(|routing| routing.keys)
-            .unwrap_or(&[]),
-    })
-}
-
-/// Ключи, занятые **другими** документами. Нужны ровно для этого остатка.
-pub fn keys_of_others(id: &str) -> Vec<&'static str> {
-    let mine = keys(id).unwrap_or(&[]);
-    ROUTING
-        .iter()
-        .flat_map(|routing| routing.keys.iter().copied())
-        .chain(FILES.iter().flat_map(|file| file.keys.iter().copied()))
-        .filter(|key| !mine.contains(key))
-        .collect()
 }
 
 const CLIENT_DEFAULT: &str = r#"# Настройки самого клиента: то, чего нет в конфиге ядра (D-068).
@@ -448,6 +452,7 @@ const GROUPS_DEFAULT: &str = r#"# Группы узлов — ваши, и он�
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::presets;
     use serde_yaml::Value;
 
     #[test]
@@ -490,13 +495,13 @@ mod tests {
     /// чего не забрали они.
     #[test]
     fn the_advanced_document_gets_everything_the_others_did_not_take() {
-        assert!(keys(ADVANCED).unwrap().is_empty());
-        let others = keys_of_others(ADVANCED);
+        assert!(Documents::keys(ADVANCED).unwrap().is_empty());
+        let others = Documents::keys_of_others(ADVANCED);
         assert!(others.contains(&"proxy-groups"));
         assert!(others.contains(&"rules"));
-        assert_eq!(keys(GROUPS).unwrap(), &["proxy-groups"]);
+        assert_eq!(Documents::keys(GROUPS).unwrap(), &["proxy-groups"]);
         assert!(
-            !keys_of_others(GROUPS).contains(&"proxy-groups"),
+            !Documents::keys_of_others(GROUPS).contains(&"proxy-groups"),
             "свой ключ в чужие не попадает"
         );
     }
@@ -505,7 +510,7 @@ mod tests {
     fn every_template_is_valid_yaml() {
         for file in FILES.iter() {
             assert!(
-                top_mapping(file.default).is_ok(),
+                Yaml::top_mapping(file.default).is_ok(),
                 "шаблон {} не разбирается",
                 file.id
             );
@@ -516,7 +521,7 @@ mod tests {
     /// написано, иначе непонятно, чей режим и чей DNS в итоге работают.
     #[test]
     fn the_advanced_template_says_out_loud_what_is_off() {
-        let out = Value::Mapping(top_mapping(ADVANCED_DEFAULT).unwrap());
+        let out = Value::Mapping(Yaml::top_mapping(ADVANCED_DEFAULT).unwrap());
         assert_eq!(out["tun"]["enable"], Value::from(false));
         assert_eq!(out["dns"]["enable"], Value::from(false));
         assert_eq!(out["allow-lan"], Value::from(false));
@@ -552,7 +557,7 @@ mod tests {
     /// файла клиента, разделы маршрута — по документу на набор.
     #[test]
     fn sections_are_built_around_documents_and_not_around_files() {
-        let sections = list(None);
+        let sections = Documents::list(None);
         assert_eq!(
             sections.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
             vec![GROUPS, "rules", ADVANCED]

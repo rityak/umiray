@@ -11,8 +11,9 @@
 //! Модуль отдельный, потому что это разводка, а не состояние: `AppState` о ней не знает
 //! ничего, кроме результата, и цикла между ними не возникает.
 
-use crate::core::Supervisor;
+use crate::core::mihomo::Mihomo;
 use crate::error::{AppError, Result};
+use crate::nodes::ping::Pinger;
 use crate::nodes::ping::{self, Method, Table};
 use crate::nodes::Node;
 
@@ -21,16 +22,20 @@ use crate::nodes::Node;
 /// пустую колонку всё это время (S-016).
 pub type Progress<'a> = &'a (dyn Fn(&str, ping::Reply) + Sync);
 
-pub async fn run(
-    nodes: &[Node],
-    supervisor: &Supervisor,
-    method: Method,
-    progress: Progress<'_>,
-) -> Result<Table> {
-    match method {
-        Method::Icmp | Method::Tcp => own(nodes, supervisor, method).await,
-        Method::Proxy => through_proxy(&nodes.iter().collect::<Vec<_>>(), supervisor).await,
-        Method::ProxyKeepalive => through_tunnel(nodes, supervisor, progress).await,
+pub struct Measure;
+
+impl Measure {
+    pub async fn run(
+        nodes: &[Node],
+        mihomo: &Mihomo,
+        method: Method,
+        progress: Progress<'_>,
+    ) -> Result<Table> {
+        match method {
+            Method::Icmp | Method::Tcp => own(nodes, mihomo, method).await,
+            Method::Proxy => through_proxy(&nodes.iter().collect::<Vec<_>>(), mihomo).await,
+            Method::ProxyKeepalive => through_tunnel(nodes, mihomo, progress).await,
+        }
     }
 }
 
@@ -40,22 +45,22 @@ pub async fn run(
 /// узла, и в колонке годами стоял бы прочерк или ICMP до хоста, который про сам туннель
 /// не говорит ничего. Такие узлы меряет ядро — если оно запущено; если нет, им достаётся
 /// прежний фолбэк, и это честнее, чем пустая колонка.
-async fn own(nodes: &[Node], supervisor: &Supervisor, method: Method) -> Result<Table> {
+async fn own(nodes: &[Node], mihomo: &Mihomo, method: Method) -> Result<Table> {
     let (udp, rest): (Vec<&Node>, Vec<&Node>) =
-        nodes.iter().partition(|node| ping::udp_only(&node.kind));
-    let mut table = ping::sweep(unique(&rest), method).await;
+        nodes.iter().partition(|node| Pinger::udp_only(&node.kind));
+    let mut table = Pinger::sweep(unique(&rest), method).await;
 
     if udp.is_empty() {
         return Ok(table);
     }
-    if !supervisor.status().running {
-        table.extend(ping::sweep(unique(&udp), method).await);
+    if !mihomo.status().running {
+        table.extend(Pinger::sweep(unique(&udp), method).await);
         return Ok(table);
     }
 
     // Замер через ядро может не выйти по своим причинам (узел не заведён провайдером,
     // ядро отказало) — тогда остаётся прежний путь, а не пустая колонка.
-    match through_proxy(&udp, supervisor).await {
+    match through_proxy(&udp, mihomo).await {
         Ok(measured) => {
             for (address, mut reply) in measured {
                 // Число получено не тем способом, который просили: колонка обязана
@@ -64,7 +69,7 @@ async fn own(nodes: &[Node], supervisor: &Supervisor, method: Method) -> Result<
                 table.insert(address, reply);
             }
         }
-        Err(_) => table.extend(ping::sweep(unique(&udp), method).await),
+        Err(_) => table.extend(Pinger::sweep(unique(&udp), method).await),
     }
     Ok(table)
 }
@@ -74,12 +79,8 @@ async fn own(nodes: &[Node], supervisor: &Supervisor, method: Method) -> Result<
 /// Служебная группа одна на всех, поэтому замер **последовательный**: навели на узел,
 /// померили, навели на следующий. Цена замерена в S-016 — 0.2–0.7 с на живой узел
 /// и таймаут на мёртвый, — поэтому каждый результат уходит наружу сразу, а не в конце.
-async fn through_tunnel(
-    nodes: &[Node],
-    supervisor: &Supervisor,
-    progress: Progress<'_>,
-) -> Result<Table> {
-    let Some(port) = supervisor.probe_port() else {
+async fn through_tunnel(nodes: &[Node], mihomo: &Mihomo, progress: Progress<'_>) -> Result<Table> {
+    let Some(port) = mihomo.probe_port() else {
         return Err(AppError::invalid(
             "Замер через прокси идёт через само ядро — сначала подключитесь.",
         ));
@@ -95,10 +96,11 @@ async fn through_tunnel(
             continue;
         }
         // Узел, которого ядро не завело (D-063), навести нельзя — ему достанется фолбэк.
-        if supervisor.probe_select(&node.name).await.is_err() {
+        if mihomo.probe_select(&node.name).await.is_err() {
             continue;
         }
-        let Ok(Some(ms)) = tokio::task::spawn_blocking(move || ping::keepalive(port)).await else {
+        let Ok(Some(ms)) = tokio::task::spawn_blocking(move || Pinger::keepalive(port)).await
+        else {
             continue;
         };
         let reply = ping::Reply {
@@ -115,7 +117,7 @@ async fn through_tunnel(
         .into_iter()
         .filter(|address| !table.contains_key(address))
         .collect();
-    table.extend(ping::sweep(missing, Method::ProxyKeepalive).await);
+    table.extend(Pinger::sweep(missing, Method::ProxyKeepalive).await);
     Ok(table)
 }
 
@@ -129,8 +131,8 @@ async fn through_tunnel(
 /// Потолок: узлы, которые клиент кладёт в конфиг сам (D-063), в провайдерах не лежат
 /// и здесь замера не получат — им достанется фолбэк. Их путь — `GET /proxies/<имя>/delay`,
 /// он для них работает; делать это стоит, когда таких схем станет больше одной.
-async fn through_proxy(nodes: &[&Node], supervisor: &Supervisor) -> Result<Table> {
-    if !supervisor.status().running {
+async fn through_proxy(nodes: &[&Node], mihomo: &Mihomo) -> Result<Table> {
+    if !mihomo.status().running {
         return Err(AppError::invalid(
             "Замер через прокси идёт через само ядро — сначала подключитесь.",
         ));
@@ -141,11 +143,11 @@ async fn through_proxy(nodes: &[&Node], supervisor: &Supervisor) -> Result<Table
     sources.dedup();
     for _ in 0..2 {
         for source in &sources {
-            supervisor.healthcheck(source).await?;
+            mihomo.healthcheck(source).await?;
         }
     }
 
-    let history = supervisor.delays().await?;
+    let history = mihomo.delays().await?;
     let mut table = Table::new();
     for node in nodes {
         let (Some(address), Some(ms)) = (
@@ -171,7 +173,7 @@ async fn through_proxy(nodes: &[&Node], supervisor: &Supervisor) -> Result<Table
         .into_iter()
         .filter(|address| !table.contains_key(address))
         .collect();
-    table.extend(ping::sweep(missing, Method::Proxy).await);
+    table.extend(Pinger::sweep(missing, Method::Proxy).await);
     Ok(table)
 }
 

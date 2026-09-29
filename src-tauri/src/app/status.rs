@@ -6,18 +6,26 @@
 
 use serde::Serialize;
 
+use crate::app::engine::{Capture, EngineState};
 use crate::app::mode;
+use crate::app::mode::Choice;
+use crate::app::proxy::SystemProxy;
 use crate::app::state::AppState;
 use crate::app::tray;
 use crate::config::mode::Mode;
-use crate::core;
-use crate::error::Result;
-use crate::paths;
-use crate::system::{autostart, elevation, sysproxy};
+use crate::core::EngineId;
+use crate::system::autostart::Autostart;
+use crate::system::elevation::Elevation;
+use crate::system::sysproxy::WinProxy;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Status {
+    /// Какое ядро держит трафик сейчас (D-154). Шапка и трей говорят о нём, а разделы —
+    /// о выбранном в настройках: переключатель ядер — вид, а не питание.
+    active: Option<EngineId>,
+    /// Работает ли mihomo. Остальные поля про режим и порт — тоже его: у qd своё
+    /// состояние, `qd_status`.
     running: bool,
     /// В каком режиме работает ядро **сейчас**. Пусто — не работает.
     mode: Option<Mode>,
@@ -59,9 +67,57 @@ pub struct Status {
     /// тумблер живёт в настройках, а здесь факт, и разойтись им можно — включённый тумблер
     /// в режиме local не запирает ничего.
     kill_switch: bool,
+    /// Значок трея — считается вместе со статусом, из тех же фактов, и окну не уезжает.
+    #[serde(skip)]
+    look: tray::Look,
 }
 
 impl Status {
+    /// Статус как есть сейчас — из ядер, реестра Windows, настроек и реестра жалоб.
+    pub fn gather(state: &AppState) -> Status {
+        let core = state.mihomo.status();
+        let running = state.running();
+        // Один поход в реестр на весь статус: он опрашивается раз в 1.5 с, и читать
+        // одно и то же дважды незачем.
+        let registry = WinProxy::read().unwrap_or_default();
+        let ours = SystemProxy::address(
+            running
+                .as_ref()
+                .and_then(|(_, engine)| engine.capture.as_ref()),
+        );
+        let system_proxy = registry.enabled
+            && ours
+                .as_deref()
+                .is_some_and(|address| registry.server == address);
+        let desired_mode = Choice::get(state);
+        Status {
+            active: running.as_ref().map(|(id, _)| *id),
+            look: look(running.as_ref().map(|(_, engine)| engine), system_proxy),
+            running: core.running,
+            mode: core.mode,
+            desired_mode,
+            restart_reason: restart_reason(state),
+            trouble: state.notices.top(core.started),
+            port: core.port,
+            started: running.as_ref().and_then(|(_, engine)| engine.started),
+            core_present: crate::core::mihomo::Mihomo::binary().exists(),
+            elevated: Elevation::is_elevated(),
+            always_admin: Autostart::always_admin(),
+            system_proxy,
+            foreign_proxy: (registry.enabled && !system_proxy && !registry.server.is_empty())
+                .then_some(registry.server),
+            autostart: Autostart::enabled(),
+            // Факт, а не намерение: тумблер живёт в настройках, а здесь — стоит ли запрет
+            // на самом деле. Разойтись им можно (тумблер включён, но режим не TUN), и окно
+            // обязано показывать работающее — то же правило, что у прокси (D-047, D-073).
+            kill_switch: state.settings.get().kill_switch_backup.is_some(),
+        }
+    }
+
+    pub fn look(&self) -> tray::Look {
+        self.look
+    }
+
     /// Причина, по которой окну стоит предложить перезапуск. Только для живых проверок:
     /// рабочему коду  уезжает целиком в вебвью и внутрь никто не смотрит.
     #[cfg(test)]
@@ -76,69 +132,20 @@ impl Status {
     }
 }
 
-/// Адрес, который прописываем в систему. Только local-режим: в TUN перехватывается весь
-/// трафик машины, и прописывать там нечего.
-pub fn proxy_address(core: &core::Status) -> Option<String> {
-    if core.mode != Some(Mode::Local) {
-        return None;
-    }
-    core.port.map(|port| format!("127.0.0.1:{port}"))
-}
-
-/// Как должен выглядеть значок при таком статусе. Отдельная функция, потому что состояние
-/// меняется в четырёх местах, и повторять этот разбор в каждом — способ их рассинхронизировать.
-pub fn shown_look(state: &AppState, status: &Status) -> tray::Look {
-    if state.settings().engine == crate::app::settings::Engine::Qd {
-        return if state.qd.connected() {
-            tray::Look::Qd
-        } else {
-            tray::Look::Off
-        };
-    }
-    look(status)
-}
-
-pub fn look(status: &Status) -> tray::Look {
-    if !status.running {
+/// Как должен выглядеть значок. Отдельная функция, потому что состояние меняется в четырёх
+/// местах, и повторять этот разбор в каждом — способ их рассинхронизировать.
+///
+/// Решает **работающее** ядро и то, как оно перехватывает трафик, а не выбранное в шапке
+/// (D-066, D-154): иначе переключение шапки на qd гасило бы значок при живом mihomo.
+fn look(running: Option<&EngineState>, system_proxy: bool) -> tray::Look {
+    let Some(engine) = running.filter(|engine| engine.on) else {
         return tray::Look::Off;
-    }
-    match status.mode {
-        Some(Mode::Tun) => tray::Look::Tun,
-        _ if status.system_proxy => tray::Look::System,
+    };
+    match engine.capture {
+        Some(Capture::Tun { .. }) => tray::Look::Tun,
+        Some(Capture::Divert) => tray::Look::Divert,
+        _ if system_proxy => tray::Look::System,
         _ => tray::Look::Local,
-    }
-}
-
-pub fn status(state: &AppState) -> Status {
-    let core = state.supervisor.status();
-    // Один поход в реестр на весь статус: он опрашивается раз в 1.5 с, и читать
-    // одно и то же дважды незачем.
-    let registry = sysproxy::read().unwrap_or_default();
-    let ours = proxy_address(&core);
-    let system_proxy = registry.enabled
-        && ours
-            .as_deref()
-            .is_some_and(|address| registry.server == address);
-    let desired_mode = mode::get(state);
-    Status {
-        running: core.running,
-        mode: core.mode,
-        desired_mode,
-        restart_reason: restart_reason(state),
-        trouble: state.notices.top(core.started),
-        port: core.port,
-        started: core.started,
-        core_present: paths::core().exists(),
-        elevated: elevation::is_elevated(),
-        always_admin: autostart::always_admin(),
-        system_proxy,
-        foreign_proxy: (registry.enabled && !system_proxy && !registry.server.is_empty())
-            .then_some(registry.server),
-        autostart: autostart::enabled(),
-        // Факт, а не намерение: тумблер живёт в настройках, а здесь — стоит ли запрет
-        // на самом деле. Разойтись им можно (тумблер включён, но режим не TUN), и окно
-        // обязано показывать работающее — то же правило, что у прокси (D-047, D-073).
-        kill_switch: state.settings().kill_switch_backup.is_some(),
     }
 }
 
@@ -152,164 +159,64 @@ pub fn status(state: &AppState) -> Status {
 /// Порт служебного входа берём **у работающего ядра**: свежий сделал бы конфиги разными
 /// на ровном месте.
 fn restart_reason(state: &AppState) -> Option<String> {
-    let launched = state.supervisor.launched()?;
-    let assembled = crate::render::effective::effective(
-        state.routing().ok().flatten().as_deref(),
-        state.supervisor.probe_port(),
+    let launched = state.mihomo.launched()?;
+    let assembled = crate::render::effective::ConfigRenderer::effective(
+        state.routing.rules(state).ok().flatten().as_deref(),
+        state.mihomo.probe_port(),
     )
     .ok()?;
-    match crate::core::apply::needed(&launched, &assembled.yaml) {
-        Ok(Some(crate::core::apply::Apply::Restart(why))) => Some(why.to_string()),
+    match crate::core::mihomo::apply::Apply::needed(&launched, &assembled.yaml) {
+        Ok(Some(crate::core::mihomo::apply::Apply::Restart(why))) => Some(why.to_string()),
         _ => None,
     }
-}
-
-/// Прописать наш адрес в систему, запомнив прежнюю настройку.
-///
-/// Неудача не роняет запуск: ядро уже работает, адрес виден в окне, и прописать его руками
-/// пользователь может сам. Правду про реестр всё равно скажет `Status::system_proxy`.
-pub fn engage_system_proxy(state: &AppState) -> Result<()> {
-    let core = state.supervisor.status();
-    let Some(address) = proxy_address(&core) else {
-        return Ok(());
-    };
-    if let Some(mut backup) = state.settings().proxy_backup {
-        // Кто-то сменил прокси после нас — не отбираем его обратно при reconnect.
-        if !backup.ours.is_empty() && !sysproxy::is_ours(&backup.ours) {
-            return Ok(());
-        }
-        if backup.ours == address && sysproxy::is_ours(&address) {
-            return Ok(());
-        }
-        let old = backup.ours.clone();
-        sysproxy::apply(&address)?;
-        backup.ours = address;
-        if let Err(why) = state.remember_proxy(Some(backup)) {
-            if !old.is_empty() {
-                let _ = sysproxy::apply(&old);
-            }
-            return Err(why);
-        }
-        return Ok(());
-    }
-    let mut previous = sysproxy::read()?;
-    previous.ours = address.clone();
-    // Снимок должен пережить падение между записью реестра и следующей строкой.
-    state.remember_proxy(Some(previous))?;
-    if let Err(why) = sysproxy::apply(&address) {
-        let _ = state.remember_proxy(None);
-        return Err(why);
-    }
-    Ok(())
-}
-
-/// Снять наш прокси и вернуть то, что стояло раньше. Вызывается и при остановке ядра,
-/// и при выходе, и при старте — последнее и есть лекарство от залипания после падения.
-pub fn release_system_proxy(state: &AppState) -> Result<()> {
-    // Снимка нет — значит включали не мы, и в реестре чужая настройка: другой VPN,
-    // корпоративный прокси. Выключить её «на всякий случай» значит сломать человеку сеть
-    // тем, что он всего лишь закрыл наше окно.
-    let Some(backup) = state.settings().proxy_backup else {
-        return Ok(());
-    };
-    sysproxy::restore(&backup)?;
-    state.remember_proxy(None)
-}
-
-/// Запереть выход мимо туннеля (D-073). Только в TUN: в local и system ядро — обычный
-/// прокси, мимо которого приложение вправе ходить, и запирать машину за него мы не подряжались.
-///
-/// Молчаливый отказ намеренный: не встало правило — VPN всё равно работает, просто без
-/// подстраховки, и ронять из-за этого подключение хуже. Что защиты нет, видно в статусе.
-pub fn engage_kill_switch(state: &AppState) -> Result<()> {
-    if !state.settings().kill_switch || state.supervisor.status().mode != Some(Mode::Tun) {
-        return Ok(());
-    }
-    // При reconnect правила уже стоят, а снимок содержит состояние до первой установки.
-    // Повторный `engage` снял бы снимок с нашего же Block и породил дубликаты правил.
-    if state.settings().kill_switch_backup.is_some() {
-        return Ok(());
-    }
-    let device = crate::config::files::read(crate::config::files::ADVANCED)
-        .and_then(|text| crate::yaml::top_mapping(&text))
-        .map(|map| crate::config::mode::tun_device(&map))
-        .unwrap_or_else(|_| crate::config::mode::DEFAULT_DEVICE.to_string());
-    let previous = crate::system::killswitch::profiles()?;
-    let backup = crate::system::killswitch::Backup { profiles: previous };
-    // Сначала сохраняем исходное состояние, затем меняем машину: падение между ними
-    // оставит данные, по которым следующий запуск всё вернёт.
-    state.remember_kill_switch(Some(backup.clone()))?;
-    if let Err(why) = crate::system::killswitch::apply(&paths::core(), &device) {
-        let _ = crate::system::killswitch::release(&backup);
-        let _ = state.remember_kill_switch(None);
-        return Err(why);
-    }
-    Ok(())
-}
-
-/// Снять запрет и вернуть умолчание брандмауэра. Как и у прокси, зовётся при остановке,
-/// при выходе и **при старте** — последнее возвращает машине сеть после падения клиента.
-pub fn release_kill_switch(state: &AppState) -> Result<()> {
-    // Снимка нет — запрет не наш (или его нет вовсе), и трогать чужую настройку
-    // брандмауэра мы не вправе.
-    let Some(backup) = state.settings().kill_switch_backup else {
-        return Ok(());
-    };
-    crate::system::killswitch::release(&backup)?;
-    state.remember_kill_switch(None)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn shown(
-        running: bool,
-        mode: Option<Mode>,
-        system_proxy: bool,
-        desired: mode::Choice,
-    ) -> Status {
-        Status {
-            running,
-            mode,
-            desired_mode: desired,
-            restart_reason: None,
-            trouble: None,
-            port: None,
+    fn on(capture: Option<Capture>) -> EngineState {
+        EngineState {
+            on: true,
+            wanted: true,
             started: None,
-            core_present: true,
-            elevated: false,
-            always_admin: false,
-            system_proxy,
-            foreign_proxy: None,
-            autostart: false,
-            kill_switch: false,
+            capture,
         }
     }
 
-    /// Значок показывает **работающее**, а не выбранное (D-066). После D-060 это разные
-    /// вещи: режим правится в конфиге и до перезапуска не в силе, а трей обязан говорить
-    /// правду о том, как идёт трафик прямо сейчас.
+    /// Значок показывает **работающее**, а не выбранное (D-066, D-154). Режим правится
+    /// в конфиге и до перезапуска не в силе, ядро выбирается в шапке и до нажатия питания
+    /// не работает, а трей обязан говорить правду о том, как идёт трафик прямо сейчас.
     #[test]
-    fn the_tray_follows_the_running_mode_not_the_chosen_one() {
+    fn the_tray_follows_the_running_engine_not_the_chosen_one() {
         assert_eq!(
-            look(&shown(false, None, false, mode::Choice::Tun)),
+            look(None, false),
             tray::Look::Off,
-            "ядро не работает — значок серый, что бы ни стояло в шапке"
+            "ничего не работает — значок серый, что бы ни стояло в шапке"
         );
+        let crashed = EngineState {
+            on: false,
+            ..on(None)
+        };
         assert_eq!(
-            look(&shown(true, Some(Mode::Local), false, mode::Choice::Tun)),
-            tray::Look::Local,
-            "выбран TUN, работает local — значок про local"
+            look(Some(&crashed), false),
+            tray::Look::Off,
+            "упавшее ядро трафик не держит, хоть и должно"
         );
+        let local = on(Some(Capture::LocalProxy { port: 2080 }));
+        assert_eq!(look(Some(&local), false), tray::Look::Local);
         assert_eq!(
-            look(&shown(true, Some(Mode::Local), true, mode::Choice::Local)),
+            look(Some(&local), true),
             tray::Look::System,
             "адрес правда стоит в реестре — это отдельное состояние (D-047)"
         );
+        let tun = on(Some(Capture::Tun {
+            device: "Meta".into(),
+        }));
+        assert_eq!(look(Some(&tun), true), tray::Look::Tun);
         assert_eq!(
-            look(&shown(true, Some(Mode::Tun), false, mode::Choice::Local)),
-            tray::Look::Tun
+            look(Some(&on(Some(Capture::Divert))), false),
+            tray::Look::Divert
         );
     }
 }

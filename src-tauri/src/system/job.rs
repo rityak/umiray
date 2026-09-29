@@ -20,14 +20,18 @@ use windows_sys::Win32::System::JobObjects::{
 /// «убить всех внутри». `usize`, потому что `HANDLE` — сырой указатель и `Sync` не является.
 static JOB: OnceLock<usize> = OnceLock::new();
 
-/// Посадить процесс в клетку. `false` — клетки нет, и ядро переживёт падение клиента:
-/// вызывающий обязан сказать об этом вслух, а не молча продолжить.
-pub fn attach(process: HANDLE) -> bool {
-    let job = *JOB.get_or_init(create) as HANDLE;
-    if job.is_null() {
-        return false;
+pub struct Job;
+
+impl Job {
+    /// Посадить процесс в клетку. `false` — клетки нет, и ядро переживёт падение клиента:
+    /// вызывающий обязан сказать об этом вслух, а не молча продолжить.
+    pub fn attach(process: HANDLE) -> bool {
+        let job = *JOB.get_or_init(create) as HANDLE;
+        if job.is_null() {
+            return false;
+        }
+        unsafe { AssignProcessToJobObject(job, process) != 0 }
     }
-    unsafe { AssignProcessToJobObject(job, process) != 0 }
 }
 
 /// Ноль — «не получилось»: клетка на этой системе не создаётся, и второй раз пробовать
@@ -72,7 +76,7 @@ mod tests {
             .stdout(Stdio::null())
             .spawn()
             .expect("cmd есть на любой windows");
-        assert!(attach(child.as_raw_handle()), "клетка приняла процесс");
+        assert!(Job::attach(child.as_raw_handle()), "клетка приняла процесс");
         let _ = child.kill();
         let _ = child.wait();
     }

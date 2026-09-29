@@ -18,14 +18,21 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use crate::app::migrate;
+use crate::app::migrate::Migration;
+use crate::config::advanced::Advanced;
 use crate::config::direction::Direction;
 use crate::config::files;
-use crate::config::mode;
+use crate::config::files::Documents;
 use crate::config::mode::Mode;
-use crate::core::Supervisor;
-use crate::paths;
-use crate::yaml::top_mapping;
+use crate::config::rulesets::RulesetStore;
+use crate::core::mihomo::Mihomo;
+use crate::paths::Paths;
+use crate::system::autostart::Autostart;
+use crate::system::killswitch::Firewall;
+use crate::system::registry::Registry;
+use crate::system::sysproxy::WinProxy;
+use crate::system::task::SchedulerTask;
+use crate::yaml::Yaml;
 
 /// Настоящий каталог пользователя. Запоминается один раз — после первой песочницы
 /// `LOCALAPPDATA` уже подменён, и второй раз спрашивать поздно.
@@ -33,7 +40,7 @@ fn real() -> &'static Path {
     static REAL: OnceLock<PathBuf> = OnceLock::new();
     // Каталог этой сборки, а не имя строкой: у отладочной он свой (D-116), и живые
     // проверки обязаны копировать тот, в котором сами же и живут.
-    REAL.get_or_init(crate::paths::root)
+    REAL.get_or_init(crate::paths::Paths::root)
 }
 
 /// Копия настоящего каталога в temp; `LOCALAPPDATA` подменяется процессу целиком.
@@ -46,12 +53,12 @@ fn sandbox(name: &str) -> PathBuf {
     );
     let root = std::env::temp_dir().join(format!("umiray-live-{name}"));
     let _ = std::fs::remove_dir_all(&root);
-    let app = root.join(crate::paths::root().file_name().unwrap());
+    let app = root.join(crate::paths::Paths::root().file_name().unwrap());
     std::fs::create_dir_all(&app).unwrap();
     copy_tree(&source, &app);
 
     std::env::set_var("LOCALAPPDATA", &root);
-    assert_eq!(paths::root(), app, "песочница не подхватилась");
+    assert_eq!(Paths::root(), app, "песочница не подхватилась");
     app
 }
 
@@ -78,16 +85,16 @@ fn copy_tree(from: &Path, to: &Path) {
 /// Аргументы те же, что у супервизора, включая `SAFE_PATHS`: без него ядро откажется
 /// читать файлы провайдеров из соседнего каталога (GOTCHAS), и проверка соврала бы.
 fn core_accepts(yaml: &str) -> (bool, String) {
-    paths::ensure_run_dir().unwrap();
-    let path = paths::effective_config();
+    Paths::ensure_run_dir().unwrap();
+    let path = Paths::effective_config();
     std::fs::write(&path, yaml).unwrap();
-    let out = std::process::Command::new(paths::core())
+    let out = std::process::Command::new(Paths::core())
         .arg("-t")
         .arg("-d")
-        .arg(paths::run_dir())
+        .arg(Paths::run_dir())
         .arg("-f")
         .arg(&path)
-        .env("SAFE_PATHS", paths::sources_dir())
+        .env("SAFE_PATHS", Paths::sources_dir())
         .output()
         .unwrap();
     let text = format!(
@@ -100,7 +107,7 @@ fn core_accepts(yaml: &str) -> (bool, String) {
 
 /// Гасит ядро, что бы ни случилось с тестом. Без этого паника посреди TUN-проверки
 /// оставила бы поднятый адаптер и переписанную таблицу маршрутов.
-struct Running<'a>(&'a Supervisor);
+struct Running<'a>(&'a Mihomo);
 
 impl Drop for Running<'_> {
     fn drop(&mut self) {
@@ -187,7 +194,7 @@ fn live_collections_move_instead_of_being_dropped() {
         .map(|entry| entry.file_name().to_string_lossy().into_owned())
         .collect();
 
-    migrate::run().expect("переезд не прошёл");
+    Migration::run().expect("переезд не прошёл");
 
     assert!(!catalog.exists(), "старый catalog/ остался");
     assert!(!rulesets.exists(), "старый rulesets/ остался");
@@ -208,7 +215,7 @@ fn live_collections_move_instead_of_being_dropped() {
     );
 
     // Второй прогон ничего не трогает: переезд разовый.
-    migrate::run().expect("повторный переезд не прошёл");
+    Migration::run().expect("повторный переезд не прошёл");
     assert_eq!(
         std::fs::read_to_string(collections.join("dns.yaml")).unwrap(),
         before,
@@ -248,7 +255,7 @@ fn live_migration_on_a_copy_of_the_real_directory() {
 ";
     std::fs::write(app.join("rules.yaml"), stale).unwrap();
 
-    migrate::run().expect("переезд не прошёл");
+    Migration::run().expect("переезд не прошёл");
 
     assert!(!app.join("override.yaml").exists(), "старый файл остался");
     assert!(
@@ -259,12 +266,12 @@ fn live_migration_on_a_copy_of_the_real_directory() {
     let after = std::fs::read_to_string(app.join("advanced.yaml")).unwrap();
     assert_eq!(
         after,
-        files::template(files::ADVANCED).unwrap(),
+        Documents::template(files::ADVANCED).unwrap(),
         "отличий от шаблона не было — он обязан лечь дословно, с комментариями"
     );
 
-    let map = top_mapping(&after).unwrap();
-    for foreign in files::keys_of_others(files::ADVANCED) {
+    let map = Yaml::top_mapping(&after).unwrap();
+    for foreign in Documents::keys_of_others(files::ADVANCED) {
         assert!(
             !map.contains_key(serde_yaml::Value::from(foreign)),
             "{foreign} не должен переезжать в конфиг ядра"
@@ -288,13 +295,15 @@ fn live_migration_on_a_copy_of_the_real_directory() {
         "группы стали документом клиента и должны лежать в корне"
     );
     assert!(
-        crate::config::groups::parse(&std::fs::read_to_string(app.join("groups.yaml")).unwrap())
-            .expect("группы должны разбираться")
-            .iter()
-            .all(|group| group.name != "AUTO" && group.name != "umiray"),
+        crate::config::groups::GroupsCodec::parse(
+            &std::fs::read_to_string(app.join("groups.yaml")).unwrap()
+        )
+        .expect("группы должны разбираться")
+        .iter()
+        .all(|group| group.name != "AUTO" && group.name != "umiray"),
         "клиентские группы в свой документ не переезжают: они собираются заново"
     );
-    let presets = crate::config::presets::list();
+    let presets = crate::config::presets::PresetStore::list();
     // Проверяем инвариант D-071 («один набор существует всегда»), а не абсолютное число:
     // песочница — копия **настоящего** каталога, и сколько наборов человек успел завести
     // своими руками, проверке знать неоткуда. Прежнее `== 1` было верно ровно до того дня,
@@ -315,7 +324,7 @@ fn live_migration_on_a_copy_of_the_real_directory() {
 
     // Боевое правило человек обязан видеть сразу — теперь его даёт сборка, а не шаблон.
     let (ok, log) = core_accepts(
-        &crate::render::effective::effective(None, None)
+        &crate::render::effective::ConfigRenderer::effective(None, None)
             .unwrap()
             .yaml,
     );
@@ -333,7 +342,7 @@ fn live_migration_on_a_copy_of_the_real_directory() {
 #[ignore]
 fn live_mode_switch_keeps_the_config_whole() {
     let app = sandbox("mode");
-    migrate::run().unwrap();
+    Migration::run().unwrap();
 
     // Как будто пользователь поправил своё руками: сменил порт и дописал поле, которого
     // клиент не знает вовсе. Порт именно правим, а не дописываем: второй такой же ключ —
@@ -345,13 +354,13 @@ fn live_mode_switch_keeps_the_config_whole() {
 experimental:
   quic-go-disable-gso: true
 ";
-    files::write(files::ADVANCED, &mine).unwrap();
+    Documents::write(files::ADVANCED, &mine).unwrap();
 
     for step in [Mode::Tun, Mode::Local, Mode::Tun, Mode::Local] {
-        mode::write(step).expect("режим не записался");
+        Mode::write(step).expect("режим не записался");
 
         let text = std::fs::read_to_string(app.join("advanced.yaml")).unwrap();
-        let map = top_mapping(&text).unwrap();
+        let map = Yaml::top_mapping(&text).unwrap();
         let out = serde_yaml::Value::Mapping(map);
 
         assert_eq!(
@@ -375,7 +384,7 @@ experimental:
             "конфиг обязан остаться полным"
         );
 
-        let effective = crate::render::effective::effective(None, None).unwrap();
+        let effective = crate::render::effective::ConfigRenderer::effective(None, None).unwrap();
         assert_eq!(effective.mode, step, "режим читается из собранного конфига");
         let (ok, log) = core_accepts(&effective.yaml);
         assert!(ok, "ядро отвергло конфиг в режиме {step:?}:\n{log}");
@@ -389,39 +398,39 @@ experimental:
 #[ignore]
 async fn live_core_routes_through_the_alias() {
     sandbox("core");
-    migrate::run().unwrap();
+    Migration::run().unwrap();
     // В local: на машине разработчика в `advanced.yaml` может стоять TUN, а прав
     // у обычного прогона нет — проверка не про режим перехвата.
-    mode::write(Mode::Local).unwrap();
+    Mode::write(Mode::Local).unwrap();
 
-    let supervisor = Supervisor::new();
-    let effective = crate::render::effective::effective(None, None).unwrap();
-    if let Err(why) = supervisor.start(&effective).await {
+    let mihomo = Mihomo::new();
+    let effective = crate::render::effective::ConfigRenderer::effective(None, None).unwrap();
+    if let Err(why) = mihomo.start(&effective).await {
         panic!(
             "ядро не поднялось: {why:?}\n{}",
-            supervisor.logs().join("\n")
+            mihomo.log().lines().join("\n")
         );
     }
-    let _guard = Running(&supervisor);
+    let _guard = Running(&mihomo);
 
-    let status = supervisor.status();
+    let status = mihomo.status();
     assert!(status.running);
     assert_eq!(status.mode, Some(Mode::Local));
     let port = status.port.expect("в local-режиме порт обязан быть");
     println!("ядро поднялось на 127.0.0.1:{port}");
 
-    let nodes = crate::nodes::source_catalog::nodes();
+    let nodes = crate::nodes::source_catalog::SourceCatalog::nodes();
     assert!(!nodes.is_empty(), "источники есть, а узлов нет");
     println!("узлов в источниках: {}", nodes.len());
 
     // Главная проверка D-053: ядро знает нашу автогруппу. На несуществующее имя оно
     // отвечает 400, поэтому успех здесь и означает, что группа собралась.
-    supervisor
+    mihomo
         .select(crate::config::direction::AUTO)
         .await
         .expect("ядро не знает AUTO — автогруппа не собралась");
     assert_eq!(
-        supervisor.selected().await.as_deref(),
+        mihomo.selected().await.as_deref(),
         Some(crate::config::direction::AUTO),
         "псевдоним не переключился на автовыбор"
     );
@@ -434,12 +443,9 @@ async fn live_core_routes_through_the_alias() {
     // мёртв, и падать из-за чужого сервера проверка не должна — она про переключение.
     let mut through_node = None;
     for node in nodes.iter().take(4) {
-        supervisor
-            .select(&node.name)
-            .await
-            .expect("узел не выбрался");
+        mihomo.select(&node.name).await.expect("узел не выбрался");
         assert_eq!(
-            supervisor.selected().await.as_deref(),
+            mihomo.selected().await.as_deref(),
             Some(node.name.as_str()),
             "псевдоним не переключился на узел"
         );
@@ -457,7 +463,7 @@ async fn live_core_routes_through_the_alias() {
         "ни один из четырёх узлов не ответил — проверять переключение не на чем"
     );
 
-    let traffic = supervisor
+    let traffic = mihomo
         .traffic()
         .await
         .unwrap()
@@ -479,7 +485,7 @@ async fn live_core_routes_through_the_alias() {
 #[ignore]
 async fn live_tun_captures_everything() {
     assert!(
-        crate::system::elevation::is_elevated(),
+        crate::system::elevation::Elevation::is_elevated(),
         "TUN без прав администратора не поднимется — запустите тест из поднятой консоли"
     );
 
@@ -487,20 +493,20 @@ async fn live_tun_captures_everything() {
     let before = external_ip(None).await;
 
     sandbox("tun");
-    migrate::run().unwrap();
-    mode::write(Mode::Tun).unwrap();
+    Migration::run().unwrap();
+    Mode::write(Mode::Tun).unwrap();
 
-    let supervisor = Supervisor::new();
-    let effective = crate::render::effective::effective(None, None).unwrap();
-    if let Err(why) = supervisor.start(&effective).await {
+    let mihomo = Mihomo::new();
+    let effective = crate::render::effective::ConfigRenderer::effective(None, None).unwrap();
+    if let Err(why) = mihomo.start(&effective).await {
         panic!(
             "ядро не поднялось: {why:?}\n{}",
-            supervisor.logs().join("\n")
+            mihomo.log().lines().join("\n")
         );
     }
-    let _guard = Running(&supervisor);
+    let _guard = Running(&mihomo);
 
-    let status = supervisor.status();
+    let status = mihomo.status();
     assert_eq!(status.mode, Some(Mode::Tun));
     assert_eq!(
         status.port, None,
@@ -529,30 +535,32 @@ async fn live_tun_captures_everything() {
 #[ignore]
 async fn live_speed_through_the_tunnel() {
     sandbox("speed");
-    migrate::run().unwrap();
+    Migration::run().unwrap();
     // В local: на машине разработчика в `advanced.yaml` может стоять TUN, а прав
     // у обычного прогона нет — проверка не про режим перехвата.
-    mode::write(Mode::Local).unwrap();
+    Mode::write(Mode::Local).unwrap();
 
-    let supervisor = Supervisor::new();
-    let effective = crate::render::effective::effective(None, None).unwrap();
-    if let Err(why) = supervisor.start(&effective).await {
+    let mihomo = Mihomo::new();
+    let effective = crate::render::effective::ConfigRenderer::effective(None, None).unwrap();
+    if let Err(why) = mihomo.start(&effective).await {
         panic!(
             "ядро не поднялось: {why:?}
 {}",
-            supervisor.logs().join(
+            mihomo.log().lines().join(
                 "
 "
             )
         );
     }
-    let _guard = Running(&supervisor);
-    let port = supervisor
+    let _guard = Running(&mihomo);
+    let port = mihomo
         .status()
         .port
         .expect("в режиме Proxy порт обязан быть");
 
-    let report = crate::diag::speed::measure(Some(port)).await.unwrap();
+    let report = crate::diag::speed::SpeedProbe::measure(Some(port))
+        .await
+        .unwrap();
     for line in &report.lines {
         println!("{:?} {}", line.tone, line.text);
     }
@@ -583,13 +591,13 @@ async fn live_speed_through_the_tunnel() {
 #[ignore]
 async fn live_tun_stacks() {
     assert!(
-        crate::system::elevation::is_elevated(),
+        crate::system::elevation::Elevation::is_elevated(),
         "адаптер без прав администратора не создать — запустите тест из поднятой консоли"
     );
     sandbox("tun-stacks");
-    migrate::run().unwrap();
+    Migration::run().unwrap();
 
-    let report = crate::diag::tun::stacks(None).await.unwrap();
+    let report = crate::diag::tun::TunProbe::stacks(None).await.unwrap();
     for line in &report.lines {
         println!("{:?} {}", line.tone, line.text);
     }
@@ -619,36 +627,39 @@ async fn live_tun_stacks() {
 #[ignore]
 async fn live_dns_leak_under_tun() {
     assert!(
-        crate::system::elevation::is_elevated(),
+        crate::system::elevation::Elevation::is_elevated(),
         "TUN без прав администратора не поднимется — запустите тест из поднятой консоли"
     );
     sandbox("dns-leak");
-    migrate::run().unwrap();
-    let physical = crate::system::net::physical_resolvers().unwrap();
+    Migration::run().unwrap();
+    let physical = crate::system::net::NetInfo::physical_resolvers().unwrap();
     assert!(
         !physical.is_empty(),
         "Windows не назвала DNS поднятого физического адаптера — проверять утечку не на чем"
     );
-    mode::write(Mode::Tun).unwrap();
+    Mode::write(Mode::Tun).unwrap();
 
-    let supervisor = Supervisor::new();
-    let effective = crate::render::effective::effective(None, None).unwrap();
-    if let Err(why) = supervisor.start(&effective).await {
+    let mihomo = Mihomo::new();
+    let effective = crate::render::effective::ConfigRenderer::effective(None, None).unwrap();
+    if let Err(why) = mihomo.start(&effective).await {
         panic!(
             "ядро не поднялось: {why:?}
 {}",
-            supervisor.logs().join(
+            mihomo.log().lines().join(
                 "
 "
             )
         );
     }
-    let _guard = Running(&supervisor);
+    let _guard = Running(&mihomo);
 
-    let report =
-        crate::diag::dns::leak_report_with(Some("tun"), Duration::from_millis(1500), &physical)
-            .await
-            .unwrap();
+    let report = crate::diag::dns::DnsProbe::leak_report_with(
+        Some("tun"),
+        Duration::from_millis(1500),
+        &physical,
+    )
+    .await
+    .unwrap();
     for line in &report.lines {
         println!("{:?} {}", line.tone, line.text);
     }
@@ -669,19 +680,19 @@ async fn live_dns_leak_under_tun() {
 #[ignore]
 async fn live_a_user_set_routes_through_its_own_group() {
     sandbox("group");
-    migrate::run().unwrap();
+    Migration::run().unwrap();
     // В local: на машине разработчика в `advanced.yaml` может стоять TUN, а прав
     // у обычного прогона нет — проверка не про режим перехвата.
-    mode::write(Mode::Local).unwrap();
+    Mode::write(Mode::Local).unwrap();
 
-    let sources = crate::nodes::sources::list();
+    let sources = crate::nodes::sources::SourceStore::list();
     assert!(
         !sources.is_empty(),
         "нет источников — группе не из чего брать"
     );
 
     let state = crate::app::state::AppState::new();
-    let preset = state.new_preset().unwrap();
+    let preset = state.presets.create().unwrap();
 
     let groups = format!(
         "proxy-groups:
@@ -693,8 +704,8 @@ async fn live_a_user_set_routes_through_its_own_group() {
 ",
         sources[0].id
     );
-    files::write(files::GROUPS, &groups).unwrap();
-    files::write(
+    Documents::write(files::GROUPS, &groups).unwrap();
+    Documents::write(
         &format!("rules/{}", preset.id),
         "rules:
   - MATCH,Своя
@@ -702,11 +713,14 @@ async fn live_a_user_set_routes_through_its_own_group() {
     )
     .unwrap();
     // Применить — отдельное действие (D-071): правка набора его не включает.
-    state.select_preset(&preset.id).unwrap();
-    assert_eq!(state.settings().direction, Direction::Rules);
+    state.presets.choose(&state, &preset.id).unwrap();
+    assert_eq!(state.settings.get().direction, Direction::Rules);
 
-    let effective =
-        crate::render::effective::effective(state.routing().unwrap().as_deref(), None).unwrap();
+    let effective = crate::render::effective::ConfigRenderer::effective(
+        state.routing.rules(&state).unwrap().as_deref(),
+        None,
+    )
+    .unwrap();
     assert!(
         effective.yaml.contains("MATCH,Своя"),
         "правило пользователя обязано доехать до сборки"
@@ -718,20 +732,20 @@ async fn live_a_user_set_routes_through_its_own_group() {
 {log}"
     );
 
-    let supervisor = Supervisor::new();
-    if let Err(why) = supervisor.start(&effective).await {
+    let mihomo = Mihomo::new();
+    if let Err(why) = mihomo.start(&effective).await {
         panic!(
             "ядро не поднялось: {why:?}
 {}",
-            supervisor.logs().join(
+            mihomo.log().lines().join(
                 "
 "
             )
         );
     }
-    let _guard = Running(&supervisor);
+    let _guard = Running(&mihomo);
 
-    let port = supervisor.status().port.unwrap();
+    let port = mihomo.status().port.unwrap();
     println!(
         "через свою группу внешний адрес: {}",
         external_ip(Some(port)).await
@@ -746,27 +760,33 @@ async fn live_a_user_set_routes_through_its_own_group() {
 #[ignore]
 async fn live_direction_decides_whether_the_set_is_used() {
     sandbox("sets");
-    migrate::run().unwrap();
+    Migration::run().unwrap();
     // В local: на машине разработчика в `advanced.yaml` может стоять TUN, а прав
     // у обычного прогона нет — проверка не про режим перехвата.
-    mode::write(Mode::Local).unwrap();
+    Mode::write(Mode::Local).unwrap();
 
     let state = crate::app::state::AppState::new();
     let mine = "rules:\n  - MATCH,DIRECT\n";
 
     // Набор завёл переезд: без единого набора разделу нечего показывать.
-    let preset = crate::config::presets::list()
+    let preset = crate::config::presets::PresetStore::list()
         .first()
         .expect("переезд обязан был завести первый набор")
         .id
         .clone();
-    crate::config::presets::write(&preset, "rules", mine).unwrap();
+    crate::config::presets::PresetStore::write(&preset, "rules", mine).unwrap();
 
     // Вне RULES набор не участвует: в сборке то, что клиент собирает сам.
-    state.set_direction(Direction::Auto, None).unwrap();
-    let yaml = crate::render::effective::effective(state.routing().unwrap().as_deref(), None)
-        .unwrap()
-        .yaml;
+    state
+        .routing
+        .set_direction(&state, Direction::Auto, None)
+        .unwrap();
+    let yaml = crate::render::effective::ConfigRenderer::effective(
+        state.routing.rules(&state).unwrap().as_deref(),
+        None,
+    )
+    .unwrap()
+    .yaml;
     assert!(
         yaml.contains("MATCH,umiray"),
         "вне RULES маршрут собирает клиент:\n{yaml}"
@@ -777,15 +797,18 @@ async fn live_direction_decides_whether_the_set_is_used() {
     );
 
     // Применили — участвует, и текст остался ровно тем же.
-    state.select_preset(&preset).unwrap();
+    state.presets.choose(&state, &preset).unwrap();
     assert_eq!(
-        crate::config::presets::read(&preset, "rules").unwrap(),
+        crate::config::presets::PresetStore::read(&preset, "rules").unwrap(),
         mine,
         "набор обязан лежать слово в слово, что бы ни делало направление"
     );
-    let yaml = crate::render::effective::effective(state.routing().unwrap().as_deref(), None)
-        .unwrap()
-        .yaml;
+    let yaml = crate::render::effective::ConfigRenderer::effective(
+        state.routing.rules(&state).unwrap().as_deref(),
+        None,
+    )
+    .unwrap()
+    .yaml;
     assert!(
         yaml.contains("MATCH,DIRECT"),
         "применённый набор обязан доехать до сборки:\n{yaml}"
@@ -798,11 +821,17 @@ async fn live_direction_decides_whether_the_set_is_used() {
         Direction::Manual,
         Direction::Rules,
     ] {
-        state.set_direction(direction, None).unwrap();
+        state
+            .routing
+            .set_direction(&state, direction, None)
+            .unwrap();
         let (ok, log) = core_accepts(
-            &crate::render::effective::effective(state.routing().unwrap().as_deref(), None)
-                .unwrap()
-                .yaml,
+            &crate::render::effective::ConfigRenderer::effective(
+                state.routing.rules(&state).unwrap().as_deref(),
+                None,
+            )
+            .unwrap()
+            .yaml,
         );
         assert!(
             ok,
@@ -819,51 +848,61 @@ async fn live_direction_decides_whether_the_set_is_used() {
 #[ignore]
 async fn live_directions_change_the_exit() {
     sandbox("exit");
-    migrate::run().unwrap();
+    Migration::run().unwrap();
     // В local: на машине разработчика в `advanced.yaml` может стоять TUN, а прав
     // у обычного прогона нет — проверка не про режим перехвата.
-    mode::write(Mode::Local).unwrap();
+    Mode::write(Mode::Local).unwrap();
 
     // Ядро поднимает **тот же** супервизор, что держит состояние: направление наводит
     // псевдоним через него, и отдельно созданный второй просто ничего бы не сделал.
     let state = crate::app::state::AppState::new();
-    state.set_direction(Direction::Auto, None).unwrap();
-    let effective =
-        crate::render::effective::effective(state.routing().unwrap().as_deref(), None).unwrap();
-    if let Err(why) = state.supervisor.start(&effective).await {
+    state
+        .routing
+        .set_direction(&state, Direction::Auto, None)
+        .unwrap();
+    let effective = crate::render::effective::ConfigRenderer::effective(
+        state.routing.rules(&state).unwrap().as_deref(),
+        None,
+    )
+    .unwrap();
+    if let Err(why) = state.mihomo.start(&effective).await {
         panic!(
             "ядро не поднялось: {why:?}
 {}",
-            state.supervisor.logs().join(
+            state.mihomo.log().lines().join(
                 "
 "
             )
         );
     }
-    let _guard = Running(&state.supervisor);
+    let _guard = Running(&state.mihomo);
     let port = state
-        .supervisor
+        .mihomo
         .status()
         .port
         .expect("в local-режиме порт обязан быть");
 
-    state.point_alias().await.unwrap();
+    state.routing.point_alias(&state).await.unwrap();
     let through_auto = external_ip(Some(port)).await;
     println!("AUTO: {through_auto}");
 
     // Перебираем несколько узлов: мёртвый сервер подписки — не повод валить проверку,
     // она про переключение направления, а не про чужой аптайм.
     let mut through_node = None;
-    for node in crate::nodes::source_catalog::nodes().into_iter().take(4) {
+    for node in crate::nodes::source_catalog::SourceCatalog::nodes()
+        .into_iter()
+        .take(4)
+    {
         state
-            .set_direction(Direction::Manual, Some(node.name.clone()))
+            .routing
+            .set_direction(&state, Direction::Manual, Some(node.name.clone()))
             .unwrap();
         // Настройку записали — теперь скажите об этом ядру. Без этого проверка утверждает
         // про действие, которого не совершала: псевдоним остаётся там, куда его навели
         // в прошлый раз, и «MANUAL» с «DIRECT» отвечают адресом от `AUTO`.
         // Руками — потому что здесь нет `AppHandle`. В настоящей жизни эту строку делает
         // `connect::apply`, и то, что она там есть, сторожит ui-check, а не эта проверка.
-        state.point_alias().await.unwrap();
+        state.routing.point_alias(&state).await.unwrap();
         match try_external_ip(Some(port)).await {
             Ok(ip) => {
                 println!("MANUAL «{}»: {ip}", node.name);
@@ -875,8 +914,11 @@ async fn live_directions_change_the_exit() {
     }
     let through_node = through_node.expect("ни один узел не ответил");
 
-    state.set_direction(Direction::Direct, None).unwrap();
-    state.point_alias().await.unwrap();
+    state
+        .routing
+        .set_direction(&state, Direction::Direct, None)
+        .unwrap();
+    state.routing.point_alias(&state).await.unwrap();
     let direct = external_ip(Some(port)).await;
     assert_ne!(
         direct, through_auto,
@@ -898,11 +940,11 @@ async fn live_source_set_changes_reach_the_generated_groups() {
     let app = sandbox("sources-reach-auto");
     // В local: на машине разработчика в `advanced.yaml` может стоять TUN, а прав
     // у обычного прогона нет — проверка не про режим перехвата.
-    mode::write(Mode::Local).unwrap();
+    Mode::write(Mode::Local).unwrap();
     println!("песочница: {}", app.display());
 
-    migrate::run().unwrap();
-    let before: Vec<String> = crate::nodes::sources::list()
+    Migration::run().unwrap();
+    let before: Vec<String> = crate::nodes::sources::SourceStore::list()
         .into_iter()
         .map(|s| s.id)
         .collect();
@@ -919,16 +961,16 @@ async fn live_source_set_changes_reach_the_generated_groups() {
             .cloned()
             .collect()
     };
-    let groups = crate::render::effective::effective(None, None)
+    let groups = crate::render::effective::ConfigRenderer::effective(None, None)
         .unwrap()
         .yaml;
     assert_eq!(used(&groups).len(), before.len(), "сначала все на месте");
 
     // Удаляем один источник — и **ничего не пересобираем**: пересобирать нечего.
     let gone = before[0].clone();
-    crate::nodes::sources::delete(&gone).unwrap();
+    crate::nodes::sources::SourceStore::delete(&gone).unwrap();
 
-    let groups = crate::render::effective::effective(None, None)
+    let groups = crate::render::effective::ConfigRenderer::effective(None, None)
         .unwrap()
         .yaml;
     assert!(
@@ -937,7 +979,7 @@ async fn live_source_set_changes_reach_the_generated_groups() {
 {groups}"
     );
 
-    let yaml = crate::render::effective::effective(None, None)
+    let yaml = crate::render::effective::ConfigRenderer::effective(None, None)
         .unwrap()
         .yaml;
     let (ok, log) = core_accepts(&yaml);
@@ -965,42 +1007,49 @@ async fn live_proxy_ping_goes_through_the_core() {
     use crate::nodes::ping::Method;
 
     sandbox("ping-proxy");
-    migrate::run().unwrap();
+    Migration::run().unwrap();
     // В local: на машине разработчика в `advanced.yaml` может стоять TUN, а прав
     // у обычного прогона нет — проверка не про режим перехвата.
-    mode::write(Mode::Local).unwrap();
+    Mode::write(Mode::Local).unwrap();
 
     let state = crate::app::state::AppState::new();
-    crate::app::client::set_ping(Method::Proxy).unwrap();
+    crate::app::client::ClientConfig::set_ping(Method::Proxy).unwrap();
     assert!(
-        !crate::nodes::sources::list().is_empty(),
+        !crate::nodes::sources::SourceStore::list().is_empty(),
         "нет источников — мерить нечего"
     );
 
     // На остановленном ядре замер обязан отказать словами, а не оставить прочерки молча.
-    let refused = state.measure().await;
+    let refused = state.catalog.measure(&state).await;
     assert!(refused.is_err(), "через прокси без ядра мерить нечем");
     println!("без ядра: {}", refused.unwrap_err());
 
-    let effective =
-        crate::render::effective::effective(state.routing().unwrap().as_deref(), None).unwrap();
-    if let Err(why) = state.supervisor.start(&effective).await {
+    let effective = crate::render::effective::ConfigRenderer::effective(
+        state.routing.rules(&state).unwrap().as_deref(),
+        None,
+    )
+    .unwrap();
+    if let Err(why) = state.mihomo.start(&effective).await {
         panic!(
             "ядро не поднялось: {why:?}
 {}",
-            state.supervisor.logs().join(
+            state.mihomo.log().lines().join(
                 "
 "
             )
         );
     }
-    let _guard = Running(&state.supervisor);
+    let _guard = Running(&state.mihomo);
 
     let started = std::time::Instant::now();
-    state.measure().await.expect("замер через прокси не прошёл");
+    state
+        .catalog
+        .measure(&state)
+        .await
+        .expect("замер через прокси не прошёл");
     let spent = started.elapsed();
 
-    let nodes = state.nodes();
+    let nodes = state.catalog.nodes();
     let measured: Vec<_> = nodes.iter().filter(|node| node.delay.is_some()).collect();
     let through: Vec<_> = measured
         .iter()
@@ -1051,19 +1100,19 @@ async fn live_probe_listener_measures_a_chosen_node() {
     const SECRET: &str = "spike";
 
     sandbox("probe");
-    migrate::run().unwrap();
+    Migration::run().unwrap();
     // В local: на машине разработчика в `advanced.yaml` может стоять TUN, а прав
     // у обычного прогона нет — проверка не про режим перехвата.
-    mode::write(Mode::Local).unwrap();
+    Mode::write(Mode::Local).unwrap();
 
     // Конфиг: обычный собранный плюс служебный вход и группа под него.
-    let mut map = top_mapping(
-        &crate::render::effective::effective(None, None)
+    let mut map = Yaml::top_mapping(
+        &crate::render::effective::ConfigRenderer::effective(None, None)
             .unwrap()
             .yaml,
     )
     .unwrap();
-    let sources: Vec<Value> = crate::nodes::sources::list()
+    let sources: Vec<Value> = crate::nodes::sources::SourceStore::list()
         .into_iter()
         .map(|source| Value::from(source.id))
         .collect();
@@ -1099,18 +1148,18 @@ async fn live_probe_listener_measures_a_chosen_node() {
 
     // Ядро поднимаем сами: супервизор про служебные входы ничего не знает, а спайку
     // и не нужно, чтобы знал.
-    paths::ensure_run_dir().unwrap();
-    std::fs::write(paths::effective_config(), &yaml).unwrap();
-    let core = std::process::Command::new(paths::core())
+    Paths::ensure_run_dir().unwrap();
+    std::fs::write(Paths::effective_config(), &yaml).unwrap();
+    let core = std::process::Command::new(Paths::core())
         .arg("-d")
-        .arg(paths::run_dir())
+        .arg(Paths::run_dir())
         .arg("-f")
-        .arg(paths::effective_config())
+        .arg(Paths::effective_config())
         .arg("-ext-ctl")
         .arg(format!("127.0.0.1:{API}"))
         .arg("-secret")
         .arg(SECRET)
-        .env("SAFE_PATHS", paths::sources_dir())
+        .env("SAFE_PATHS", Paths::sources_dir())
         .spawn()
         .expect("ядро не запустилось");
     struct Kill(std::process::Child);
@@ -1236,19 +1285,21 @@ async fn live_keepalive_ping_measures_through_our_own_tunnel() {
     use crate::nodes::ping::Method;
 
     sandbox("ping-keepalive");
-    migrate::run().unwrap();
+    Migration::run().unwrap();
     // В local: на машине разработчика в `advanced.yaml` может стоять TUN, а прав
     // у обычного прогона нет — проверка не про режим перехвата.
-    mode::write(Mode::Local).unwrap();
+    Mode::write(Mode::Local).unwrap();
 
     let state = crate::app::state::AppState::new();
-    crate::app::client::set_ping(Method::ProxyKeepalive).unwrap();
+    crate::app::client::ClientConfig::set_ping(Method::ProxyKeepalive).unwrap();
 
     // Порт служебного входа выбирает запуск — повторяем то же, что делает `connect::start`.
-    let probe = crate::core::free_port().unwrap();
-    let effective =
-        crate::render::effective::effective(state.routing().unwrap().as_deref(), Some(probe))
-            .unwrap();
+    let probe = crate::core::Ports::free_port().unwrap();
+    let effective = crate::render::effective::ConfigRenderer::effective(
+        state.routing.rules(&state).unwrap().as_deref(),
+        Some(probe),
+    )
+    .unwrap();
     assert_eq!(
         effective.probe,
         Some(probe),
@@ -1261,28 +1312,32 @@ async fn live_keepalive_ping_measures_through_our_own_tunnel() {
 {log}"
     );
 
-    if let Err(why) = state.supervisor.start(&effective).await {
+    if let Err(why) = state.mihomo.start(&effective).await {
         panic!(
             "ядро не поднялось: {why:?}
 {}",
-            state.supervisor.logs().join(
+            state.mihomo.log().lines().join(
                 "
 "
             )
         );
     }
-    let _guard = Running(&state.supervisor);
+    let _guard = Running(&state.mihomo);
     assert_eq!(
-        state.supervisor.probe_port(),
+        state.mihomo.probe_port(),
         Some(probe),
         "супервизор обязан помнить порт входа: без него мерить некуда"
     );
 
     let started = std::time::Instant::now();
-    state.measure().await.expect("замер не прошёл");
+    state
+        .catalog
+        .measure(&state)
+        .await
+        .expect("замер не прошёл");
     let spent = started.elapsed();
 
-    let nodes = state.nodes();
+    let nodes = state.catalog.nodes();
     let tunnelled: Vec<_> = nodes
         .iter()
         .filter(|node| node.method == Some(Method::ProxyKeepalive) && !node.fallback)
@@ -1337,7 +1392,7 @@ impl RegistryGuard {
         let values = names
             .iter()
             .map(|name| {
-                let read = crate::system::registry::read_string(subkey, name).unwrap();
+                let read = crate::system::registry::Registry::read_string(subkey, name).unwrap();
                 (*name, read.map(RegistryValue::Text))
             })
             .collect();
@@ -1345,7 +1400,7 @@ impl RegistryGuard {
     }
 
     fn with_number(mut self, name: &'static str) -> Self {
-        let read = crate::system::registry::read_dword(self.subkey, name).unwrap();
+        let read = crate::system::registry::Registry::read_dword(self.subkey, name).unwrap();
         self.values.push((name, read.map(RegistryValue::Number)));
         self
     }
@@ -1353,14 +1408,13 @@ impl RegistryGuard {
 
 impl Drop for RegistryGuard {
     fn drop(&mut self) {
-        use crate::system::registry;
         for (name, value) in &self.values {
             let restored = match value {
-                Some(RegistryValue::Text(text)) => registry::write_string(self.subkey, name, text),
+                Some(RegistryValue::Text(text)) => Registry::write_string(self.subkey, name, text),
                 Some(RegistryValue::Number(number)) => {
-                    registry::write_dword(self.subkey, name, *number)
+                    Registry::write_dword(self.subkey, name, *number)
                 }
-                None => registry::delete_value(self.subkey, name),
+                None => Registry::delete_value(self.subkey, name),
             };
             restored.expect("сырое состояние реестра обязано вернуться");
         }
@@ -1372,11 +1426,11 @@ fn proxy_key() -> &'static str {
 }
 
 fn proxy_value(name: &str) -> Option<String> {
-    crate::system::registry::read_string(proxy_key(), name).unwrap()
+    crate::system::registry::Registry::read_string(proxy_key(), name).unwrap()
 }
 
 fn proxy_enabled() -> u32 {
-    crate::system::registry::read_dword(proxy_key(), "ProxyEnable")
+    crate::system::registry::Registry::read_dword(proxy_key(), "ProxyEnable")
         .unwrap()
         .unwrap_or(0)
 }
@@ -1386,8 +1440,6 @@ fn proxy_enabled() -> u32 {
 #[test]
 #[ignore]
 fn live_system_proxy_reaches_the_registry_and_gives_it_back() {
-    use crate::system::sysproxy;
-
     let _guard = RegistryGuard::text(proxy_key(), &["ProxyServer", "ProxyOverride"])
         .with_number("ProxyEnable");
 
@@ -1396,12 +1448,13 @@ fn live_system_proxy_reaches_the_registry_and_gives_it_back() {
     // не с чем сверять.
     let foreign = "127.0.0.1:2080";
     let foreign_bypass = "*.corp.example;<local>";
-    crate::system::registry::write_string(proxy_key(), "ProxyServer", foreign).unwrap();
-    crate::system::registry::write_string(proxy_key(), "ProxyOverride", foreign_bypass).unwrap();
-    crate::system::registry::write_dword(proxy_key(), "ProxyEnable", 1).unwrap();
+    crate::system::registry::Registry::write_string(proxy_key(), "ProxyServer", foreign).unwrap();
+    crate::system::registry::Registry::write_string(proxy_key(), "ProxyOverride", foreign_bypass)
+        .unwrap();
+    crate::system::registry::Registry::write_dword(proxy_key(), "ProxyEnable", 1).unwrap();
 
     let ours = "127.0.0.1:3090";
-    let backup = sysproxy::enable(ours).unwrap();
+    let backup = WinProxy::enable(ours).unwrap();
 
     assert_eq!(proxy_enabled(), 1, "ProxyEnable не встал");
     assert_eq!(
@@ -1415,9 +1468,9 @@ fn live_system_proxy_reaches_the_registry_and_gives_it_back() {
             .contains("127.*"),
         "петля не в исключениях: окно не достучится до external-controller"
     );
-    assert!(sysproxy::is_ours(ours), "свою запись обязаны узнавать");
+    assert!(WinProxy::is_ours(ours), "свою запись обязаны узнавать");
 
-    sysproxy::restore(&backup).unwrap();
+    WinProxy::restore(&backup).unwrap();
 
     assert_eq!(
         proxy_enabled(),
@@ -1436,10 +1489,11 @@ fn live_system_proxy_reaches_the_registry_and_gives_it_back() {
     );
 
     // Второе правило D-047: пока мы работали, прокси сменил кто-то третий.
-    let backup = sysproxy::enable(ours).unwrap();
+    let backup = WinProxy::enable(ours).unwrap();
     let third_party = "127.0.0.1:9999";
-    crate::system::registry::write_string(proxy_key(), "ProxyServer", third_party).unwrap();
-    sysproxy::restore(&backup).unwrap();
+    crate::system::registry::Registry::write_string(proxy_key(), "ProxyServer", third_party)
+        .unwrap();
+    WinProxy::restore(&backup).unwrap();
     assert_eq!(
         proxy_value("ProxyServer").as_deref(),
         Some(third_party),
@@ -1458,8 +1512,8 @@ fn live_autostart_writes_and_removes_its_run_entry() {
     let run = r"Software\Microsoft\Windows\CurrentVersion\Run";
     let _guard = RegistryGuard::text(run, &["umiray"]);
 
-    autostart::set(true).unwrap();
-    let written = crate::system::registry::read_string(run, "umiray")
+    Autostart::set(true).unwrap();
+    let written = crate::system::registry::Registry::read_string(run, "umiray")
         .unwrap()
         .expect("записи автозапуска нет — тумблер не работает");
     assert!(
@@ -1470,18 +1524,18 @@ fn live_autostart_writes_and_removes_its_run_entry() {
         written.to_lowercase().contains(".exe"),
         "в автозапуск попал не бинарь: {written}"
     );
-    assert!(autostart::enabled(), "запись есть, а окно её не видит");
+    assert!(Autostart::enabled(), "запись есть, а окно её не видит");
 
-    autostart::set(false).unwrap();
+    Autostart::set(false).unwrap();
     assert!(
-        crate::system::registry::read_string(run, "umiray")
+        crate::system::registry::Registry::read_string(run, "umiray")
             .unwrap()
             .is_none(),
         "запись осталась после выключения"
     );
-    assert!(!autostart::enabled());
+    assert!(!Autostart::enabled());
 
-    autostart::set(false).expect("повторное выключение — не ошибка, значения и так нет");
+    Autostart::set(false).expect("повторное выключение — не ошибка, значения и так нет");
 }
 
 /// Запрос мимо любого прокси — базовая линия «как машина ходит сама».
@@ -1550,32 +1604,30 @@ async fn ip_via_system_proxy() -> std::result::Result<String, String> {
 #[tokio::test]
 #[ignore]
 async fn live_system_proxy_actually_redirects_a_foreign_client() {
-    use crate::system::sysproxy;
-
     sandbox("sysproxy");
-    migrate::run().unwrap();
+    Migration::run().unwrap();
     // В local: на машине разработчика в `advanced.yaml` может стоять TUN, а прав
     // у обычного прогона нет — проверка не про режим перехвата.
-    mode::write(Mode::Local).unwrap();
+    Mode::write(Mode::Local).unwrap();
 
     let home = direct_ip().await;
     println!("домашний адрес: {home}");
 
-    let supervisor = Supervisor::new();
-    let effective = crate::render::effective::effective(None, None).unwrap();
-    if let Err(why) = supervisor.start(&effective).await {
+    let mihomo = Mihomo::new();
+    let effective = crate::render::effective::ConfigRenderer::effective(None, None).unwrap();
+    if let Err(why) = mihomo.start(&effective).await {
         panic!(
             "ядро не поднялось: {why:?}\n{}",
-            supervisor.logs().join("\n")
+            mihomo.log().lines().join("\n")
         );
     }
-    let _running = Running(&supervisor);
-    let port = supervisor
+    let _running = Running(&mihomo);
+    let port = mihomo
         .status()
         .port
         .expect("в local-режиме порт обязан быть");
 
-    supervisor
+    mihomo
         .select(crate::config::direction::AUTO)
         .await
         .expect("автогруппа не собралась");
@@ -1584,7 +1636,7 @@ async fn live_system_proxy_actually_redirects_a_foreign_client() {
         .with_number("ProxyEnable");
 
     let address = format!("127.0.0.1:{port}");
-    let backup = sysproxy::enable(&address).unwrap();
+    let backup = WinProxy::enable(&address).unwrap();
     println!("системный прокси включён на {address}");
 
     let through = ip_via_system_proxy()
@@ -1594,7 +1646,7 @@ async fn live_system_proxy_actually_redirects_a_foreign_client() {
 
     // Возврат делаем до утверждений: провалившаяся проверка не должна оставлять
     // машину с чужим прокси даже на время печати сообщения.
-    sysproxy::restore(&backup).unwrap();
+    WinProxy::restore(&backup).unwrap();
 
     assert_ne!(
         through, home,
@@ -1624,34 +1676,34 @@ async fn live_kill_switch_locks_the_way_out_and_gives_it_back() {
     use crate::system::killswitch;
 
     assert!(
-        crate::system::elevation::is_elevated(),
+        crate::system::elevation::Elevation::is_elevated(),
         "нужны права администратора: правила брандмауэра иначе не поставить"
     );
 
     sandbox("killswitch");
-    migrate::run().unwrap();
-    mode::write(Mode::Tun).unwrap();
+    Migration::run().unwrap();
+    Mode::write(Mode::Tun).unwrap();
 
     let home = direct_ip().await;
     println!("домашний адрес: {home}");
 
-    let supervisor = Supervisor::new();
-    let effective = crate::render::effective::effective(None, None).unwrap();
-    if let Err(why) = supervisor.start(&effective).await {
+    let mihomo = Mihomo::new();
+    let effective = crate::render::effective::ConfigRenderer::effective(None, None).unwrap();
+    if let Err(why) = mihomo.start(&effective).await {
         panic!(
             "ядро не поднялось: {why:?}\n{}",
-            supervisor.logs().join("\n")
+            mihomo.log().lines().join("\n")
         );
     }
-    let _running = Running(&supervisor);
-    assert_eq!(supervisor.status().mode, Some(Mode::Tun));
-    supervisor
+    let _running = Running(&mihomo);
+    assert_eq!(mihomo.status().mode, Some(Mode::Tun));
+    mihomo
         .select(crate::config::direction::AUTO)
         .await
         .expect("автогруппа не собралась");
 
-    let device = crate::config::mode::tun_device(
-        &top_mapping(&files::read(files::ADVANCED).unwrap()).unwrap(),
+    let device = crate::config::mode::Mode::tun_device(
+        &Yaml::top_mapping(&Documents::read(files::ADVANCED).unwrap()).unwrap(),
     );
     println!("адаптер ядра: {device}");
 
@@ -1659,12 +1711,12 @@ async fn live_kill_switch_locks_the_way_out_and_gives_it_back() {
     struct Unlock(killswitch::Backup);
     impl Drop for Unlock {
         fn drop(&mut self) {
-            killswitch::release(&self.0).expect("сеть обязана вернуться");
+            Firewall::release(&self.0).expect("сеть обязана вернуться");
         }
     }
 
     let через_туннель = {
-        let guard = Unlock(killswitch::engage(&paths::core(), &device).unwrap());
+        let guard = Unlock(Firewall::engage(&Paths::core(), &device).unwrap());
         // Прогон, убитый снаружи (Ctrl+C), до `Drop` не доходит и оставит машину запертой.
         // Печатаем лекарство **по снятому снимку**, а не общими словами: искать его
         // в панике и без интернета будет неоткуда.
@@ -1682,9 +1734,9 @@ async fn live_kill_switch_locks_the_way_out_and_gives_it_back() {
     println!("под защитой при живом ядре: {через_туннель:?}");
 
     // А теперь то, ради чего всё: ядро умирает, адаптер исчезает — и выхода быть не должно.
-    let backup = killswitch::engage(&paths::core(), &device).unwrap();
+    let backup = Firewall::engage(&Paths::core(), &device).unwrap();
     let guard = Unlock(backup);
-    supervisor.stop();
+    mihomo.stop();
     tokio::time::sleep(Duration::from_secs(3)).await;
     let after_death = try_direct_ip().await;
     drop(guard);
@@ -1724,54 +1776,58 @@ async fn live_kill_switch_locks_the_way_out_and_gives_it_back() {
 #[ignore]
 async fn live_kill_switch_heals_itself_after_the_client_dies() {
     use crate::app::state::AppState;
-    use crate::app::status::{engage_kill_switch, release_kill_switch};
     use crate::system::killswitch;
 
     assert!(
-        crate::system::elevation::is_elevated(),
+        crate::system::elevation::Elevation::is_elevated(),
         "нужны права администратора: правила брандмауэра иначе не поставить"
     );
 
     sandbox("killswitch-heal");
-    migrate::run().unwrap();
-    mode::write(Mode::Tun).unwrap();
+    Migration::run().unwrap();
+    Mode::write(Mode::Tun).unwrap();
 
     let home = direct_ip().await;
 
     // Первая жизнь клиента: тумблер включён, TUN поднят, защита встала.
     let doomed = AppState::new();
     doomed
+        .settings
         .patch(crate::app::settings::Patch {
             kill_switch: Some(true),
             ..Default::default()
         })
         .unwrap();
-    let effective = crate::render::effective::effective(None, None).unwrap();
-    if let Err(why) = doomed.supervisor.start(&effective).await {
+    let effective = crate::render::effective::ConfigRenderer::effective(None, None).unwrap();
+    if let Err(why) = doomed.mihomo.start(&effective).await {
         panic!(
             "ядро не поднялось: {why:?}\n{}",
-            doomed.supervisor.logs().join("\n")
+            doomed.mihomo.log().lines().join("\n")
         );
     }
-    assert_eq!(doomed.supervisor.status().mode, Some(Mode::Tun));
-    engage_kill_switch(&doomed).expect("защита должна встать");
+    assert_eq!(doomed.mihomo.status().mode, Some(Mode::Tun));
+    doomed
+        .kill_switch
+        .engage(&doomed, &doomed.mihomo)
+        .expect("защита должна встать");
 
     // Страховка на случай, если проверка развалится посередине: сеть обязана вернуться.
     struct Unlock(killswitch::Backup);
     impl Drop for Unlock {
         fn drop(&mut self) {
-            let _ = killswitch::release(&self.0);
+            let _ = Firewall::release(&self.0);
         }
     }
     let snapshot = doomed
-        .settings()
+        .settings
+        .get()
         .kill_switch_backup
         .expect("защита встала, но снимок на диск не лёг — лечить будет нечем");
     let _safety = Unlock(snapshot);
     println!("защита встала, снимок лежит в settings.json");
 
     // Клиент умирает, не прибравшись.
-    doomed.supervisor.stop();
+    doomed.mihomo.stop();
     drop(doomed);
     tokio::time::sleep(Duration::from_secs(2)).await;
     let while_dead = try_direct_ip().await;
@@ -1779,9 +1835,12 @@ async fn live_kill_switch_heals_itself_after_the_client_dies() {
 
     // Следующий запуск: то же, что делает `setup` в `main.rs`.
     let reborn = AppState::new();
-    let carried = reborn.settings().kill_switch_backup.is_some();
+    let carried = reborn.settings.get().kill_switch_backup.is_some();
     if carried {
-        release_kill_switch(&reborn).expect("защита должна сняться");
+        reborn
+            .kill_switch
+            .release(&reborn)
+            .expect("защита должна сняться");
     }
     let after_restart = try_direct_ip().await;
     println!("после нового запуска: {after_restart:?}");
@@ -1800,7 +1859,7 @@ async fn live_kill_switch_heals_itself_after_the_client_dies() {
         "запуск клиента сеть не вернул: обещание «починить = открыть umiray» не выполняется"
     );
     assert!(
-        reborn.settings().kill_switch_backup.is_none(),
+        reborn.settings.get().kill_switch_backup.is_none(),
         "снимок остался на диске — следующий запуск будет лечить уже здоровое"
     );
 }
@@ -1815,9 +1874,9 @@ async fn live_kill_switch_heals_itself_after_the_client_dies() {
 #[ignore]
 async fn live_a_rule_sends_traffic_through_the_named_node() {
     sandbox("rule-node");
-    migrate::run().unwrap();
+    Migration::run().unwrap();
     // Правило проверяется в local: прав тут не нужно, а маршрут от режима не зависит.
-    mode::write(Mode::Local).unwrap();
+    Mode::write(Mode::Local).unwrap();
 
     let home = direct_ip().await;
     println!("домашний адрес: {home}");
@@ -1825,14 +1884,17 @@ async fn live_a_rule_sends_traffic_through_the_named_node() {
     // Сначала узнаём, какой адрес даёт узел сам по себе: сравнивать правило не с чем,
     // пока неизвестно, куда узел выходит.
     let (name, expected) = {
-        let supervisor = Supervisor::new();
-        let effective = crate::render::effective::effective(None, None).unwrap();
-        supervisor.start(&effective).await.expect("ядро не встало");
-        let _guard = Running(&supervisor);
-        let port = supervisor.status().port.unwrap();
+        let mihomo = Mihomo::new();
+        let effective = crate::render::effective::ConfigRenderer::effective(None, None).unwrap();
+        mihomo.start(&effective).await.expect("ядро не встало");
+        let _guard = Running(&mihomo);
+        let port = mihomo.status().port.unwrap();
         let mut found = None;
-        for node in crate::nodes::source_catalog::nodes().iter().take(6) {
-            if supervisor.select(&node.name).await.is_err() {
+        for node in crate::nodes::source_catalog::SourceCatalog::nodes()
+            .iter()
+            .take(6)
+        {
+            if mihomo.select(&node.name).await.is_err() {
                 continue;
             }
             match try_external_ip(Some(port)).await {
@@ -1849,8 +1911,8 @@ async fn live_a_rule_sends_traffic_through_the_named_node() {
     };
 
     let state = crate::app::state::AppState::new();
-    let preset = state.new_preset().unwrap();
-    files::write(
+    let preset = state.presets.create().unwrap();
+    Documents::write(
         &format!("rules/{}", preset.id),
         &format!(
             "rules:
@@ -1860,20 +1922,23 @@ async fn live_a_rule_sends_traffic_through_the_named_node() {
         ),
     )
     .unwrap();
-    state.select_preset(&preset.id).unwrap();
+    state.presets.choose(&state, &preset.id).unwrap();
 
-    let effective =
-        crate::render::effective::effective(state.routing().unwrap().as_deref(), None).unwrap();
+    let effective = crate::render::effective::ConfigRenderer::effective(
+        state.routing.rules(&state).unwrap().as_deref(),
+        None,
+    )
+    .unwrap();
     let (ok, log) = core_accepts(&effective.yaml);
     assert!(ok, "ядро отвергло правило на узел:\n{log}");
 
-    let supervisor = Supervisor::new();
-    supervisor
+    let mihomo = Mihomo::new();
+    mihomo
         .start(&effective)
         .await
         .expect("ядро не встало с правилом на узел");
-    let _guard = Running(&supervisor);
-    let port = supervisor.status().port.unwrap();
+    let _guard = Running(&mihomo);
+    let port = mihomo.status().port.unwrap();
 
     let through_rule = external_ip(Some(port)).await;
     println!("по правилу на «{name}» внешний адрес: {through_rule}");
@@ -1895,16 +1960,16 @@ async fn live_a_rule_sends_traffic_through_the_named_node() {
 #[tokio::test]
 #[ignore]
 async fn live_the_core_starts_on_what_the_form_wrote() {
-    use crate::config::advanced::{self, Enhanced, LogLevel, Stack};
+    use crate::config::advanced::{Enhanced, LogLevel, Stack};
 
     sandbox("form");
-    migrate::run().unwrap();
+    Migration::run().unwrap();
     // В local: форма пишет и поля TUN, но поднимать туннель ради разбора конфига незачем.
-    mode::write(Mode::Local).unwrap();
+    Mode::write(Mode::Local).unwrap();
 
-    let mut options = advanced::read().unwrap();
+    let mut options = Advanced::read().unwrap();
     // Порт берём свободный, а не круглый: занятый номер уронил бы запуск по чужой причине.
-    let port = crate::core::free_port().unwrap();
+    let port = crate::core::Ports::free_port().unwrap();
     options.mixed_port = port;
     options.stack = Stack::Gvisor;
     options.log_level = LogLevel::Warning;
@@ -1916,25 +1981,25 @@ async fn live_the_core_starts_on_what_the_form_wrote() {
     options.strict_route = true;
     options.sniffer = true;
     options.dns_enable = true;
-    advanced::write(&options).unwrap();
+    Advanced::write(&options).unwrap();
 
-    let back = advanced::read().unwrap();
+    let back = Advanced::read().unwrap();
     assert_eq!(back, options, "форма прочитала не то, что записала");
 
-    let effective = crate::render::effective::effective(None, None).unwrap();
+    let effective = crate::render::effective::ConfigRenderer::effective(None, None).unwrap();
     let (ok, log) = core_accepts(&effective.yaml);
     assert!(ok, "ядро отвергло то, что написала форма:\n{log}");
 
-    let supervisor = Supervisor::new();
-    if let Err(why) = supervisor.start(&effective).await {
+    let mihomo = Mihomo::new();
+    if let Err(why) = mihomo.start(&effective).await {
         panic!(
             "ядро не поднялось на конфиге формы: {why:?}\n{}",
-            supervisor.logs().join("\n")
+            mihomo.log().lines().join("\n")
         );
     }
-    let _guard = Running(&supervisor);
+    let _guard = Running(&mihomo);
     assert_eq!(
-        supervisor.status().port,
+        mihomo.status().port,
         Some(port),
         "ядро слушает не тот порт, который написала форма"
     );
@@ -1950,15 +2015,15 @@ async fn live_the_core_starts_on_what_the_form_wrote() {
 #[ignore]
 async fn live_a_source_the_converter_cannot_read_still_reaches_the_core() {
     sandbox("unreadable");
-    migrate::run().unwrap();
+    Migration::run().unwrap();
     // В local: проверка про сборку источника, а не про режим перехвата.
-    mode::write(Mode::Local).unwrap();
+    Mode::write(Mode::Local).unwrap();
 
     // Ключи — настоящие 32 байта в base64: ядро их разбирает, а до туннеля дело
     // не дойдёт — проверка про сборку и запуск, а не про чужой сервер.
     let key = "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXowMTIzNDU%3D";
     let name = "живой-шов";
-    let source = crate::nodes::source_import::add_link(&format!(
+    let source = crate::nodes::source_import::SourceImporter::add_link(&format!(
         "wireguard://{key}@1.2.3.4:51820?address=10.0.0.2/32&publickey={key}#{name}"
     ))
     .unwrap();
@@ -1967,11 +2032,11 @@ async fn live_a_source_the_converter_cannot_read_still_reaches_the_core() {
     // С D-122 «непонятная конвертеру ядра схема» перестала быть особым случаем: такую
     // ссылку разбирает клиент, и узел приезжает обычной записью.
     assert!(
-        crate::nodes::sources::content(&source.id).contains("type: wireguard"),
+        crate::nodes::sources::SourceStore::content(&source.id).contains("type: wireguard"),
         "узел лёг записью, а не ссылкой"
     );
 
-    let effective = crate::render::effective::effective(None, None).unwrap();
+    let effective = crate::render::effective::ConfigRenderer::effective(None, None).unwrap();
     assert!(
         !effective.yaml.contains(&format!("{}.yaml", source.id)),
         "источнику без понятных ссылок завели провайдера — ядро откажется его читать"
@@ -1984,15 +2049,15 @@ async fn live_a_source_the_converter_cannot_read_still_reaches_the_core() {
     let (ok, log) = core_accepts(&effective.yaml);
     assert!(ok, "ядро отвергло конфиг с узлом из шва:\n{log}");
 
-    let supervisor = Supervisor::new();
-    if let Err(why) = supervisor.start(&effective).await {
+    let mihomo = Mihomo::new();
+    if let Err(why) = mihomo.start(&effective).await {
         panic!(
             "ядро не поднялось: {why:?}\n{}",
-            supervisor.logs().join("\n")
+            mihomo.log().lines().join("\n")
         );
     }
-    let _guard = Running(&supervisor);
-    assert!(supervisor.status().running, "ядро не работает");
+    let _guard = Running(&mihomo);
+    assert!(mihomo.status().running, "ядро не работает");
     println!("ядро поднялось с источником, который его конвертер не читает");
 }
 
@@ -2080,7 +2145,7 @@ impl Drop for TaskGuard {
 #[test]
 #[ignore]
 fn live_a_stale_task_does_not_take_the_launch() {
-    use crate::system::{autostart, task};
+    use crate::system::task;
 
     sandbox("stale");
     let _registry = RegistryGuard::text(
@@ -2089,10 +2154,13 @@ fn live_a_stale_task_does_not_take_the_launch() {
     );
     let _task = TaskGuard::snapshot();
 
-    autostart::set_always_admin(true)
+    Autostart::set_always_admin(true)
         .expect("нужны права администратора — запускать эту проверку из поднятой консоли");
-    assert!(task::usable(), "живая задача должна считаться рабочей");
-    assert!(autostart::always_admin(), "окно не видит заведённую задачу");
+    assert!(
+        SchedulerTask::usable(),
+        "живая задача должна считаться рабочей"
+    );
+    assert!(Autostart::always_admin(), "окно не видит заведённую задачу");
 
     // Тот самый случай: каталог со сборкой исчез, задача осталась.
     let gone = std::env::temp_dir()
@@ -2120,19 +2188,22 @@ fn live_a_stale_task_does_not_take_the_launch() {
     let _ = std::fs::remove_file(&path);
     task::forget();
 
-    assert!(task::exists(), "задача в планировщике осталась");
+    assert!(SchedulerTask::exists(), "задача в планировщике осталась");
     assert!(
-        !task::usable(),
+        !SchedulerTask::usable(),
         "задача с исчезнувшим файлом считается рабочей — клиент снова уйдёт в никуда"
     );
     assert!(
-        !autostart::always_admin(),
+        !Autostart::always_admin(),
         "окно показывает «всегда от администратора» по задаче, которая ничего не поднимает"
     );
 
     // И «схема» лечится тем же тумблером: включили — задача перезаведена на живой путь.
-    autostart::set_always_admin(true).unwrap();
-    assert!(task::usable(), "тумблер не починил протухшую задачу");
+    Autostart::set_always_admin(true).unwrap();
+    assert!(
+        SchedulerTask::usable(),
+        "тумблер не починил протухшую задачу"
+    );
     println!("протухшая задача опознана и перезаведена");
 }
 
@@ -2147,57 +2218,58 @@ fn live_a_stale_task_does_not_take_the_launch() {
 #[test]
 #[ignore]
 fn live_always_admin_gives_the_launch_back_to_the_registry() {
-    use crate::system::{autostart, task};
-
     sandbox("admin");
     let run = r"Software\Microsoft\Windows\CurrentVersion\Run";
     let _registry = RegistryGuard::text(run, &["umiray"]);
     let _task = TaskGuard::snapshot();
 
     // Исходное состояние: задачи нет, автозапуск включён обычным способом.
-    task::remove()
+    SchedulerTask::remove()
         .expect("нужны права администратора — запускать эту проверку из поднятой консоли");
-    autostart::set(true).unwrap();
-    assert!(autostart::enabled(), "автозапуск не включился");
+    Autostart::set(true).unwrap();
+    assert!(Autostart::enabled(), "автозапуск не включился");
 
-    autostart::set_always_admin(true).unwrap();
-    assert!(task::exists(), "задача не завелась");
+    Autostart::set_always_admin(true).unwrap();
+    assert!(SchedulerTask::exists(), "задача не завелась");
     assert!(
-        autostart::enabled(),
+        Autostart::enabled(),
         "автозапуск потерялся при переезде в задачу"
     );
     assert!(
-        crate::system::registry::read_string(run, "umiray")
+        crate::system::registry::Registry::read_string(run, "umiray")
             .unwrap()
             .is_none(),
         "запись в Run осталась вместе с задачей — вход в систему поднял бы вторую копию, и без прав"
     );
 
-    autostart::set_always_admin(false).unwrap();
-    assert!(!task::exists(), "задача осталась после снятия тумблера");
-    let written = crate::system::registry::read_string(run, "umiray")
+    Autostart::set_always_admin(false).unwrap();
+    assert!(
+        !SchedulerTask::exists(),
+        "задача осталась после снятия тумблера"
+    );
+    let written = crate::system::registry::Registry::read_string(run, "umiray")
         .unwrap()
         .expect("запись в Run не вернулась — автозапуск пропал вместе с задачей");
     assert!(
         written.to_lowercase().contains(".exe"),
         "в автозапуск вернулся не бинарь: {written}"
     );
-    assert!(autostart::enabled(), "окно не видит вернувшийся автозапуск");
+    assert!(Autostart::enabled(), "окно не видит вернувшийся автозапуск");
     println!("задача ушла, автозапуск вернулся в реестр: {written}");
 
     // И то же самое при выключенном автозапуске: задача есть, но триггера у неё нет,
     // а после снятия тумблера в реестре не появляется ничего.
-    autostart::set(false).unwrap();
-    autostart::set_always_admin(true).unwrap();
-    assert!(task::exists());
+    Autostart::set(false).unwrap();
+    Autostart::set_always_admin(true).unwrap();
+    assert!(SchedulerTask::exists());
     assert!(
-        !autostart::enabled(),
+        !Autostart::enabled(),
         "выключенный автозапуск включился сам от смены способа"
     );
-    autostart::set_always_admin(false).unwrap();
-    assert!(!task::exists());
+    Autostart::set_always_admin(false).unwrap();
+    assert!(!SchedulerTask::exists());
     assert!(
-        crate::system::registry::read_string(run, "umiray")
+        crate::system::registry::Registry::read_string(run, "umiray")
             .unwrap()
             .is_none(),
         "выключенный автозапуск вернулся записью в реестр"
@@ -2262,8 +2334,8 @@ async fn live_which_keys_a_reload_carries() {
     use crate::diag::Bench;
 
     sandbox("reload");
-    let port = crate::core::free_port().unwrap();
-    let second = crate::core::free_port().unwrap();
+    let port = crate::core::Ports::free_port().unwrap();
+    let second = crate::core::Ports::free_port().unwrap();
     let base = probe_config(port, "");
     let bench = Bench::with(&base).await.unwrap();
     let pid = bench.pid();
@@ -2380,7 +2452,7 @@ async fn live_which_keys_a_reload_carries() {
         .await
         .unwrap();
     let tun = bench.controller().config().await.unwrap()["tun"]["enable"].clone();
-    let elevated = crate::system::elevation::is_elevated();
+    let elevated = crate::system::elevation::Elevation::is_elevated();
     println!("| `tun.enable` | `/configs` | {tun} (права: {elevated}) |");
     if elevated {
         assert_eq!(
@@ -2413,51 +2485,55 @@ async fn live_which_keys_a_reload_carries() {
 #[ignore]
 async fn live_a_ruleset_toggle_reloads_instead_of_restarting() {
     sandbox("toggle");
-    migrate::run().unwrap();
-    mode::write(Mode::Local).unwrap();
+    Migration::run().unwrap();
+    Mode::write(Mode::Local).unwrap();
 
     let state = crate::app::state::AppState::new();
-    let probe = crate::core::free_port().unwrap();
-    let effective =
-        crate::render::effective::effective(state.routing().unwrap().as_deref(), Some(probe))
-            .unwrap();
-    if let Err(why) = state.supervisor.start(&effective).await {
+    let probe = crate::core::Ports::free_port().unwrap();
+    let effective = crate::render::effective::ConfigRenderer::effective(
+        state.routing.rules(&state).unwrap().as_deref(),
+        Some(probe),
+    )
+    .unwrap();
+    if let Err(why) = state.mihomo.start(&effective).await {
         panic!(
             "ядро не поднялось: {why:?}\n{}",
-            state.supervisor.logs().join("\n")
+            state.mihomo.log().lines().join("\n")
         );
     }
-    let _guard = Running(&state.supervisor);
-    let port = state.supervisor.status().port.unwrap();
+    let _guard = Running(&state.mihomo);
+    let port = state.mihomo.status().port.unwrap();
 
     external_ip(Some(port)).await;
     let before = state
-        .supervisor
+        .mihomo
         .traffic()
         .await
         .unwrap()
         .expect("у работающего ядра счётчики обязаны читаться");
     assert!(before.up > 0, "трафик не пошёл — сравнивать будет нечего");
 
-    let ruleset = crate::config::rulesets::list()
+    let ruleset = crate::config::rulesets::RulesetStore::list()
         .into_iter()
         .next()
         .expect("встроенных наборов нет — тумблер проверять не на чем");
-    crate::config::rulesets::toggle(&ruleset.id, !ruleset.on).unwrap();
+    crate::config::rulesets::RulesetStore::toggle(&ruleset.id, !ruleset.on).unwrap();
 
-    let changed =
-        crate::render::effective::effective(state.routing().unwrap().as_deref(), Some(probe))
-            .unwrap();
-    let launched = state.supervisor.launched().unwrap();
+    let changed = crate::render::effective::ConfigRenderer::effective(
+        state.routing.rules(&state).unwrap().as_deref(),
+        Some(probe),
+    )
+    .unwrap();
+    let launched = state.mihomo.launched().unwrap();
     assert_eq!(
-        crate::core::apply::needed(&launched, &changed.yaml).unwrap(),
-        Some(crate::core::apply::Apply::Reload),
+        crate::core::mihomo::apply::Apply::needed(&launched, &changed.yaml).unwrap(),
+        Some(crate::core::mihomo::apply::Apply::Reload),
         "правка набора вдруг требует перезапуска — таблица разошлась с реальностью"
     );
-    state.supervisor.apply(&changed).await.unwrap();
+    state.mihomo.apply(&changed).await.unwrap();
 
     let after = state
-        .supervisor
+        .mihomo
         .traffic()
         .await
         .unwrap()
@@ -2478,13 +2554,14 @@ async fn live_a_ruleset_toggle_reloads_instead_of_restarting() {
 
     // И собранное теперь совпадает с работающим — окно не будет предлагать перезапуск.
     assert_eq!(
-        crate::core::apply::needed(&state.supervisor.launched().unwrap(), &changed.yaml).unwrap(),
+        crate::core::mihomo::apply::Apply::needed(&state.mihomo.launched().unwrap(), &changed.yaml)
+            .unwrap(),
         None,
         "после применения ядро и файл обязаны сойтись"
     );
     external_ip(Some(port)).await;
 
-    crate::config::rulesets::toggle(&ruleset.id, ruleset.on).unwrap();
+    crate::config::rulesets::RulesetStore::toggle(&ruleset.id, ruleset.on).unwrap();
 }
 
 // ---------------------------------------------------------------------------
@@ -2519,7 +2596,8 @@ rules:
 
 /// Спросить имя у слушателя ядра — своим пакетом, как в `diag::wire`.
 async fn fake_address(dns: u16, name: &str) -> String {
-    let packet = crate::diag::wire::query(name, crate::diag::wire::TYPE_A, 0x4242).unwrap();
+    let packet =
+        crate::diag::wire::DnsWire::query(name, crate::diag::wire::TYPE_A, 0x4242).unwrap();
     let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     socket
         .send_to(&packet, format!("127.0.0.1:{dns}"))
@@ -2530,7 +2608,7 @@ async fn fake_address(dns: u16, name: &str) -> String {
         .await
         .expect("слушатель DNS ядра не ответил")
         .unwrap();
-    crate::diag::wire::answer(&buffer[..read], 0x4242)
+    crate::diag::wire::DnsWire::answer(&buffer[..read], 0x4242)
         .unwrap()
         .ips
         .first()
@@ -2545,7 +2623,7 @@ async fn fakeip_core(dir: &Path, config: &str) -> std::process::Child {
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
     std::fs::write(dir.join("config.yaml"), config).unwrap();
-    let child = std::process::Command::new(paths::core())
+    let child = std::process::Command::new(Paths::core())
         .arg("-d")
         .arg(dir)
         .arg("-f")
@@ -2561,9 +2639,9 @@ async fn fakeip_core(dir: &Path, config: &str) -> std::process::Child {
 #[ignore]
 async fn live_a_soft_stop_keeps_the_fake_ip_map() {
     sandbox("fakeip");
-    let port = crate::core::free_port().unwrap();
-    let dns = crate::core::free_port().unwrap();
-    let dir = paths::run_dir().join("fakeip");
+    let port = crate::core::Ports::free_port().unwrap();
+    let dns = crate::core::Ports::free_port().unwrap();
+    let dir = Paths::run_dir().join("fakeip");
     std::fs::create_dir_all(&dir).unwrap();
     let config = fakeip_config(port, dns);
     let names = ["example.com", "github.com", "wikipedia.org"];
@@ -2580,7 +2658,7 @@ async fn live_a_soft_stop_keeps_the_fake_ip_map() {
     );
 
     // --- мягко ---------------------------------------------------------------
-    let sent = crate::system::console::interrupt(child.id());
+    let sent = crate::system::console::Console::interrupt(child.id());
     let stopped = std::time::Instant::now();
     let quiet = tokio::task::spawn_blocking(move || {
         for _ in 0..50 {
@@ -2622,7 +2700,7 @@ async fn live_a_soft_stop_keeps_the_fake_ip_map() {
     // Без него «карта цела» проходило бы и в мире, где мягкая остановка ни на что
     // не влияет. Каталог новый: старый уже хранит карту, и жёсткое убийство её
     // не испортит — потеряется только то, что не успело сохраниться.
-    let rough = paths::run_dir().join("fakeip-rough");
+    let rough = Paths::run_dir().join("fakeip-rough");
     std::fs::create_dir_all(&rough).unwrap();
     let mut child = fakeip_core(&rough, &config).await;
     let mut first = Vec::new();
@@ -2655,19 +2733,21 @@ async fn live_a_soft_stop_keeps_the_fake_ip_map() {
 #[ignore]
 async fn live_the_window_is_told_which_change_needs_a_restart() {
     sandbox("restart-reason");
-    migrate::run().unwrap();
-    mode::write(Mode::Local).unwrap();
+    Migration::run().unwrap();
+    Mode::write(Mode::Local).unwrap();
 
     let state = crate::app::state::AppState::new();
-    let probe = crate::core::free_port().unwrap();
-    let effective =
-        crate::render::effective::effective(state.routing().unwrap().as_deref(), Some(probe))
-            .unwrap();
-    state.supervisor.start(&effective).await.unwrap();
-    let _guard = Running(&state.supervisor);
-    let port = state.supervisor.status().port.unwrap();
+    let probe = crate::core::Ports::free_port().unwrap();
+    let effective = crate::render::effective::ConfigRenderer::effective(
+        state.routing.rules(&state).unwrap().as_deref(),
+        Some(probe),
+    )
+    .unwrap();
+    state.mihomo.start(&effective).await.unwrap();
+    let _guard = Running(&state.mihomo);
+    let port = state.mihomo.status().port.unwrap();
 
-    let quiet = crate::app::status::status(&state);
+    let quiet = crate::app::status::Status::gather(&state);
     assert_eq!(
         quiet.restart_reason(),
         None,
@@ -2675,25 +2755,25 @@ async fn live_the_window_is_told_which_change_needs_a_restart() {
     );
 
     // Правка, которая доезжает: подробность лога.
-    let mut options = crate::config::advanced::read().unwrap();
+    let mut options = crate::config::advanced::Advanced::read().unwrap();
     options.log_level = crate::config::advanced::LogLevel::Warning;
-    crate::config::advanced::write(&options).unwrap();
+    crate::config::advanced::Advanced::write(&options).unwrap();
     assert_eq!(
-        crate::app::status::status(&state).restart_reason(),
+        crate::app::status::Status::gather(&state).restart_reason(),
         None,
         "уровень лога перезапуска не требует — он перечитывается (S-020)"
     );
 
     // Правка, которая не доезжает: порт локального прокси.
-    options.mixed_port = crate::core::free_port().unwrap();
-    crate::config::advanced::write(&options).unwrap();
-    let asked = crate::app::status::status(&state);
+    options.mixed_port = crate::core::Ports::free_port().unwrap();
+    crate::config::advanced::Advanced::write(&options).unwrap();
+    let asked = crate::app::status::Status::gather(&state);
     let why = asked
         .restart_reason()
         .expect("смена порта обязана попросить перезапуск");
     assert!(why.contains("Порт"), "причина не про порт: {why}");
     assert_eq!(
-        state.supervisor.status().port,
+        state.mihomo.status().port,
         Some(port),
         "ядро перезапустилось само — а не должно было"
     );
@@ -2701,9 +2781,9 @@ async fn live_the_window_is_told_which_change_needs_a_restart() {
 
     // Вернули как было — предложение обязано уйти само.
     options.mixed_port = port;
-    crate::config::advanced::write(&options).unwrap();
+    crate::config::advanced::Advanced::write(&options).unwrap();
     assert_eq!(
-        crate::app::status::status(&state).restart_reason(),
+        crate::app::status::Status::gather(&state).restart_reason(),
         None,
         "расхождения нет, а окно всё ещё предлагает перезапуск"
     );
@@ -2713,17 +2793,15 @@ async fn live_the_window_is_told_which_change_needs_a_restart() {
 #[tokio::test]
 #[ignore]
 async fn live_an_edited_ruleset_reaches_the_assembled_config() {
-    use crate::config::rulesets;
-
     sandbox("ruleset-edit");
-    migrate::run().unwrap();
-    mode::write(Mode::Local).unwrap();
+    Migration::run().unwrap();
+    Mode::write(Mode::Local).unwrap();
 
-    let set = rulesets::list()
+    let set = RulesetStore::list()
         .into_iter()
         .next()
         .expect("встроенных наборов нет — править нечего");
-    let before = rulesets::read(&set.id).unwrap();
+    let before = RulesetStore::read(&set.id).unwrap();
     assert!(
         before.contains("rules"),
         "набор читается не файлом: {before:.40}"
@@ -2732,26 +2810,29 @@ async fn live_an_edited_ruleset_reaches_the_assembled_config() {
     // Битое не принимаем: набор, выпавший из сборки при включённом тумблере, — это
     // тихо неработающее правило.
     assert!(
-        rulesets::write(&set.id, "не yaml: [и не набор").is_err(),
+        RulesetStore::write(&set.id, "не yaml: [и не набор").is_err(),
         "битый текст записался"
     );
     assert!(
-        rulesets::write(&set.id, "title: пусто\n").is_err(),
+        RulesetStore::write(&set.id, "title: пусто\n").is_err(),
         "набор без единого правила записался"
     );
     assert_eq!(
-        rulesets::read(&set.id).unwrap(),
+        RulesetStore::read(&set.id).unwrap(),
         before,
         "файл всё же тронут"
     );
 
     let mark = "DOMAIN-SUFFIX,umiray-live-check.example,DIRECT";
-    rulesets::write(&set.id, &format!("{}\n  - {mark}\n", before.trim_end())).unwrap();
-    rulesets::toggle(&set.id, true).unwrap();
+    RulesetStore::write(&set.id, &format!("{}\n  - {mark}\n", before.trim_end())).unwrap();
+    RulesetStore::toggle(&set.id, true).unwrap();
 
     let state = crate::app::state::AppState::new();
-    let effective =
-        crate::render::effective::effective(state.routing().unwrap().as_deref(), None).unwrap();
+    let effective = crate::render::effective::ConfigRenderer::effective(
+        state.routing.rules(&state).unwrap().as_deref(),
+        None,
+    )
+    .unwrap();
     assert!(
         effective.yaml.contains(mark),
         "правка набора не доехала до собранного конфига"
@@ -2759,8 +2840,8 @@ async fn live_an_edited_ruleset_reaches_the_assembled_config() {
     let (ok, log) = core_accepts(&effective.yaml);
     assert!(ok, "ядро отвергло конфиг с правленым набором:\n{log}");
 
-    rulesets::write(&set.id, &before).unwrap();
-    rulesets::toggle(&set.id, set.on).unwrap();
+    RulesetStore::write(&set.id, &before).unwrap();
+    RulesetStore::toggle(&set.id, set.on).unwrap();
     println!("правка набора «{}» доехала и вернулась", set.title);
 }
 
@@ -2772,13 +2853,15 @@ async fn live_an_edited_ruleset_reaches_the_assembled_config() {
 #[ignore]
 async fn live_smart_dns_writes_the_fastest_resolvers() {
     sandbox("smart-dns");
-    migrate::run().unwrap();
-    mode::write(Mode::Local).unwrap();
+    Migration::run().unwrap();
+    Mode::write(Mode::Local).unwrap();
 
-    let before = crate::config::advanced::read().unwrap().nameserver;
+    let before = crate::config::advanced::Advanced::read()
+        .unwrap()
+        .nameserver;
     println!("было: {before:?}");
 
-    let report = crate::diag::smart::apply("dns-race", crate::diag::Args::default())
+    let report = crate::diag::smart::Smart::apply("dns-race", crate::diag::Args::default())
         .await
         .unwrap();
     assert_eq!(
@@ -2788,7 +2871,9 @@ async fn live_smart_dns_writes_the_fastest_resolvers() {
         report.headline
     );
 
-    let after = crate::config::advanced::read().unwrap().nameserver;
+    let after = crate::config::advanced::Advanced::read()
+        .unwrap()
+        .nameserver;
     println!("стало: {after:?} · {}", report.headline);
     assert!(
         !after.is_empty() && after.len() <= crate::diag::dns::BEST,
@@ -2798,8 +2883,11 @@ async fn live_smart_dns_writes_the_fastest_resolvers() {
 
     // И собранный конфиг с ними ядро принимает — иначе «умный» выбор ломал бы запуск.
     let state = crate::app::state::AppState::new();
-    let effective =
-        crate::render::effective::effective(state.routing().unwrap().as_deref(), None).unwrap();
+    let effective = crate::render::effective::ConfigRenderer::effective(
+        state.routing.rules(&state).unwrap().as_deref(),
+        None,
+    )
+    .unwrap();
     for server in &after {
         assert!(
             effective.yaml.contains(server),
@@ -2814,7 +2902,7 @@ async fn live_smart_dns_writes_the_fastest_resolvers() {
 
     // У утилиты нет действия — отказ, а не тишина.
     assert!(
-        crate::diag::smart::apply("external-ip", crate::diag::Args::default())
+        crate::diag::smart::Smart::apply("external-ip", crate::diag::Args::default())
             .await
             .is_err()
     );
@@ -2825,12 +2913,12 @@ async fn live_smart_dns_writes_the_fastest_resolvers() {
 #[ignore]
 async fn live_a_broken_config_is_explained_before_the_core_starts() {
     sandbox("preflight");
-    migrate::run().unwrap();
-    mode::write(Mode::Local).unwrap();
+    Migration::run().unwrap();
+    Mode::write(Mode::Local).unwrap();
 
     // Сколько стоит сухой прогон: он теперь на пути каждого подключения.
-    let good = crate::render::effective::effective(None, None).unwrap();
-    let said = crate::diag::config::accepts(&good.yaml).unwrap();
+    let good = crate::render::effective::ConfigRenderer::effective(None, None).unwrap();
+    let said = crate::diag::config::DryRun::accepts(&good.yaml).unwrap();
     assert!(said.ok, "здоровый конфиг не принят: {}", said.complaint());
     println!("сухой прогон здорового конфига: {} мс", said.ms);
 
@@ -2838,7 +2926,7 @@ async fn live_a_broken_config_is_explained_before_the_core_starts() {
     let broken = good
         .yaml
         .replace("rules:", "rules:\n  - НЕПРАВИЛО,куда-то,DIRECT");
-    let refused = crate::diag::config::accepts(&broken).unwrap();
+    let refused = crate::diag::config::DryRun::accepts(&broken).unwrap();
     assert!(!refused.ok, "ядро приняло несуществующее правило");
     println!("ядро сказало: {}", refused.complaint());
     assert!(
@@ -2849,20 +2937,23 @@ async fn live_a_broken_config_is_explained_before_the_core_starts() {
 
     // И то же самое целиком: фаза `core` обязана отмениться «до»-шагом, не запустив ядро.
     let state = crate::app::state::AppState::new();
-    crate::config::files::write(
+    crate::config::files::Documents::write(
         crate::config::files::ADVANCED,
         &format!(
             "{}\nrules:\n  - НЕПРАВИЛО,куда-то,DIRECT\n",
-            crate::config::files::read(crate::config::files::ADVANCED).unwrap()
+            crate::config::files::Documents::read(crate::config::files::ADVANCED).unwrap()
         ),
     )
     .unwrap();
-    let effective =
-        crate::render::effective::effective(state.routing().unwrap().as_deref(), None).unwrap();
-    let checked = crate::diag::config::accepts(&effective.yaml).unwrap();
+    let effective = crate::render::effective::ConfigRenderer::effective(
+        state.routing.rules(&state).unwrap().as_deref(),
+        None,
+    )
+    .unwrap();
+    let checked = crate::diag::config::DryRun::accepts(&effective.yaml).unwrap();
     assert!(!checked.ok, "битое правило не доехало до сборки");
     assert!(
-        !state.supervisor.status().running,
+        !state.mihomo.status().running,
         "ядро не должно быть поднято этой проверкой"
     );
 }
@@ -2872,10 +2963,10 @@ async fn live_a_broken_config_is_explained_before_the_core_starts() {
 #[ignore]
 async fn live_the_measured_mtu_reaches_the_core_form() {
     sandbox("smart-mtu");
-    migrate::run().unwrap();
-    mode::write(Mode::Local).unwrap();
+    Migration::run().unwrap();
+    Mode::write(Mode::Local).unwrap();
 
-    let path = crate::diag::pmtu::path("1.1.1.1")
+    let path = crate::diag::pmtu::PmtuProbe::path("1.1.1.1")
         .unwrap()
         .expect("узел молчит по ICMP — мерить нечем");
     println!(
@@ -2883,7 +2974,7 @@ async fn live_the_measured_mtu_reaches_the_core_form() {
         path - crate::diag::pmtu::TUNNEL
     );
 
-    let report = crate::diag::smart::apply("pmtu", crate::diag::Args::default())
+    let report = crate::diag::smart::Smart::apply("pmtu", crate::diag::Args::default())
         .await
         .unwrap();
     assert_eq!(
@@ -2893,7 +2984,7 @@ async fn live_the_measured_mtu_reaches_the_core_form() {
         report.headline
     );
 
-    let written = crate::config::advanced::read().unwrap().mtu;
+    let written = crate::config::advanced::Advanced::read().unwrap().mtu;
     assert_eq!(
         written,
         path - crate::diag::pmtu::TUNNEL,
@@ -2903,9 +2994,12 @@ async fn live_the_measured_mtu_reaches_the_core_form() {
 
     // И ядро такой конфиг принимает: подобранное число не должно ломать запуск.
     let state = crate::app::state::AppState::new();
-    let effective =
-        crate::render::effective::effective(state.routing().unwrap().as_deref(), None).unwrap();
-    let said = crate::diag::config::accepts(&effective.yaml).unwrap();
+    let effective = crate::render::effective::ConfigRenderer::effective(
+        state.routing.rules(&state).unwrap().as_deref(),
+        None,
+    )
+    .unwrap();
+    let said = crate::diag::config::DryRun::accepts(&effective.yaml).unwrap();
     assert!(
         said.ok,
         "ядро отвергло подобранный MTU: {}",
@@ -2918,39 +3012,45 @@ async fn live_the_measured_mtu_reaches_the_core_form() {
 #[ignore]
 async fn live_the_guard_notices_a_tunnel_that_carries_nothing() {
     sandbox("guard");
-    migrate::run().unwrap();
-    mode::write(Mode::Local).unwrap();
+    Migration::run().unwrap();
+    Mode::write(Mode::Local).unwrap();
 
     let state = crate::app::state::AppState::new();
     // Ядра нет — жалоб не бывает: сторож про туннель, а не про его отсутствие.
-    crate::app::guard::look(&state).await;
-    assert_eq!(crate::app::status::status(&state).trouble(), None);
+    crate::app::guard::Guard::look(&state).await;
+    assert_eq!(crate::app::status::Status::gather(&state).trouble(), None);
 
-    let effective =
-        crate::render::effective::effective(state.routing().unwrap().as_deref(), None).unwrap();
-    state.supervisor.start(&effective).await.unwrap();
-    let _guard = Running(&state.supervisor);
-    let _ = state.point_alias().await;
+    let effective = crate::render::effective::ConfigRenderer::effective(
+        state.routing.rules(&state).unwrap().as_deref(),
+        None,
+    )
+    .unwrap();
+    state.mihomo.start(&effective).await.unwrap();
+    let _guard = Running(&state.mihomo);
+    let _ = state.routing.point_alias(&state).await;
 
-    crate::app::guard::look(&state).await;
+    crate::app::guard::Guard::look(&state).await;
     assert_eq!(
-        crate::app::status::status(&state).trouble(),
+        crate::app::status::Status::gather(&state).trouble(),
         None,
         "рабочий туннель не должен вызывать жалоб"
     );
 
     // А теперь рвём: наводим псевдоним на заведомо мёртвый узел, добавленный сюда же.
-    let dead = crate::nodes::source_import::add_link(
+    let dead = crate::nodes::source_import::SourceImporter::add_link(
         "vless://00000000-0000-0000-0000-000000000000@203.0.113.1:443?type=tcp&security=none#мёртвый",
     )
     .unwrap();
-    let effective =
-        crate::render::effective::effective(state.routing().unwrap().as_deref(), None).unwrap();
-    state.supervisor.apply(&effective).await.unwrap();
-    state.supervisor.select("мёртвый").await.unwrap();
+    let effective = crate::render::effective::ConfigRenderer::effective(
+        state.routing.rules(&state).unwrap().as_deref(),
+        None,
+    )
+    .unwrap();
+    state.mihomo.apply(&effective).await.unwrap();
+    state.mihomo.select("мёртвый").await.unwrap();
 
-    crate::app::guard::look(&state).await;
-    let shown = crate::app::status::status(&state);
+    crate::app::guard::Guard::look(&state).await;
+    let shown = crate::app::status::Status::gather(&state);
     let complaint = shown.trouble();
     println!("сторож сказал: {complaint:?}");
     assert!(
@@ -2958,7 +3058,7 @@ async fn live_the_guard_notices_a_tunnel_that_carries_nothing() {
         "трафик через мёртвый узел не идёт, а сторож молчит"
     );
 
-    crate::nodes::sources::delete(&dead.id).unwrap();
+    crate::nodes::sources::SourceStore::delete(&dead.id).unwrap();
 }
 
 /// Часы машины против настоящего заголовка `Date` (D-097).
@@ -2969,7 +3069,7 @@ async fn live_the_guard_notices_a_tunnel_that_carries_nothing() {
 #[tokio::test]
 #[ignore]
 async fn live_the_clock_is_checked_against_a_real_date_header() {
-    let report = crate::diag::clock::check().await.unwrap();
+    let report = crate::diag::clock::ClockProbe::check().await.unwrap();
     for line in &report.lines {
         println!("{:?} {}", line.tone, line.text);
     }
@@ -2995,20 +3095,20 @@ async fn live_the_clock_is_checked_against_a_real_date_header() {
 #[ignore]
 async fn live_a_forced_recheck_reaches_every_provider() {
     sandbox("recheck");
-    migrate::run().unwrap();
-    mode::write(Mode::Local).unwrap();
+    Migration::run().unwrap();
+    Mode::write(Mode::Local).unwrap();
 
-    let supervisor = Supervisor::new();
-    let effective = crate::render::effective::effective(None, None).unwrap();
-    if let Err(why) = supervisor.start(&effective).await {
+    let mihomo = Mihomo::new();
+    let effective = crate::render::effective::ConfigRenderer::effective(None, None).unwrap();
+    if let Err(why) = mihomo.start(&effective).await {
         panic!(
             "ядро не поднялось: {why:?}\n{}",
-            supervisor.logs().join("\n")
+            mihomo.log().lines().join("\n")
         );
     }
-    let _guard = Running(&supervisor);
+    let _guard = Running(&mihomo);
 
-    let asked = supervisor.recheck().await.unwrap();
+    let asked = mihomo.recheck().await.unwrap();
     println!("перепроверено провайдеров: {asked}");
     assert!(
         asked > 0,
@@ -3022,8 +3122,8 @@ async fn live_a_forced_recheck_reaches_every_provider() {
 #[ignore]
 async fn live_a_recheck_without_a_core_is_not_a_failure() {
     sandbox("recheck-idle");
-    let supervisor = Supervisor::new();
-    assert_eq!(supervisor.recheck().await.unwrap(), 0);
+    let mihomo = Mihomo::new();
+    assert_eq!(mihomo.recheck().await.unwrap(), 0);
 }
 
 /// Критерий D-113 на живом ядре: с галкой конфиг с группой `umiray-udp` и правилом
@@ -3036,15 +3136,15 @@ async fn live_a_recheck_without_a_core_is_not_a_failure() {
 #[ignore]
 async fn live_the_udp_group_is_accepted_by_the_core() {
     sandbox("udp");
-    migrate::run().unwrap();
-    mode::write(Mode::Local).unwrap();
+    Migration::run().unwrap();
+    Mode::write(Mode::Local).unwrap();
 
-    let with_udp = crate::render::effective::udp_nodes();
+    let with_udp = crate::render::effective::ConfigRenderer::udp_nodes();
     println!("узлов с нативным UDP в источниках: {with_udp}");
-    crate::config::udp::write(true).unwrap();
+    crate::config::udp::UdpGroup::write(true).unwrap();
 
-    let effective = crate::render::effective::effective(None, None).unwrap();
-    let map = top_mapping(&effective.yaml).unwrap();
+    let effective = crate::render::effective::ConfigRenderer::effective(None, None).unwrap();
+    let map = Yaml::top_mapping(&effective.yaml).unwrap();
     let group = map
         .get(serde_yaml::Value::from("proxy-groups"))
         .and_then(serde_yaml::Value::as_sequence)
@@ -3065,22 +3165,19 @@ async fn live_the_udp_group_is_accepted_by_the_core() {
 
     // И оно правда её подняло: с такой группой ядро не просто приняло конфиг,
     // а стартовало и ответило.
-    let supervisor = Supervisor::new();
-    if let Err(why) = supervisor.start(&effective).await {
+    let mihomo = Mihomo::new();
+    if let Err(why) = mihomo.start(&effective).await {
         panic!(
             "ядро не поднялось с UDP-группой: {why:?}
 {}",
-            supervisor.logs().join(
+            mihomo.log().lines().join(
                 "
 "
             )
         );
     }
-    let _guard = Running(&supervisor);
-    assert!(
-        supervisor.status().running,
-        "ядро с UDP-группой не работает"
-    );
+    let _guard = Running(&mihomo);
+    assert!(mihomo.status().running, "ядро с UDP-группой не работает");
 }
 
 /// Разбор ссылок на **живых подписках** пользователя (D-122): каждая ли ссылка стала
@@ -3089,7 +3186,7 @@ async fn live_the_udp_group_is_accepted_by_the_core() {
 #[tokio::test]
 #[ignore]
 async fn live_every_real_link_becomes_an_entry() {
-    let dir = crate::paths::root();
+    let dir = crate::paths::Paths::root();
     let mut lines: Vec<String> = Vec::new();
     if let Ok(entries) = std::fs::read_dir(dir.join("sources")) {
         for entry in entries.flatten() {
@@ -3108,7 +3205,7 @@ async fn live_every_real_link_becomes_an_entry() {
     let mut proxies = Vec::new();
     let mut missed = Vec::new();
     for line in &lines {
-        match crate::nodes::convert::to_entry(line) {
+        match crate::nodes::convert::Converter::to_entry(line) {
             Some(entry) => proxies.push(serde_yaml::Value::Mapping(entry)),
             None => missed.push(line.split("://").next().unwrap_or("?").to_string()),
         }
@@ -3123,7 +3220,7 @@ async fn live_every_real_link_becomes_an_entry() {
     assert!(missed.is_empty(), "не разобрали схемы: {missed:?}");
 
     let mut document = serde_yaml::Mapping::new();
-    crate::yaml::set(
+    crate::yaml::Yaml::set(
         &mut document,
         "proxies",
         serde_yaml::Value::Sequence(proxies),

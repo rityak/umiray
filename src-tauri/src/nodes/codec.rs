@@ -5,25 +5,29 @@
 
 use base64::Engine;
 
-pub fn decode(raw: &str) -> Option<Vec<u8>> {
-    let compact: String = raw.chars().filter(|c| !c.is_whitespace()).collect();
-    [
-        base64::engine::general_purpose::STANDARD,
-        base64::engine::general_purpose::STANDARD_NO_PAD,
-        base64::engine::general_purpose::URL_SAFE,
-        base64::engine::general_purpose::URL_SAFE_NO_PAD,
-    ]
-    .iter()
-    .find_map(|engine| engine.decode(&compact).ok())
-}
+pub struct Base64;
 
-/// Обратно в base64: имя внутри `vmess://` правится и упаковывается заново.
-pub fn encode(bytes: &[u8]) -> String {
-    base64::engine::general_purpose::STANDARD.encode(bytes)
-}
+impl Base64 {
+    pub fn decode(raw: &str) -> Option<Vec<u8>> {
+        let compact: String = raw.chars().filter(|c| !c.is_whitespace()).collect();
+        [
+            base64::engine::general_purpose::STANDARD,
+            base64::engine::general_purpose::STANDARD_NO_PAD,
+            base64::engine::general_purpose::URL_SAFE,
+            base64::engine::general_purpose::URL_SAFE_NO_PAD,
+        ]
+        .iter()
+        .find_map(|engine| engine.decode(&compact).ok())
+    }
 
-pub fn decode_text(raw: &str) -> Option<String> {
-    String::from_utf8(decode(raw)?).ok()
+    /// Обратно в base64: имя внутри `vmess://` правится и упаковывается заново.
+    pub fn encode(bytes: &[u8]) -> String {
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    }
+
+    pub fn decode_text(raw: &str) -> Option<String> {
+        String::from_utf8(Base64::decode(raw)?).ok()
+    }
 }
 
 #[cfg(test)]
@@ -39,10 +43,13 @@ mod tests {
             "YWVzLTI1Ni1nY206cHc=",
             "YWVzLTI1Ni1nY206cHc",
         ] {
-            assert_eq!(decode_text(encoded).as_deref(), Some("aes-256-gcm:pw"));
+            assert_eq!(
+                Base64::decode_text(encoded).as_deref(),
+                Some("aes-256-gcm:pw")
+            );
         }
         // url-safe отличается алфавитом: '-' и '_' вместо '+' и '/'.
-        assert_eq!(decode_text("Pz8_Pz8").as_deref(), Some("?????"));
-        assert!(decode_text("не base64 вовсе").is_none());
+        assert_eq!(Base64::decode_text("Pz8_Pz8").as_deref(), Some("?????"));
+        assert!(Base64::decode_text("не base64 вовсе").is_none());
     }
 }

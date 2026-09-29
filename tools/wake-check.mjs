@@ -68,7 +68,7 @@ if (!running) {
 }
 
 const was = await session.eval(
-  `return (await window.__TAURI_INTERNALS__.invoke("core_logs")).length;`,
+  `return (await window.__TAURI_INTERNALS__.invoke("core_logs", { engine: "mihomo" })).length;`,
 );
 rmSync(MARK, { force: true });
 
@@ -84,7 +84,11 @@ check(
 
 const said = await until(
   async () =>
-    (await session.eval(`return await window.__TAURI_INTERNALS__.invoke("core_logs");`))
+    (
+      await session.eval(
+        `return await window.__TAURI_INTERNALS__.invoke("core_logs", { engine: "mihomo" });`,
+      )
+    )
       .slice(was)
       .some((line) => line.includes(SAID)),
   "строка про смену сети в логе",
@@ -93,7 +97,9 @@ const said = await until(
 check("клиент заметил смену сети и перепроверил узлы", said);
 if (said) {
   const lines = (
-    await session.eval(`return await window.__TAURI_INTERNALS__.invoke("core_logs");`)
+    await session.eval(
+      `return await window.__TAURI_INTERNALS__.invoke("core_logs", { engine: "mihomo" });`,
+    )
   ).filter((line) => line.includes(SAID));
   console.log(`     ${lines.at(-1)}`);
 }

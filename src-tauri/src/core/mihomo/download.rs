@@ -10,8 +10,8 @@
 use std::io::Cursor;
 
 use crate::error::{AppError, Result};
-use crate::http;
-use crate::paths;
+use crate::http::Http;
+use crate::paths::Paths;
 
 const LATEST_RELEASE: &str = "https://github.com/MetaCubeX/mihomo/releases/latest";
 const DOWNLOAD_BASE: &str = "https://github.com/MetaCubeX/mihomo/releases/download";
@@ -20,21 +20,25 @@ const VARIANT: &str = "windows-amd64-compatible";
 const MAX_ARCHIVE: usize = 128 * 1024 * 1024;
 const MAX_BINARY: u64 = 256 * 1024 * 1024;
 
-/// Скачивает ядро и кладёт его на место. Возвращает установленную версию.
-pub async fn install() -> Result<String> {
-    let client = http::client()?;
-    let tag = latest_tag(&client).await?;
-    let archive = fetch_asset(&client, &tag).await?;
-    let binary = extract_executable(&archive)?;
+pub struct MihomoDownload;
 
-    paths::ensure_root()?;
-    replace_binary(&paths::core(), &binary)?;
+impl MihomoDownload {
+    /// Скачивает ядро и кладёт его на место. Возвращает установленную версию.
+    pub async fn install() -> Result<String> {
+        let client = Http::client()?;
+        let tag = latest_tag(&client).await?;
+        let archive = fetch_asset(&client, &tag).await?;
+        let binary = extract_executable(&archive)?;
 
-    Ok(tag)
+        Paths::ensure_root()?;
+        replace_binary(&super::Mihomo::binary(), &binary)?;
+
+        Ok(tag)
+    }
 }
 
 fn replace_binary(path: &std::path::Path, binary: &[u8]) -> Result<()> {
-    crate::atomic::write(path, binary)
+    crate::atomic::AtomicFile::write(path, binary)
         .map_err(|e| AppError::io(format!("Не удалось заменить ядро: {e}")))
 }
 
@@ -59,41 +63,7 @@ async fn latest_tag(client: &reqwest::Client) -> Result<String> {
 
 async fn fetch_asset(client: &reqwest::Client, tag: &str) -> Result<Vec<u8>> {
     let url = format!("{DOWNLOAD_BASE}/{tag}/mihomo-{VARIANT}-{tag}.zip");
-    let mut response = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| AppError::network(format!("Не удалось скачать ядро: {e}")))?;
-
-    let status = response.status();
-    if !status.is_success() {
-        return Err(AppError::network(format!(
-            "Загрузка ядра вернула {status}: {url}"
-        )));
-    }
-    if response
-        .content_length()
-        .is_some_and(|length| length > MAX_ARCHIVE as u64)
-    {
-        return Err(AppError::network("Архив ядра неожиданно велик"));
-    }
-    let mut archive = Vec::with_capacity(
-        response
-            .content_length()
-            .unwrap_or_default()
-            .min(MAX_ARCHIVE as u64) as usize,
-    );
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|e| AppError::network(format!("Загрузка ядра оборвалась: {e}")))?
-    {
-        if archive.len().saturating_add(chunk.len()) > MAX_ARCHIVE {
-            return Err(AppError::network("Архив ядра неожиданно велик"));
-        }
-        archive.extend_from_slice(&chunk);
-    }
-    Ok(archive)
+    Http::fetch(client, &url, MAX_ARCHIVE).await
 }
 
 /// В архиве ровно один файл — сам бинарь; имя внутри зависит от варианта сборки,
@@ -146,7 +116,7 @@ mod tests {
     fn an_existing_core_is_replaced_on_windows() {
         let path = std::env::temp_dir().join(format!(
             "umiray-core-replace-{}.exe",
-            crate::stamp::id().unwrap()
+            crate::stamp::Stamp::id().unwrap()
         ));
         std::fs::write(&path, b"old").unwrap();
         replace_binary(&path, b"MZ-new").unwrap();

@@ -5,10 +5,10 @@
 
 use tauri::State;
 
-use crate::app::connect;
 use crate::app::state::AppState;
 use crate::app::status::Status;
 use crate::config::files;
+use crate::config::files::Documents;
 use crate::error::Result;
 
 /// Разделы окна с документами внутри (D-044, D-070). Команды принимают идентификатор
@@ -18,12 +18,12 @@ use crate::error::Result;
 /// здесь, на границе, где доступно и то, и другое.
 #[tauri::command]
 pub fn config_list(state: State<AppState>) -> Vec<files::Section> {
-    files::list(state.applied_preset().as_deref())
+    Documents::list(state.routing.applied_preset(&state).as_deref())
 }
 
 #[tauri::command]
 pub fn config_read(id: String) -> Result<String> {
-    files::read(&id)
+    Documents::read(&id)
 }
 
 /// Записать документ — и довести до работающего ядра то, что до него доходит (D-143).
@@ -38,20 +38,26 @@ pub async fn config_write(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Status> {
-    files::write(&id, &text)?;
-    connect::apply(&app, &state).await
+    state
+        .connection
+        .change(&app, &state, || Documents::write(&id, &text))
+        .await
 }
 
 /// Собранный конфиг целиком — то, что уходит ядру (D-130). Только для показа: правится
 /// он в документах. Служебный вход замера не подмешиваем — он нужен живому ядру, а не читателю.
 #[tauri::command]
 pub fn config_assembled(state: State<AppState>) -> Result<String> {
-    crate::render::effective::effective(state.routing()?.as_deref(), None).map(|built| built.yaml)
+    crate::render::effective::ConfigRenderer::effective(
+        state.routing.rules(&state)?.as_deref(),
+        None,
+    )
+    .map(|built| built.yaml)
 }
 
 /// Умолчание у файла клиента — шаблон, у части набора — собранное клиентом, поэтому
 /// сброс живёт в `config`, а не в `files` (D-071).
 #[tauri::command]
 pub fn config_reset(id: String) -> Result<String> {
-    crate::render::effective::reset(&id)
+    crate::render::effective::ConfigRenderer::reset(&id)
 }

@@ -2,29 +2,29 @@
 
 use tauri::State;
 
-use crate::app::connect;
 use crate::app::state::AppState;
 use crate::app::status::Status;
-use crate::config::rulesets::{self, Ruleset};
+use crate::config::rulesets::Ruleset;
+use crate::config::rulesets::RulesetStore;
 use crate::error::Result;
 
 /// Все наборы папки и то, какие из них включены.
 #[tauri::command]
 pub fn rulesets_list() -> Vec<Ruleset> {
-    rulesets::list()
+    RulesetStore::list()
 }
 
 /// Текст набора для редактора в окне (D-104).
 #[tauri::command]
 pub fn rulesets_read(id: String) -> Result<String> {
-    rulesets::read(&id)
+    RulesetStore::read(&id)
 }
 
 /// Завести свой набор. Ядру ничего не доезжает: новый набор выключен, и в сборку
 /// он не входит — поэтому здесь идентификатор, а не статус.
 #[tauri::command]
 pub fn rulesets_create(title: String) -> Result<String> {
-    rulesets::create(&title)
+    RulesetStore::create(&title)
 }
 
 /// Удалить набор — и довести это до живого ядра: удалённый включённый набор уносит
@@ -35,8 +35,10 @@ pub async fn rulesets_delete(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Status> {
-    rulesets::delete(&id)?;
-    connect::apply(&app, &state).await
+    state
+        .connection
+        .change(&app, &state, || RulesetStore::delete(&id))
+        .await
 }
 
 /// Записать правку набора — и довести её до живого ядра (D-102).
@@ -51,8 +53,10 @@ pub async fn rulesets_write(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Status> {
-    rulesets::write(&id, &text)?;
-    connect::apply(&app, &state).await
+    state
+        .connection
+        .change(&app, &state, || RulesetStore::write(&id, &text))
+        .await
 }
 
 /// Включить или выключить набор — и довести до живого ядра (D-102, D-143), поэтому
@@ -64,5 +68,8 @@ pub async fn rulesets_set(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Status> {
-    connect::set_ruleset(&app, &state, &id, on).await
+    state
+        .connection
+        .change(&app, &state, || RulesetStore::toggle(&id, on))
+        .await
 }

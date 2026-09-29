@@ -22,7 +22,7 @@ export default function Debug() {
 
   const read = useCallback(async () => {
     const [logs, status, nodes, sources] = await Promise.all([
-      api.coreLogs().catch(() => [] as string[]),
+      api.coreLogs("mihomo").catch(() => [] as string[]),
       api.coreStatus().catch(() => null),
       api.nodesList().catch(() => []),
       api.sourcesList().catch(() => []),

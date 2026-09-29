@@ -2,7 +2,6 @@
 
 use tauri::State;
 
-use crate::app::connect;
 use crate::app::state::AppState;
 use crate::app::status::Status;
 use crate::config::direction;
@@ -20,5 +19,10 @@ pub async fn direction_set(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Status> {
-    connect::set_direction(&app, &state, direction, node).await
+    state
+        .connection
+        .change(&app, &state, || {
+            state.routing.set_direction(&state, direction, node)
+        })
+        .await
 }

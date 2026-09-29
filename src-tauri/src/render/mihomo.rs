@@ -11,7 +11,7 @@ use crate::config::mode::Mode;
 use crate::error::{AppError, Result};
 use crate::nodes::health::EXPECTED;
 use crate::render::plan::{Client, NodeSource};
-use crate::yaml::{fill, merge, set, sub, top_mapping};
+use crate::yaml::Yaml;
 
 /// Имя служебного входа. Отдельное от группы: в логе ядра видно, что это вход, а не выход.
 const PROBE_INBOUND: &str = "probe-in";
@@ -28,51 +28,59 @@ pub struct Effective {
     /// Порт служебного входа под замер (D-072). Пусто — вход не заводили: он нужен только
     /// живому ядру, и в показанный конфиг его не подмешивают.
     pub probe: Option<u16>,
+    /// Адаптер TUN, если режим — TUN: kill switch разрешает выход именно через него (D-073).
+    pub device: Option<String>,
 }
 
-/// Файлы пользователя плюс источники — в тот самый файл, который запускает ядро.
-///
-/// Порядок: сначала документы пользователя, потом наше. Что клиент ставит жёстко —
-/// то, без чего его работа теряет смысл: пути провайдеров и состав автогруппы. Что
-/// заполняет только при отсутствии — умолчания, которые пользователь вправе перебить
-/// (D-029).
-pub fn config(
-    user: &[String],
-    builtin: &[String],
-    sources: &[NodeSource],
-    probe: Option<u16>,
-    client: &Client,
-) -> Result<Effective> {
-    let mut map = assemble(user, sources, client)?;
-    builtin_rules(&mut map, builtin);
-    providers(&mut map, sources, &client.health);
-    let mode = crate::config::mode::of(&map);
-    baseline(&mut map, mode);
-    // После `baseline`: `MATCH` дописывает он, а правило обязано встать **перед** ним.
-    // И только если группа правда собралась — правило в несуществующую цель ядро
-    // не примет, и VPN не поднимется вовсе.
-    if client.udp && has_group(&map, UDP) {
-        udp_rule(&mut map);
-    }
-    if let Some(port) = probe {
-        probe_seam(&mut map, sources, port);
-    }
+pub struct MihomoRenderer;
 
-    let port = match mode {
-        Mode::Local => map
-            .get(Value::from("mixed-port"))
-            .and_then(Value::as_u64)
-            .map(|port| port as u16),
-        Mode::Tun => None,
-    };
-    let yaml = serde_yaml::to_string(&Value::Mapping(map))
-        .map_err(|e| AppError::invalid(e.to_string()))?;
-    Ok(Effective {
-        yaml,
-        mode,
-        port,
-        probe,
-    })
+impl MihomoRenderer {
+    /// Файлы пользователя плюс источники — в тот самый файл, который запускает ядро.
+    ///
+    /// Порядок: сначала документы пользователя, потом наше. Что клиент ставит жёстко —
+    /// то, без чего его работа теряет смысл: пути провайдеров и состав автогруппы. Что
+    /// заполняет только при отсутствии — умолчания, которые пользователь вправе перебить
+    /// (D-029).
+    pub fn config(
+        user: &[String],
+        builtin: &[String],
+        sources: &[NodeSource],
+        probe: Option<u16>,
+        client: &Client,
+    ) -> Result<Effective> {
+        let mut map = assemble(user, sources, client)?;
+        builtin_rules(&mut map, builtin);
+        providers(&mut map, sources, &client.health);
+        let mode = crate::config::mode::Mode::of(&map);
+        baseline(&mut map, mode);
+        // После `baseline`: `MATCH` дописывает он, а правило обязано встать **перед** ним.
+        // И только если группа правда собралась — правило в несуществующую цель ядро
+        // не примет, и VPN не поднимется вовсе.
+        if client.udp && has_group(&map, UDP) {
+            udp_rule(&mut map);
+        }
+        if let Some(port) = probe {
+            probe_seam(&mut map, sources, port);
+        }
+
+        let port = match mode {
+            Mode::Local => map
+                .get(Value::from("mixed-port"))
+                .and_then(Value::as_u64)
+                .map(|port| port as u16),
+            Mode::Tun => None,
+        };
+        let device = (mode == Mode::Tun).then(|| crate::config::mode::Mode::tun_device(&map));
+        let yaml = serde_yaml::to_string(&Value::Mapping(map))
+            .map_err(|e| AppError::invalid(e.to_string()))?;
+        Ok(Effective {
+            yaml,
+            mode,
+            port,
+            probe,
+            device,
+        })
+    }
 }
 
 /// Служебный вход и группа под него (D-072, замерено в S-016).
@@ -109,17 +117,17 @@ fn probe_seam(map: &mut Mapping, sources: &[NodeSource], port: u16) {
         .unwrap_or_default();
     if !groups.iter().filter_map(name_of).any(|name| name == PROBE) {
         let mut group = Mapping::new();
-        set(&mut group, "name", Value::from(PROBE));
-        set(&mut group, "type", Value::from("select"));
+        Yaml::set(&mut group, "name", Value::from(PROBE));
+        Yaml::set(&mut group, "type", Value::from("select"));
         set_use(&mut group, sources);
         if !named.is_empty() {
-            set(&mut group, "proxies", Value::Sequence(named));
+            Yaml::set(&mut group, "proxies", Value::Sequence(named));
         }
         // Ни `url`, ни `interval`: фоновой проверки этой группе не нужно, она существует
         // ради замеров по нажатию.
         let mut all = groups;
         all.push(Value::Mapping(group));
-        set(map, "proxy-groups", Value::Sequence(all));
+        Yaml::set(map, "proxy-groups", Value::Sequence(all));
     }
 
     let mut inbounds = map
@@ -135,13 +143,13 @@ fn probe_seam(map: &mut Mapping, sources: &[NodeSource], port: u16) {
         return;
     }
     let mut inbound = Mapping::new();
-    set(&mut inbound, "name", Value::from(PROBE_INBOUND));
-    set(&mut inbound, "type", Value::from("mixed"));
-    set(&mut inbound, "listen", Value::from("127.0.0.1"));
-    set(&mut inbound, "port", Value::from(port));
-    set(&mut inbound, "proxy", Value::from(PROBE));
+    Yaml::set(&mut inbound, "name", Value::from(PROBE_INBOUND));
+    Yaml::set(&mut inbound, "type", Value::from("mixed"));
+    Yaml::set(&mut inbound, "listen", Value::from("127.0.0.1"));
+    Yaml::set(&mut inbound, "port", Value::from(port));
+    Yaml::set(&mut inbound, "proxy", Value::from(PROBE));
     inbounds.push(Value::Mapping(inbound));
-    set(map, "listeners", Value::Sequence(inbounds));
+    Yaml::set(map, "listeners", Value::Sequence(inbounds));
 }
 
 /// Строки встроенных наборов — между правилами пользователя и `MATCH` (D-083).
@@ -173,7 +181,7 @@ fn builtin_rules(map: &mut Mapping, builtin: &[String]) {
         rules.insert(at + added, value);
         added += 1;
     }
-    set(map, "rules", Value::Sequence(rules));
+    Yaml::set(map, "rules", Value::Sequence(rules));
 }
 
 fn is_match(line: &str) -> bool {
@@ -185,9 +193,9 @@ fn is_match(line: &str) -> bool {
 /// Общая часть конфига и списка выбора: документы пользователя, узлы, которые ядро
 /// из ссылки не прочитает, и наши группы.
 fn assemble(user: &[String], sources: &[NodeSource], client: &Client) -> Result<Mapping> {
-    let mut map = top_mapping("")?;
+    let mut map = Yaml::top_mapping("")?;
     for document in user {
-        merge(&mut map, top_mapping(document)?);
+        Yaml::merge(&mut map, Yaml::top_mapping(document)?);
     }
     proxies(&mut map);
     groups(&mut map, sources, &[], client)?;
@@ -207,7 +215,7 @@ fn proxies(map: &mut Mapping) {
         .cloned()
         .unwrap_or_default();
     if !theirs.is_empty() {
-        set(map, "proxies", Value::Sequence(theirs));
+        Yaml::set(map, "proxies", Value::Sequence(theirs));
     }
 }
 
@@ -216,35 +224,43 @@ fn proxies(map: &mut Mapping) {
 /// Всё заполняется только при отсутствии: шаблоны файлов уже содержат эти поля явно,
 /// а подстраховка нужна на случай, когда пользователь их оттуда убрал.
 fn baseline(map: &mut Mapping, mode: Mode) {
-    fill(map, "mode", Value::from("rule"));
+    Yaml::fill(map, "mode", Value::from("rule"));
     // Без порта local-режим не работает вовсе, а в TUN лишний слушатель ни к чему.
     if mode == Mode::Local {
-        fill(
+        Yaml::fill(
             map,
             "mixed-port",
             Value::from(crate::config::files::LOCAL_PROXY_PORT),
         );
     }
-    fill(map, "log-level", Value::from("info"));
-    fill(map, "allow-lan", Value::from(false));
-    fill(map, "ipv6", Value::from(false));
+    Yaml::fill(map, "log-level", Value::from("info"));
+    Yaml::fill(map, "allow-lan", Value::from(false));
+    Yaml::fill(map, "ipv6", Value::from(false));
 
     // Выбранный узел помним сами (D-039), и `store-selected` у ядра его через перезапуск
     // не удержал (S-012). Пишем выключенным, чтобы не было двух хозяев у одного выбора.
-    fill(sub(map, "profile"), "store-selected", Value::from(false));
+    Yaml::fill(
+        Yaml::sub(map, "profile"),
+        "store-selected",
+        Value::from(false),
+    );
 
     // А вот карту подменных адресов помнить просим (D-103, S-021): без неё после подъёма
     // `198.18.0.4` достаётся тому, кто спросил первым, и приложение с запомненным адресом
     // уезжает по чужому правилу молча. Работает это только с мягкой остановкой — она
     // у нас теперь есть (`system::console`).
-    fill(sub(map, "profile"), "store-fake-ip", Value::from(true));
+    Yaml::fill(
+        Yaml::sub(map, "profile"),
+        "store-fake-ip",
+        Value::from(true),
+    );
 
     // Именно «завести раздел целиком, если его нет», а не заполнение внутри: `sub` создал
     // бы раздел и дописал бы `enable: false` в **пользовательский** `dns`, где его не было,
     // то есть выключил бы то, что человек только что настроил.
     if !map.contains_key(Value::from("dns")) {
         let mut section = Mapping::new();
-        set(&mut section, "enable", Value::from(false));
+        Yaml::set(&mut section, "enable", Value::from(false));
         map.insert(Value::from("dns"), Value::Mapping(section));
     }
 
@@ -261,7 +277,7 @@ fn baseline(map: &mut Mapping, mode: Mode) {
         .unwrap_or_default();
     if !rules.iter().any(|line| line.as_str().is_some_and(is_match)) {
         rules.push(Value::from(format!("MATCH,{SELECTOR}")));
-        set(map, "rules", Value::Sequence(rules));
+        Yaml::set(map, "rules", Value::Sequence(rules));
     }
 }
 
@@ -272,27 +288,27 @@ fn providers(map: &mut Mapping, sources: &[NodeSource], target: &str) {
     if mine.is_empty() {
         return;
     }
-    let providers = sub(map, "proxy-providers");
+    let providers = Yaml::sub(map, "proxy-providers");
     for source in mine {
-        let entry = sub(providers, &source.id);
-        set(entry, "type", Value::from("file"));
-        set(
+        let entry = Yaml::sub(providers, &source.id);
+        Yaml::set(entry, "type", Value::from("file"));
+        Yaml::set(
             entry,
             "path",
             Value::from(source.path.display().to_string()),
         );
 
-        let health = sub(entry, "health-check");
-        set(health, "enable", Value::from(true));
-        set(health, "url", Value::from(target));
-        set(health, "interval", Value::from(HEALTH_INTERVAL));
+        let health = Yaml::sub(entry, "health-check");
+        Yaml::set(health, "enable", Value::from(true));
+        Yaml::set(health, "url", Value::from(target));
+        Yaml::set(health, "interval", Value::from(HEALTH_INTERVAL));
         // Без него ответом считается любой: заглушка провайдера и страница captive
         // portal отвечают двухсотым, и мёртвый выход остаётся в группе (D-108).
-        set(health, "expected-status", Value::from(EXPECTED.to_string()));
+        Yaml::set(health, "expected-status", Value::from(EXPECTED.to_string()));
         // Ленивая: узлы проверяются, когда группой пользуются. Числа в таблице от неё
         // больше не зависят — их меряет клиент сам (D-062), а фоновый обход всех узлов
         // каждые пять минут стоил трафика и не давал взамен ничего.
-        set(health, "lazy", Value::from(true));
+        Yaml::set(health, "lazy", Value::from(true));
     }
 }
 
@@ -338,7 +354,7 @@ fn groups(
         }
     }
     all.extend(theirs);
-    set(map, "proxy-groups", Value::Sequence(all));
+    Yaml::set(map, "proxy-groups", Value::Sequence(all));
     Ok(())
 }
 
@@ -350,18 +366,18 @@ fn named(ours: &[String]) -> Vec<Value> {
 
 fn auto(sources: &[NodeSource], ours: &[String], health: &str) -> Mapping {
     let mut group = Mapping::new();
-    set(&mut group, "name", Value::from(AUTO));
+    Yaml::set(&mut group, "name", Value::from(AUTO));
     // consistent-hashing, а не round-robin: один и тот же адрес обязан уходить через один
     // и тот же сервер, иначе сессия рвётся на каждом запросе.
-    set(&mut group, "type", Value::from("load-balance"));
-    set(&mut group, "strategy", Value::from("consistent-hashing"));
+    Yaml::set(&mut group, "type", Value::from("load-balance"));
+    Yaml::set(&mut group, "strategy", Value::from("consistent-hashing"));
     set_use(&mut group, sources);
     if !ours.is_empty() {
-        set(&mut group, "proxies", Value::Sequence(named(ours)));
+        Yaml::set(&mut group, "proxies", Value::Sequence(named(ours)));
     }
-    set(&mut group, "url", Value::from(health));
-    set(&mut group, "interval", Value::from(HEALTH_INTERVAL));
-    set(
+    Yaml::set(&mut group, "url", Value::from(health));
+    Yaml::set(&mut group, "interval", Value::from(HEALTH_INTERVAL));
+    Yaml::set(
         &mut group,
         "expected-status",
         Value::from(EXPECTED.to_string()),
@@ -390,9 +406,9 @@ fn selector(user_groups: &[String], sources: &[NodeSource], ours: &[String]) -> 
     }
 
     let mut group = Mapping::new();
-    set(&mut group, "name", Value::from(SELECTOR));
-    set(&mut group, "type", Value::from("select"));
-    set(&mut group, "proxies", Value::Sequence(options));
+    Yaml::set(&mut group, "name", Value::from(SELECTOR));
+    Yaml::set(&mut group, "type", Value::from("select"));
+    Yaml::set(&mut group, "proxies", Value::Sequence(options));
     // Узлы провайдера попадают в группу только через `use` (проверено, S-012).
     // Провайдера нет ни у одного источника — поля не будет: пустой список ядро
     // читает как «поля нет» и спотыкается о него (B-016).
@@ -423,26 +439,26 @@ fn udp_group(sources: &[NodeSource], ours: &[String], health: &str) -> Option<Ma
     }
 
     let mut group = Mapping::new();
-    set(&mut group, "name", Value::from(UDP));
-    set(&mut group, "type", Value::from("url-test"));
+    Yaml::set(&mut group, "name", Value::from(UDP));
+    Yaml::set(&mut group, "type", Value::from("url-test"));
     if !from.is_empty() {
         let names: Vec<String> = sources
             .iter()
             .filter(|source| provides(source))
             .flat_map(|source| source.udp.iter().cloned())
             .collect();
-        set(&mut group, "use", Value::Sequence(from));
-        set(&mut group, "filter", Value::from(any(&names)));
+        Yaml::set(&mut group, "use", Value::Sequence(from));
+        Yaml::set(&mut group, "filter", Value::from(any(&names)));
     }
     if !mine.is_empty() {
-        set(&mut group, "proxies", Value::Sequence(named(&mine)));
+        Yaml::set(&mut group, "proxies", Value::Sequence(named(&mine)));
     }
     // Та же цель и тот же ожидаемый код, что у остальных проверок живости (D-108):
     // без `url` группа осталась бы без обхода вовсе. Что этот обход меряет **TCP** —
     // ограничение, названное в D-113: глухой по UDP узел из группы не выпадет.
-    set(&mut group, "url", Value::from(health));
-    set(&mut group, "interval", Value::from(HEALTH_INTERVAL));
-    set(
+    Yaml::set(&mut group, "url", Value::from(health));
+    Yaml::set(&mut group, "interval", Value::from(HEALTH_INTERVAL));
+    Yaml::set(
         &mut group,
         "expected-status",
         Value::from(EXPECTED.to_string()),
@@ -486,7 +502,7 @@ fn udp_rule(map: &mut Mapping) {
         .position(|rule| rule.as_str().is_some_and(is_match))
         .unwrap_or(rules.len());
     rules.insert(at, Value::from(line));
-    set(map, "rules", Value::Sequence(rules));
+    Yaml::set(map, "rules", Value::Sequence(rules));
 }
 
 /// Группы под узлы, названные целью правила (D-082).
@@ -527,15 +543,15 @@ fn node_targets(map: &mut Mapping, sources: &[NodeSource]) {
             continue;
         }
         let mut group = Mapping::new();
-        set(&mut group, "name", Value::from(target.clone()));
-        set(&mut group, "type", Value::from("select"));
-        set(&mut group, "use", Value::Sequence(from));
-        set(&mut group, "filter", Value::from(exact(&target)));
+        Yaml::set(&mut group, "name", Value::from(target.clone()));
+        Yaml::set(&mut group, "type", Value::from("select"));
+        Yaml::set(&mut group, "use", Value::Sequence(from));
+        Yaml::set(&mut group, "filter", Value::from(exact(&target)));
         groups.push(Value::Mapping(group));
         taken.push(target);
     }
     if groups.len() != before {
-        set(map, "proxy-groups", Value::Sequence(groups));
+        Yaml::set(map, "proxy-groups", Value::Sequence(groups));
     }
 }
 
@@ -604,7 +620,7 @@ fn provider_ids(sources: &[NodeSource]) -> Vec<Value> {
 fn set_use(group: &mut Mapping, sources: &[NodeSource]) {
     let list = provider_ids(sources);
     if !list.is_empty() {
-        set(group, "use", Value::Sequence(list));
+        Yaml::set(group, "use", Value::Sequence(list));
     }
 }
 
@@ -640,7 +656,7 @@ mod tests {
         sources: &[NodeSource],
         probe: Option<u16>,
     ) -> Result<Effective> {
-        super::config(user, builtin, sources, probe, &plain())
+        super::MihomoRenderer::config(user, builtin, sources, probe, &plain())
     }
 
     /// Настройки клиента, при которых конфиг собирается «как обычно»: цель проверки
@@ -972,7 +988,7 @@ mod tests {
 
     fn with_udp(sources: &[NodeSource]) -> Value {
         parsed(
-            &super::config(
+            &super::MihomoRenderer::config(
                 &[],
                 &[],
                 sources,
@@ -1073,7 +1089,7 @@ mod tests {
     fn one_target_reaches_both_health_checks() {
         let mine = "http://example.org/generate_204";
         let out = parsed(
-            &super::config(
+            &super::MihomoRenderer::config(
                 &[],
                 &[],
                 &nodes(&["a1"]),
@@ -1252,7 +1268,7 @@ mod tests {
     #[test]
     #[ignore]
     fn core_accepts_the_assembled_config() {
-        let core = crate::paths::core();
+        let core = crate::paths::Paths::core();
         assert!(core.exists(), "ядро не скачано, проверять нечем");
         let dir = std::env::temp_dir().join("umiray-render-check");
         std::fs::create_dir_all(&dir).unwrap();
@@ -1342,8 +1358,8 @@ mod tests {
             extra: Vec::new(),
             origin: None,
         };
-        let groups = crate::config::groups::render("", &[group]).unwrap();
-        let rules = crate::config::rules::render(
+        let groups = crate::config::groups::GroupsCodec::render("", &[group]).unwrap();
+        let rules = crate::config::rules::RulesCodec::render(
             "",
             &crate::config::rules::Routing {
                 rules: vec![crate::config::rules::Rule {

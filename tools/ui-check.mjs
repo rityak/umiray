@@ -96,7 +96,7 @@ const conn = await run(`
     modes: radios('Перехват'),
     routes: radios('Маршрут'),
     exit: !!document.querySelector('[aria-label="VPN"]')?.closest('.rk-card')?.querySelector('.rk-item-title')?.textContent.trim(),
-    load: !!byText('.rk-card-title', 'Нагрузка'),
+    load: !!byText('.rk-card-title', 'Трафик'),
     nodes: !!byText('.rk-card-title', 'Узлы'),
   };
 `);
@@ -180,7 +180,7 @@ const sections = await run(`
   await dock('Маршрутизация');
   out.routing = !!document.querySelector('[aria-label="Набор маршрутизации"]') && !!byText('.rk-card-title', 'MATCH');
   await dock('Настройки');
-  out.settings = !!document.querySelector('[aria-label="Разделы настроек"]') && !!document.querySelector('[aria-label="Что настраиваем"]');
+  out.settings = !!document.querySelector('[aria-label="Разделы настроек"]') && !!document.querySelector('[aria-label="Документ настроек"]');
   [...document.querySelectorAll('[aria-label="Вид"] input')][1]?.click();
   await wait(1200);
   out.code = !!document.querySelector('.cm-editor');
@@ -327,6 +327,11 @@ if (process.env.UI_CHECK_PRESETS === "1") {
     };
   `;
   const flow = await run(`${PICK}
+    // Что было до проверки — по id и направлению, а не по имени: имена наборов повторяются,
+    // и откат «по подписи» однажды применил чужой набор и оставил направление в Rules.
+    const invoke = window.__TAURI_INTERNALS__.invoke;
+    const was = await invoke('presets_list');
+    const route = await invoke('connection_snapshot');
     await dock('Маршрутизация');
     const before = picker().textContent.trim();
     await act('Новый набор');
@@ -338,9 +343,14 @@ if (process.env.UI_CHECK_PRESETS === "1") {
     // Используемый не удаляется: второе нажатие подтверждает, отказ приходит сообщением.
     await drop();
     const refused = !!document.querySelector('.rk-callout[data-tone="danger"]') && picker().textContent.includes(created);
-    // Откат: прежний набор снова применён, свой убран.
-    await pick(before);
-    byText('button', 'Использовать')?.click();
+    // Откат: прежний набор снова применён — или прежнее направление, если набора не было, —
+    // свой убран.
+    if (was.active) {
+      await invoke('presets_select', { id: was.active });
+    } else {
+      const node = route.direction === 'manual' ? route.route[0] ?? null : null;
+      await invoke('direction_set', { direction: route.direction, node });
+    }
     await wait(1500);
     await pick(created);
     await drop();

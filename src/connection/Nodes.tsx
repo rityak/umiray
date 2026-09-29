@@ -25,12 +25,10 @@ type Props = {
   selected: string | null;
   /// RULES assigns routes through rules; the banner offers switching to MANUAL (D-056).
   rules: boolean;
-  /// The selected latency method names the column, rather than every row (D-069).
-  method: api.PingMethod;
+  /// Sources name the nodes and give the list its default order. None — no such order.
   sources: api.Source[];
   /// Privacy mode hides server addresses in this section (D-127).
   hidden: boolean;
-  onHidden: () => void;
   /// App polls live traffic regardless of the open section (S-018).
   rates: Record<string, NodeSpeed>;
   onSelect: (node: string) => void;
@@ -38,7 +36,19 @@ type Props = {
   onChanged: () => void;
   onAdd: () => void;
   onMessage: (message: Message) => void;
-  qd?: { onRefresh: () => Promise<void> };
+  /// Fetch the list again where it comes from. The list says what it refreshes.
+  onRefresh: () => Promise<void>;
+  refreshLabel: string;
+  emptyHint: string;
+  // What the engine can do with its nodes (D-154): absent means the list does not offer it.
+  /// Latency measured on request; the method names the column (D-069).
+  measure?: { method: api.PingMethod; run: () => Promise<void> };
+  /// The list shows addresses, so it carries the privacy toggle (D-127).
+  onHidden?: () => void;
+  /// Nodes of our own sources can be edited (D-114).
+  editable?: boolean;
+  /// No transport details: no address, protocol, source or per-node load.
+  plain?: boolean;
 };
 
 type Sort = "source" | "name" | "delay";
@@ -57,19 +67,27 @@ export default function Nodes({
   nodes,
   selected,
   rules,
-  method,
   sources,
   hidden,
-  onHidden,
   rates,
   onSelect,
   onManual,
   onChanged,
   onAdd,
   onMessage,
-  qd,
+  onRefresh,
+  refreshLabel,
+  emptyHint,
+  measure: measurer,
+  onHidden,
+  editable,
+  plain,
 }: Props) {
-  const [sort, setSort] = useState<Sort>(qd ? "delay" : "source");
+  const bySource = sources.length > 0;
+  const [picked, setSort] = useState<Sort>("source");
+  /// No sources — no source order: the list falls back to latency. Computed, not stored:
+  /// the sources arrive after the first render.
+  const sort = bySource || picked !== "source" ? picked : "delay";
   const [view, setView] = useState<View>("tiles");
   const [measuring, setMeasuring] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -100,9 +118,10 @@ export default function Nodes({
   /// measurements do not show a connect-first banner on every visit (D-062, D-069).
   const measure = useRef(async (_report: boolean) => {});
   measure.current = async (report: boolean) => {
+    if (!measurer) return;
     setMeasuring(true);
     try {
-      await api.nodesPing();
+      await measurer.run();
       onChanged();
     } catch (e) {
       if (report) onMessage(failure(e));
@@ -111,27 +130,12 @@ export default function Nodes({
     }
   };
 
-  /// Refresh subscriptions and the node list, then measure latency again.
+  /// Refresh the list where it comes from, then measure latency again.
   const refresh = async () => {
     setRefreshing(true);
-    if (qd) {
-      try {
-        await qd.onRefresh();
-        onChanged();
-      } catch (e) {
-        onMessage(failure(e));
-      } finally {
-        setRefreshing(false);
-      }
-      return;
-    }
     try {
-      const failures = await api.sourcesRefreshAll();
+      await onRefresh();
       onChanged();
-      // One failed subscription does not cancel successful refreshes.
-      if (failures.length > 0) {
-        onMessage(notice(t("Some subscriptions could not be refreshed."), failures));
-      }
     } catch (e) {
       onMessage(failure(e));
     } finally {
@@ -143,14 +147,14 @@ export default function Nodes({
   /// Measure an unchecked list once, then only on request to avoid repeated pings.
   const measured = useRef(false);
   useEffect(() => {
-    if (qd || measured.current || nodes.length === 0) return;
+    if (!measurer || measured.current || nodes.length === 0) return;
     if (nodes.some((node) => node.delay !== null)) {
       measured.current = true;
       return;
     }
     measured.current = true;
     measure.current(false);
-  }, [nodes, qd]);
+  }, [nodes, measurer]);
 
   const select = useCallback(
     (node: string) => {
@@ -169,11 +173,7 @@ export default function Nodes({
         <EmptyState
           icon={<Server />}
           title={t("No nodes")}
-          hint={
-            qd
-              ? t("Add the qd:// link in Sources.")
-              : t("Add a subscription or a link — the core will load it.")
-          }
+          hint={emptyHint}
           action={
             <Button variant="primary" onClick={onAdd}>
               {t("Add source")}
@@ -204,7 +204,7 @@ export default function Nodes({
             value={sort}
             onChange={setSort}
             options={[
-              ...(qd ? [] : [{ value: "source" as const, label: t("by source") }]),
+              ...(bySource ? [{ value: "source" as const, label: t("by source") }] : []),
               { value: "name", label: t("by name") },
               { value: "delay", label: t("by latency") },
             ]}
@@ -219,7 +219,7 @@ export default function Nodes({
               { value: "table", icon: <Table2 />, hint: t("Table") },
             ]}
           />
-          {!qd && (
+          {onHidden && (
             <IconButton
               size="sm"
               variant="ghost"
@@ -239,18 +239,14 @@ export default function Nodes({
             icon={<RefreshCw />}
             loading={refreshing}
             disabled={measuring}
-            label={
-              qd
-                ? t("Refresh the qd subscription")
-                : t("Refresh subscriptions and measure latency again")
-            }
+            label={refreshLabel}
             onClick={refresh}
           />
           <span className="flex-1" />
-          {!qd && (
+          {measurer && (
             <Tooltip
               content={t("Latency to each server: {method}. Change the method in Settings", {
-                method: api.PING_LABEL[method],
+                method: api.PING_LABEL[measurer.method],
               })}
             >
               <Button
@@ -298,21 +294,21 @@ export default function Nodes({
               sourceName={sourceName}
               hidden={hidden}
               rates={rates}
-              plain={Boolean(qd)}
+              plain={plain}
               onSelect={select}
-              onEdit={qd ? undefined : setEditing}
+              onEdit={editable ? setEditing : undefined}
             />
           ) : (
             <NodeTable
               nodes={visible}
               selected={selected}
-              method={qd ? undefined : method}
+              method={measurer?.method}
               sourceName={sourceName}
               hidden={hidden}
               rates={rates}
-              plain={Boolean(qd)}
+              plain={plain}
               onSelect={select}
-              onEdit={qd ? undefined : setEditing}
+              onEdit={editable ? setEditing : undefined}
             />
           )}
         </div>

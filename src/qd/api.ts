@@ -112,10 +112,6 @@ const ask = <T extends z.ZodType>(
 ) => call(schema, "qd_call", { method, path, body: body ?? null });
 
 export const status = () => call(Status, "qd_status");
-export const start = () => call(State, "qd_start");
-export const stop = () => call(State.nullable(), "qd_stop");
-export const install = () => call(z.string(), "qd_install");
-export const logs = () => call(z.array(z.string()), "qd_logs");
 
 export const nodes = () => ask(z.array(Node), "GET", "/client/api/nodes");
 export const toggle = (patch: { egress?: boolean; adblock?: boolean }) =>

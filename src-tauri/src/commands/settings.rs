@@ -8,12 +8,12 @@ use crate::error::Result;
 
 #[tauri::command]
 pub fn settings_get(state: State<AppState>) -> Settings {
-    state.settings()
+    state.settings.get()
 }
 
 /// Одна команда на все настройки: приходит только то, что меняется (D-037).
 #[tauri::command]
 pub fn settings_update(patch: settings::Patch, state: State<AppState>) -> Result<Settings> {
-    state.patch(patch)?;
-    Ok(state.settings())
+    state.settings.patch(patch)?;
+    Ok(state.settings.get())
 }

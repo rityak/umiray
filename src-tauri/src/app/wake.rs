@@ -20,47 +20,51 @@ use crate::app::state::AppState;
 /// а не пауза «на всякий случай».
 const SETTLE: std::time::Duration = std::time::Duration::from_secs(3);
 
-/// Завести наблюдателя. Своя нить, а не задача рантайма: `NotifyAddrChange` блокируется,
-/// и в асинхронной задаче она заняла бы рабочий поток целиком.
-pub fn watch(app: AppHandle) {
-    std::thread::spawn(move || {
-        while crate::system::wake::next_change() {
-            let app = app.clone();
-            tauri::async_runtime::spawn(async move {
-                tokio::time::sleep(SETTLE).await;
-                look(&app.state::<AppState>()).await;
-            });
-            // Пачку изменений считаем одним событием: без этого одно пробуждение дало бы
-            // десяток обходов всех узлов подряд.
-            std::thread::sleep(SETTLE);
-        }
-    });
-}
+pub struct Wake;
 
-/// Перепроверить часы, узлы и сторожа. Часы — первыми и независимо от ядра: они уезжают
-/// именно во сне, а не в работе.
-pub async fn look(state: &AppState) {
-    clock(state).await;
-    if !state.supervisor.status().running {
-        return;
+impl Wake {
+    /// Завести наблюдателя. Своя нить, а не задача рантайма: `NotifyAddrChange` блокируется,
+    /// и в асинхронной задаче она заняла бы рабочий поток целиком.
+    pub fn watch(app: AppHandle) {
+        std::thread::spawn(move || {
+            while crate::system::wake::AddressWatcher::next_change() {
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(SETTLE).await;
+                    Wake::look(&app.state::<AppState>()).await;
+                });
+                // Пачку изменений считаем одним событием: без этого одно пробуждение дало бы
+                // десяток обходов всех узлов подряд.
+                std::thread::sleep(SETTLE);
+            }
+        });
     }
-    match state.supervisor.recheck().await {
-        Ok(0) => return,
-        // В кольцо, а не только на stderr: повод редкий — сон или смена сети, — и это
-        // единственный ответ на «почему VPN моргнул», который увидит пользователь.
-        Ok(asked) => state.supervisor.note(
-            "info",
-            &format!("сеть сменилась, узлы перепроверены (провайдеров: {asked})"),
-        ),
-        Err(why) => {
-            state.supervisor.note(
-                "warning",
-                &format!("сеть сменилась, но перепроверить не вышло: {why}"),
-            );
+
+    /// Перепроверить часы, узлы и сторожа. Часы — первыми и независимо от ядра: они уезжают
+    /// именно во сне, а не в работе.
+    pub async fn look(state: &AppState) {
+        clock(state).await;
+        if !state.mihomo.status().running {
             return;
         }
+        match state.mihomo.recheck().await {
+            Ok(0) => return,
+            // В кольцо, а не только на stderr: повод редкий — сон или смена сети, — и это
+            // единственный ответ на «почему VPN моргнул», который увидит пользователь.
+            Ok(asked) => state.mihomo.log().note(
+                "info",
+                &format!("сеть сменилась, узлы перепроверены (провайдеров: {asked})"),
+            ),
+            Err(why) => {
+                state.mihomo.log().note(
+                    "warning",
+                    &format!("сеть сменилась, но перепроверить не вышло: {why}"),
+                );
+                return;
+            }
+        }
+        crate::app::guard::Guard::look(state).await;
     }
-    crate::app::guard::look(state).await;
 }
 
 /// Часы после сна (D-115). Повод именно этот: машина, проспавшая ночь, просыпается
@@ -70,11 +74,11 @@ pub async fn look(state: &AppState) {
 /// Эталон не ответил — жалобу не трогаем: сразу после пробуждения сети может не быть
 /// вовсе, и «не сверили» это не «часы точны». Следующее пробуждение спросит заново.
 async fn clock(state: &AppState) {
-    let Some(skew) = crate::diag::clock::skew().await else {
+    let Some(skew) = crate::diag::clock::ClockProbe::skew().await else {
         return;
     };
     state.notices.set(
         CLOCK,
-        crate::diag::clock::complaint(skew).map(Notice::about),
+        crate::diag::clock::ClockProbe::complaint(skew).map(Notice::about),
     );
 }

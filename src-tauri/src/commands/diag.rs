@@ -4,12 +4,14 @@ use tauri::State;
 
 use crate::app::state::AppState;
 use crate::collections;
-use crate::diag::{self, Args, Report, Tool};
+use crate::collections::Collections;
+use crate::diag::Toolbox;
+use crate::diag::{Args, Report, Tool};
 use crate::error::Result;
 
 #[tauri::command]
 pub fn diag_tools() -> Vec<Tool> {
-    diag::tools()
+    Toolbox::tools()
 }
 
 /// Запустить утилиту.
@@ -19,7 +21,7 @@ pub async fn diag_run(
     args: Option<Args>,
     state: State<'_, AppState>,
 ) -> Result<Report> {
-    diag::run(&id, filled(args, &state)?).await
+    state.diagnostics.run(&state, &id, args).await
 }
 
 /// Сделать то, что утилита предлагает: прописать отмеченное в документ пользователя
@@ -34,29 +36,12 @@ pub async fn diag_apply(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Report> {
-    let report = diag::smart::apply(&id, filled(args, &state)?).await?;
-    crate::app::connect::apply(&app, &state).await?;
-    Ok(report)
-}
-
-/// Чего окно не знает и знать не должно: какой набор применён и на каком порту ядро.
-///
-/// Маршрутизация подставляется здесь, а не приходит из окна: какой набор применён —
-/// дело состояния приложения, и спрашивать об этом вебвью значило бы завести второй
-/// источник истины (D-071). Порт работающего ядра — оттуда же: окно знает его только
-/// как число в статусе, а пробам он нужен как адрес прокси.
-fn filled(args: Option<Args>, state: &State<'_, AppState>) -> Result<Args> {
-    let mut args = args.unwrap_or_default();
-    args.rules = state.routing()?;
-    let status = state.supervisor.status();
-    args.proxy = status.port;
-    args.mode = status.mode.map(|mode| format!("{mode:?}").to_lowercase());
-    Ok(args)
+    state.diagnostics.apply(&app, &state, &id, args).await
 }
 
 /// Коллекция резолверов — та же, из которой берёт кандидатов `dns-race`.
 /// Нужен окну для ручного выбора DNS.
 #[tauri::command]
 pub fn diag_providers() -> Result<collections::Resolvers> {
-    collections::dns()
+    Collections::dns()
 }

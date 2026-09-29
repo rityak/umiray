@@ -67,74 +67,78 @@ fn powershell(_script: &str) -> Result<String> {
     Err(AppError::io("Только Windows".to_string()))
 }
 
-pub fn adapters() -> Result<Vec<Adapter>> {
-    let raw = powershell(
+pub struct NetInfo;
+
+impl NetInfo {
+    pub fn adapters() -> Result<Vec<Adapter>> {
+        let raw = powershell(
         "Get-NetAdapter | ForEach-Object { \"$($_.Name)|$($_.InterfaceDescription)|$($_.Status)\" }",
     )?;
-    Ok(parse_adapters(&raw))
-}
+        Ok(parse_adapters(&raw))
+    }
 
-/// Маршруты по умолчанию — все, а не один: их бывает несколько, и вопрос как раз в том,
-/// чей выиграл.
-pub fn default_routes() -> Result<Vec<Route>> {
-    let raw = powershell(
+    /// Маршруты по умолчанию — все, а не один: их бывает несколько, и вопрос как раз в том,
+    /// чей выиграл.
+    pub fn default_routes() -> Result<Vec<Route>> {
+        let raw = powershell(
         "Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | \
          ForEach-Object { \"$($_.InterfaceAlias)|$($_.NextHop)|$($_.RouteMetric + $_.InterfaceMetric)\" }",
     )?;
-    let mut routes = parse_routes(&raw);
-    // Побеждает меньшая метрика — сортируем сразу, чтобы читающий не считал сам.
-    routes.sort_by_key(|route| route.metric);
-    Ok(routes)
-}
+        let mut routes = parse_routes(&raw);
+        // Побеждает меньшая метрика — сортируем сразу, чтобы читающий не считал сам.
+        routes.sort_by_key(|route| route.metric);
+        Ok(routes)
+    }
 
-/// Резолверы системы — только у поднятых адаптеров с непустым списком: у выключенной
-/// сетевой карты он остаётся от прошлой жизни и в диагностике только мешает.
-pub fn resolvers() -> Result<Vec<Resolvers>> {
-    let raw = powershell(
-        "Get-DnsClientServerAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | \
+    /// Резолверы системы — только у поднятых адаптеров с непустым списком: у выключенной
+    /// сетевой карты он остаётся от прошлой жизни и в диагностике только мешает.
+    pub fn resolvers() -> Result<Vec<Resolvers>> {
+        let raw = powershell(
+            "Get-DnsClientServerAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | \
          Where-Object { $_.ServerAddresses.Count -gt 0 } | \
          ForEach-Object { \"$($_.InterfaceAlias)|$($_.ServerAddresses -join ',')\" }",
-    )?;
-    Ok(parse_resolvers(&raw))
-}
+        )?;
+        Ok(parse_resolvers(&raw))
+    }
 
-/// DNS поднятых физических адаптеров до появления TUN. Берём оба семейства: IPv6 DNS
-/// может быть единственным путём утечки, даже когда основной маршрут IPv4.
-#[cfg(test)]
-pub fn physical_resolvers() -> Result<Vec<String>> {
-    let raw = powershell(
+    /// DNS поднятых физических адаптеров до появления TUN. Берём оба семейства: IPv6 DNS
+    /// может быть единственным путём утечки, даже когда основной маршрут IPv4.
+    #[cfg(test)]
+    pub fn physical_resolvers() -> Result<Vec<String>> {
+        let raw = powershell(
         "$physical = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue | \
          Where-Object { $_.Status -eq 'Up' } | Select-Object -ExpandProperty ifIndex); \
          Get-DnsClientServerAddress -ErrorAction SilentlyContinue | \
          Where-Object { $physical -contains $_.InterfaceIndex -and $_.ServerAddresses.Count -gt 0 } | \
          ForEach-Object { \"$($_.InterfaceAlias)|$($_.ServerAddresses -join ',')\" }",
     )?;
-    Ok(resolver_servers(&raw))
-}
+        Ok(resolver_servers(&raw))
+    }
 
-/// Первый резолвер системы: тот, кого спрашивает всё остальное на машине. Именно его
-/// чаще всего и подменяют.
-pub fn first_resolver() -> Option<String> {
-    resolvers()
-        .ok()?
-        .into_iter()
-        .flat_map(|entry| entry.servers)
-        // Локальная заглушка (сам ядро в TUN, DNS-прокси роутера на 127.x) отвечает
-        // не за провайдера, и сверять с ней подмену бессмысленно.
-        .find(|server| !server.starts_with("127."))
-}
+    /// Первый резолвер системы: тот, кого спрашивает всё остальное на машине. Именно его
+    /// чаще всего и подменяют.
+    pub fn first_resolver() -> Option<String> {
+        NetInfo::resolvers()
+            .ok()?
+            .into_iter()
+            .flat_map(|entry| entry.servers)
+            // Локальная заглушка (сам ядро в TUN, DNS-прокси роутера на 127.x) отвечает
+            // не за провайдера, и сверять с ней подмену бессмысленно.
+            .find(|server| !server.starts_with("127."))
+    }
 
-/// Кто слушает TCP-порт: имя процесса с номером, а если имени не прочитать — один номер
-/// (D-133). Спрашивается только на отказе: PowerShell стоит полсекунды, а удачному
-/// запуску ответ не нужен вовсе.
-pub fn port_owner(port: u16) -> Option<String> {
-    let raw = powershell(&format!(
+    /// Кто слушает TCP-порт: имя процесса с номером, а если имени не прочитать — один номер
+    /// (D-133). Спрашивается только на отказе: PowerShell стоит полсекунды, а удачному
+    /// запуску ответ не нужен вовсе.
+    pub fn port_owner(port: u16) -> Option<String> {
+        let raw = powershell(&format!(
         "Get-NetTCPConnection -LocalPort {port} -State Listen -ErrorAction SilentlyContinue | \
          Select-Object -First 1 | ForEach-Object {{ \
          \"$($_.OwningProcess)|$((Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).ProcessName)\" }}"
     ))
     .ok()?;
-    parse_owner(&raw)
+        parse_owner(&raw)
+    }
 }
 
 fn parse_owner(raw: &str) -> Option<String> {

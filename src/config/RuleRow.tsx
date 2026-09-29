@@ -1,4 +1,5 @@
 import {
+  AppWindow,
   ArrowDown,
   ArrowRight,
   ArrowUp,
@@ -9,7 +10,7 @@ import {
 } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 import {
-  Badge,
+  Button,
   Card,
   Field,
   IconButton,
@@ -21,8 +22,9 @@ import {
   Textarea,
   Tooltip,
 } from "rootik";
-import type * as api from "../api";
+import * as api from "../api";
 import { t, tn } from "../i18n";
+import ProcessPicker from "../shell/ProcessPicker";
 import { targetLook } from "./kinds";
 import { ruleValues } from "./rule-values";
 import TargetPicker from "./TargetPicker";
@@ -66,8 +68,6 @@ type Props = {
   nodes: string[];
   first: boolean;
   last: boolean;
-  /// This rule matched in the "where will a domain go" check.
-  hit: boolean;
   open: boolean;
   onToggle: () => void;
   onChange: (rule: api.Rule) => void;
@@ -87,7 +87,6 @@ export default function RuleRow({
   nodes,
   first,
   last,
-  hit,
   open,
   onToggle,
   onChange,
@@ -98,6 +97,8 @@ export default function RuleRow({
   const panelId = useId();
   const [text, setText] = useState(() => rule.values.join("\n"));
   const [armed, setArmed] = useState(false);
+  // D-153: PROCESS-NAME can take a running exe while free-form values remain editable.
+  const [picking, setPicking] = useState(false);
   // Preserve blank lines and the caret while typing; synchronize external undo/moves.
   useEffect(() => {
     setText((was) =>
@@ -108,7 +109,7 @@ export default function RuleRow({
   }, [rule.values]);
   const preview = rule.values.slice(0, 2).join(" · ");
   return (
-    <Card padding="sm" selected={hit} className="um-rule">
+    <Card padding="sm" className="um-rule">
       <div className="um-rule-header grid grid-cols-[24px_170px_minmax(0,1fr)_16px_210px_32px_32px] items-center gap-2">
         {/* The number in the outcome's tone: order and "where" read at a glance. */}
         <Tooltip content={look.word}>
@@ -185,31 +186,50 @@ export default function RuleRow({
           </MenuItem>
         </Menu>
       </div>
-      {hit && (
-        <Badge size="sm" tone="success" className="self-start">
-          {t("will match")}
-        </Badge>
-      )}
       <div id={panelId} hidden={!open}>
         {open && (
           <Field label={valuesLabel(rule.kind)} hint={t("One value per line. Paste a whole list.")}>
-            <Textarea
-              className="um-rule-values w-full resize-y"
-              mono
-              rows={6}
-              spellCheck={false}
-              aria-label={t("Rule {no} values", { no })}
-              placeholder={PLACEHOLDER[rule.kind] ?? "example"}
-              value={text}
-              onChange={(event) => {
-                const next = event.target.value;
-                setText(next);
-                onChange({ ...rule, values: ruleValues(next) });
-              }}
-            />
+            <div className="flex flex-col items-start gap-2">
+              <Textarea
+                className="um-rule-values w-full resize-y"
+                mono
+                rows={6}
+                spellCheck={false}
+                aria-label={t("Rule {no} values", { no })}
+                placeholder={PLACEHOLDER[rule.kind] ?? "example"}
+                value={text}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  setText(next);
+                  onChange({ ...rule, values: ruleValues(next) });
+                }}
+              />
+              {rule.kind === "PROCESS-NAME" && (
+                <Button size="sm" icon={<AppWindow />} onClick={() => setPicking(true)}>
+                  {t("Choose running process")}
+                </Button>
+              )}
+            </div>
           </Field>
         )}
       </div>
+      {picking && rule.kind === "PROCESS-NAME" && (
+        <ProcessPicker
+          taken={new Set(rule.values.map((value) => value.toLowerCase()))}
+          onPick={({ process }) => {
+            const values = ruleValues(text);
+            if (values.some((value) => value.toLowerCase() === process.toLowerCase())) return;
+            const next = [...values, process];
+            setText(next.join("\n"));
+            onChange({ ...rule, values: next });
+          }}
+          onClose={() => setPicking(false)}
+          load={api.rulesProcesses}
+          cacheKey="rules.processes"
+          title={t("Choose running process")}
+          searchLabel={t("Search by name")}
+        />
+      )}
     </Card>
   );
 }

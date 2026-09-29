@@ -14,27 +14,31 @@
 
 use crate::app::notice::{Notice, GUARD};
 use crate::app::state::AppState;
-use crate::diag::web;
+use crate::diag::web::WebProbe;
 
-/// Посмотреть, идёт ли трафик, и запомнить ответ. Ядро не работает — жалоб быть
-/// не может: сторож про туннель, а не про то, что его нет.
-///
-/// В TUN идём напрямую: там перехвачен весь трафик машины, и обычный запрос **и есть**
-/// запрос через туннель. В local — через порт прокси, иначе замерили бы домашний канал.
-pub async fn look(state: &AppState) {
-    let core = state.supervisor.status();
-    let Some(since) = core.started.filter(|_| core.running) else {
-        state.notices.set(GUARD, None);
-        return;
-    };
-    let seen = web::whoami(core.port).await;
-    state.notices.set(
-        GUARD,
-        seen.is_none().then(|| {
-            Notice::about_core(
-                "Ядро работает, но наружу через него ничего не проходит — узел молчит.",
-                since,
-            )
-        }),
-    );
+pub struct Guard;
+
+impl Guard {
+    /// Посмотреть, идёт ли трафик, и запомнить ответ. Ядро не работает — жалоб быть
+    /// не может: сторож про туннель, а не про то, что его нет.
+    ///
+    /// В TUN идём напрямую: там перехвачен весь трафик машины, и обычный запрос **и есть**
+    /// запрос через туннель. В local — через порт прокси, иначе замерили бы домашний канал.
+    pub async fn look(state: &AppState) {
+        let core = state.mihomo.status();
+        let Some(since) = core.started.filter(|_| core.running) else {
+            state.notices.set(GUARD, None);
+            return;
+        };
+        let seen = WebProbe::whoami(core.port).await;
+        state.notices.set(
+            GUARD,
+            seen.is_none().then(|| {
+                Notice::about_core(
+                    "Ядро работает, но наружу через него ничего не проходит — узел молчит.",
+                    since,
+                )
+            }),
+        );
+    }
 }

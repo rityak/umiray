@@ -4,24 +4,42 @@ import { Badge, Dialog, EmptyState, Item, ItemGroup, SearchInput } from "rootik"
 import { useCached } from "../hooks/useCached";
 import { unchanged, usePoll } from "../hooks/usePoll";
 import { t } from "../i18n";
-import * as qd from "./api";
+
+export type Process = {
+  name: string;
+  path?: string;
+  icon?: string;
+  connections?: number;
+};
 
 type Props = {
   taken: Set<string>;
   onPick: (pick: { process: string; path?: string }) => void;
   onClose: () => void;
+  load: () => Promise<Process[]>;
+  cacheKey: string;
+  title: string;
+  searchLabel: string;
 };
 
 const keyOf = (item: { name?: string; process?: string; path?: string }) =>
   (item.path || item.name || item.process || "").toLowerCase();
 
-export default function ProcessPicker({ taken, onPick, onClose }: Props) {
-  const [running, setRunning] = useCached<qd.Process[]>("qd.processes", []);
+export default function ProcessPicker({
+  taken,
+  onPick,
+  onClose,
+  load,
+  cacheKey,
+  title,
+  searchLabel,
+}: Props) {
+  const [running, setRunning] = useCached<Process[]>(cacheKey, []);
   const [term, setTerm] = useState("");
 
   usePoll(
     () => {
-      qd.processes().then(unchanged(setRunning), () => {});
+      load().then(unchanged(setRunning), () => {});
     },
     true,
     5000,
@@ -30,7 +48,7 @@ export default function ProcessPicker({ taken, onPick, onClose }: Props) {
   const needle = term.trim().toLowerCase();
 
   const shown = useMemo(() => {
-    const folded = new Map<string, qd.Process & { instances: number }>();
+    const folded = new Map<string, Process & { instances: number }>();
     for (const item of running) {
       if (
         needle &&
@@ -62,12 +80,12 @@ export default function ProcessPicker({ taken, onPick, onClose }: Props) {
   };
 
   return (
-    <Dialog open size="md" title={t("New rule")} onClose={onClose}>
+    <Dialog open size="md" title={title} onClose={onClose}>
       <div className="flex flex-col gap-3">
         <SearchInput
           autoFocus
-          aria-label={t("Search by name or path")}
-          placeholder={t("Search by name or path")}
+          aria-label={searchLabel}
+          placeholder={searchLabel}
           value={term}
           onChange={(event) => setTerm(event.target.value)}
           onClear={() => setTerm("")}

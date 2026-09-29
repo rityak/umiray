@@ -4,21 +4,25 @@ use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-/// Записать во временный файл рядом, вытолкнуть содержимое на диск и заменить цель.
-/// Соседство обязательно: только внутри одного тома rename остаётся атомарным.
-pub fn write(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> io::Result<()> {
-    let path = path.as_ref();
-    let (temporary, mut file) = temporary(path)?;
-    let result = (|| {
-        file.write_all(contents.as_ref())?;
-        file.sync_all()?;
-        drop(file);
-        replace(&temporary, path)
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&temporary);
+pub struct AtomicFile;
+
+impl AtomicFile {
+    /// Записать во временный файл рядом, вытолкнуть содержимое на диск и заменить цель.
+    /// Соседство обязательно: только внутри одного тома rename остаётся атомарным.
+    pub fn write(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> io::Result<()> {
+        let path = path.as_ref();
+        let (temporary, mut file) = temporary(path)?;
+        let result = (|| {
+            file.write_all(contents.as_ref())?;
+            file.sync_all()?;
+            drop(file);
+            replace(&temporary, path)
+        })();
+        if result.is_err() {
+            let _ = std::fs::remove_file(&temporary);
+        }
+        result
     }
-    result
 }
 
 fn temporary(path: &Path) -> io::Result<(PathBuf, std::fs::File)> {
@@ -82,10 +86,12 @@ mod tests {
 
     #[test]
     fn an_existing_file_is_replaced_whole() {
-        let path =
-            std::env::temp_dir().join(format!("umiray-atomic-{}.txt", crate::stamp::id().unwrap()));
+        let path = std::env::temp_dir().join(format!(
+            "umiray-atomic-{}.txt",
+            crate::stamp::Stamp::id().unwrap()
+        ));
         std::fs::write(&path, "before").unwrap();
-        write(&path, "after").unwrap();
+        AtomicFile::write(&path, "after").unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "after");
         std::fs::remove_file(path).unwrap();
     }

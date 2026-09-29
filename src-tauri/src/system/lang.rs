@@ -14,11 +14,13 @@ pub enum Lang {
     Ru,
 }
 
-pub fn detect() -> Lang {
-    if layouts().into_iter().any(is_russian) {
-        Lang::Ru
-    } else {
-        Lang::En
+impl Lang {
+    pub fn detect() -> Lang {
+        if layouts().into_iter().any(is_russian) {
+            Lang::Ru
+        } else {
+            Lang::En
+        }
     }
 }
 

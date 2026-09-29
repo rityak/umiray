@@ -17,7 +17,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, Result};
-use crate::paths;
+use crate::paths::Paths;
 
 /// Имена коллекций-документов — они же имена файлов без расширения.
 pub const DNS: &str = "dns";
@@ -111,62 +111,103 @@ pub struct Sites {
     pub sites: Vec<Site>,
 }
 
-/// Положить образцы, если коллекций ещё нет.
-///
-/// Папку целиком, а не файл по отдельности: удалённая коллекция не должна возвращаться
-/// сама при следующем запуске — иначе «удалить» означало бы «удалить до перезапуска».
-/// Переезд со старой раскладки идёт **до** этого вызова и оставляет папку заполненной,
-/// поэтому здесь она уже существует и раздача не трогает ничего (D-100).
-pub fn seed() -> Result<()> {
-    if paths::collections_dir().exists() {
-        return Ok(());
-    }
-    fill_missing()
-}
+pub struct Collections;
 
-/// Дописать то, чего в коллекциях нет. Нужен переезду: старая установка приносит
-/// `catalog/` и `rulesets/` порознь, и любой из них мог отсутствовать.
-pub fn fill_missing() -> Result<()> {
-    std::fs::create_dir_all(paths::collections_dir())?;
-    for (name, shipped) in [(DNS, DNS_SHIPPED), (SITES, SITES_SHIPPED)] {
-        let path = paths::collection_file(name);
-        if !path.exists() {
-            crate::atomic::write(path, shipped)?;
+impl Collections {
+    /// Положить образцы, если коллекций ещё нет.
+    ///
+    /// Папку целиком, а не файл по отдельности: удалённая коллекция не должна возвращаться
+    /// сама при следующем запуске — иначе «удалить» означало бы «удалить до перезапуска».
+    /// Переезд со старой раскладки идёт **до** этого вызова и оставляет папку заполненной,
+    /// поэтому здесь она уже существует и раздача не трогает ничего (D-100).
+    pub fn seed() -> Result<()> {
+        if Paths::collections_dir().exists() {
+            return Ok(());
         }
+        Collections::fill_missing()
     }
-    let rules = paths::collection_folder(RULES);
-    std::fs::create_dir_all(&rules)?;
-    for (id, shipped) in RULES_SHIPPED {
-        let path = rules.join(format!("{id}.yaml"));
-        if !path.exists() {
-            crate::atomic::write(path, shipped)?;
-        }
-    }
-    Ok(())
-}
 
-/// Добавить перевод прежним стандартным наборам один раз; правки владельца сохраняются.
-pub fn adopt_rule_titles() -> Result<()> {
-    let marker = paths::collections_dir().join(".rule-titles-v1");
-    if marker.exists() {
-        return Ok(());
-    }
-    for (id, shipped) in RULES_SHIPPED {
-        let path = paths::collection_folder(RULES).join(format!("{id}.yaml"));
-        if path.exists() {
-            let text = std::fs::read_to_string(&path)?;
-            if let Some(updated) = translated_title(&text, shipped) {
-                crate::atomic::write(path, updated)?;
+    /// Дописать то, чего в коллекциях нет. Нужен переезду: старая установка приносит
+    /// `catalog/` и `rulesets/` порознь, и любой из них мог отсутствовать.
+    pub fn fill_missing() -> Result<()> {
+        std::fs::create_dir_all(Paths::collections_dir())?;
+        for (name, shipped) in [(DNS, DNS_SHIPPED), (SITES, SITES_SHIPPED)] {
+            let path = Paths::collection_file(name);
+            if !path.exists() {
+                crate::atomic::AtomicFile::write(path, shipped)?;
             }
         }
+        let rules = Paths::collection_folder(RULES);
+        std::fs::create_dir_all(&rules)?;
+        for (id, shipped) in RULES_SHIPPED {
+            let path = rules.join(format!("{id}.yaml"));
+            if !path.exists() {
+                crate::atomic::AtomicFile::write(path, shipped)?;
+            }
+        }
+        Ok(())
     }
-    crate::atomic::write(marker, "1\n")?;
-    Ok(())
+
+    /// Добавить перевод прежним стандартным наборам один раз; правки владельца сохраняются.
+    pub fn adopt_rule_titles() -> Result<()> {
+        let marker = Paths::collections_dir().join(".rule-titles-v1");
+        if marker.exists() {
+            return Ok(());
+        }
+        for (id, shipped) in RULES_SHIPPED {
+            let path = Paths::collection_folder(RULES).join(format!("{id}.yaml"));
+            if path.exists() {
+                let text = std::fs::read_to_string(&path)?;
+                if let Some(updated) = translated_title(&text, shipped) {
+                    crate::atomic::AtomicFile::write(path, updated)?;
+                }
+            }
+        }
+        crate::atomic::AtomicFile::write(marker, "1\n")?;
+        Ok(())
+    }
+
+    /// Прочитать коллекцию резолверов. Файла нет — читаем вшитый образец: она нужна окну
+    /// и без диска, а первый запуск не должен показывать пустой список.
+    pub fn dns() -> Result<Resolvers> {
+        parse_named(DNS, DNS_SHIPPED)
+    }
+
+    /// Прочитать список эталонных ресурсов.
+    pub fn sites() -> Result<Sites> {
+        parse_named(SITES, SITES_SHIPPED)
+    }
+
+    /// Файл коллекции-папки по идентификатору. Раскладку `collections/` знает только
+    /// это место (D-155); проверять идентификатор — дело того, кто его принёс.
+    pub fn file(folder: &str, id: &str) -> std::path::PathBuf {
+        Paths::collection_folder(folder).join(format!("{id}.yaml"))
+    }
+
+    /// Файлы коллекции-папки: `(идентификатор, содержимое)`, по алфавиту.
+    ///
+    /// Порядок задаётся здесь, а не тем, как файлы легли на диск: у наборов правил от него
+    /// зависит порядок строк в собранном конфиге.
+    pub fn folder(name: &str) -> Vec<(String, String)> {
+        let Ok(entries) = std::fs::read_dir(Paths::collection_folder(name)) else {
+            return Vec::new();
+        };
+        let mut items: Vec<(String, String)> = entries
+            .flatten()
+            .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "yaml"))
+            .filter_map(|entry| {
+                let id = entry.path().file_stem()?.to_str()?.to_string();
+                Some((id, std::fs::read_to_string(entry.path()).ok()?))
+            })
+            .collect();
+        items.sort_by(|a, b| a.0.cmp(&b.0));
+        items
+    }
 }
 
 fn translated_title(text: &str, shipped: &str) -> Option<String> {
-    let map = crate::yaml::top_mapping(text).ok()?;
-    let sample = crate::yaml::top_mapping(shipped).ok()?;
+    let map = crate::yaml::Yaml::top_mapping(text).ok()?;
+    let sample = crate::yaml::Yaml::top_mapping(shipped).ok()?;
     let key = serde_yaml::Value::from("title_en");
     if map.contains_key(&key)
         || map.get(serde_yaml::Value::from("title")) != sample.get(serde_yaml::Value::from("title"))
@@ -175,24 +216,13 @@ fn translated_title(text: &str, shipped: &str) -> Option<String> {
     }
     let title = serde_yaml::to_string(sample.get(&key)?).ok()?;
     let updated = format!("{text}\ntitle_en: {title}");
-    crate::yaml::top_mapping(&updated).ok()?;
+    crate::yaml::Yaml::top_mapping(&updated).ok()?;
     Some(updated)
-}
-
-/// Прочитать коллекцию резолверов. Файла нет — читаем вшитый образец: она нужна окну
-/// и без диска, а первый запуск не должен показывать пустой список.
-pub fn dns() -> Result<Resolvers> {
-    parse_named(DNS, DNS_SHIPPED)
-}
-
-/// Прочитать список эталонных ресурсов.
-pub fn sites() -> Result<Sites> {
-    parse_named(SITES, SITES_SHIPPED)
 }
 
 /// Общее чтение документа: файл с диска, а нет его — вшитый образец.
 fn parse_named<T: serde::de::DeserializeOwned>(name: &str, shipped: &str) -> Result<T> {
-    let text = std::fs::read_to_string(paths::collection_file(name))
+    let text = std::fs::read_to_string(Paths::collection_file(name))
         .unwrap_or_else(|_| shipped.to_string());
     read(&text, name)
 }
@@ -201,29 +231,9 @@ fn read<T: serde::de::DeserializeOwned>(text: &str, name: &str) -> Result<T> {
     serde_yaml::from_str(text).map_err(|e| {
         AppError::invalid(format!(
             "Коллекция «{name}» не читается: {e}. Файл — {}",
-            paths::collection_file(name).display()
+            Paths::collection_file(name).display()
         ))
     })
-}
-
-/// Файлы коллекции-папки: `(идентификатор, содержимое)`, по алфавиту.
-///
-/// Порядок задаётся здесь, а не тем, как файлы легли на диск: у наборов правил от него
-/// зависит порядок строк в собранном конфиге.
-pub fn folder(name: &str) -> Vec<(String, String)> {
-    let Ok(entries) = std::fs::read_dir(paths::collection_folder(name)) else {
-        return Vec::new();
-    };
-    let mut items: Vec<(String, String)> = entries
-        .flatten()
-        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "yaml"))
-        .filter_map(|entry| {
-            let id = entry.path().file_stem()?.to_str()?.to_string();
-            Some((id, std::fs::read_to_string(entry.path()).ok()?))
-        })
-        .collect();
-    items.sort_by(|a, b| a.0.cmp(&b.0));
-    items
 }
 
 #[cfg(test)]

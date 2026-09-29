@@ -5,13 +5,13 @@
 //! и владелец у неё `settings.json` (D-047). Собрать обе половины в одно понятие можно
 //! только здесь, где видно и файл, и настройки.
 //!
-//! Здесь только запись выбора; до живого ядра его доводит `connect::set_mode` (D-143).
+//! Здесь только запись выбора; до живого ядра его доводит `Connection::set_mode` (D-143).
 
 use serde::{Deserialize, Serialize};
 
 use crate::app::settings;
 use crate::app::state::AppState;
-use crate::config::mode::{self, Mode};
+use crate::config::mode::Mode;
 use crate::error::Result;
 
 /// Что стоит в шапке. `Off` здесь нет: выключение — это кнопка питания, а не режим (D-060).
@@ -37,26 +37,28 @@ impl Choice {
     }
 }
 
-/// Что выбрано сейчас. Читается, а не помнится: конфиг правит и редактор тоже (D-052).
-pub fn get(state: &AppState) -> Choice {
-    if mode::current() == Mode::Tun {
-        return Choice::Tun;
+impl Choice {
+    /// Что выбрано сейчас. Читается, а не помнится: конфиг правит и редактор тоже (D-052).
+    pub fn get(state: &AppState) -> Choice {
+        if Mode::current() == Mode::Tun {
+            return Choice::Tun;
+        }
+        if state.settings.get().system_proxy {
+            Choice::System
+        } else {
+            Choice::Local
+        }
     }
-    if state.settings().system_proxy {
-        Choice::System
-    } else {
-        Choice::Local
-    }
-}
 
-/// Записать выбор. Обе половины сразу и в этом порядке: сорвётся запись конфига —
-/// не изменится ничего, а обратный порядок оставил бы намерение без файла.
-pub fn set(state: &AppState, choice: Choice) -> Result<()> {
-    mode::write(choice.core())?;
-    state.patch(settings::Patch {
-        system_proxy: Some(choice == Choice::System),
-        ..Default::default()
-    })
+    /// Записать выбор. Обе половины сразу и в этом порядке: сорвётся запись конфига —
+    /// не изменится ничего, а обратный порядок оставил бы намерение без файла.
+    pub fn set(state: &AppState, choice: Choice) -> Result<()> {
+        Mode::write(choice.core())?;
+        state.settings.patch(settings::Patch {
+            system_proxy: Some(choice == Choice::System),
+            ..Default::default()
+        })
+    }
 }
 
 #[cfg(test)]

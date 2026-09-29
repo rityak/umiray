@@ -15,9 +15,9 @@ use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
-use crate::core::controller::Controller;
+use crate::core::mihomo::controller::Controller;
+use crate::core::mihomo::Mihomo;
 use crate::error::{AppError, Result};
-use crate::paths;
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -48,7 +48,7 @@ impl Bench {
     /// То же, но с готовым конфигом: перебор сочетаний (`diag::matrix`) меняет не только
     /// резолвер, и собирать его строку здесь значило бы держать вторую копию перебора.
     pub async fn with(config: &str) -> Result<Self> {
-        let core = paths::core();
+        let core = Mihomo::binary();
         if !core.exists() {
             return Err(AppError::invalid(
                 "Ядра нет — шифрованные точки мерить нечем".to_string(),
@@ -57,10 +57,10 @@ impl Bench {
         let controller = Controller::new()?;
         // Папка своя у каждого стенда: их поднимают по нескольку разом, и общий каталог
         // они бы затирали друг у друга. Имя берём от порта управления — он уже уникален.
-        let dir = paths::run_dir().join(format!("bench-{}", controller.port()));
+        let dir = Mihomo::workdir().join(format!("bench-{}", controller.port()));
         std::fs::create_dir_all(&dir)?;
         let path = dir.join("config.yaml");
-        crate::atomic::write(&path, config)?;
+        crate::atomic::AtomicFile::write(&path, config)?;
 
         let mut command = Command::new(&core);
         command

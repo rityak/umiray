@@ -22,9 +22,10 @@
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 
-use crate::config::files::{self, CLIENT};
+use crate::config::files::Documents;
+use crate::config::files::CLIENT;
 use crate::error::{AppError, Result};
-use crate::yaml::{set, top_mapping};
+use crate::yaml::Yaml;
 
 const KEY: &str = "wireguard-mask";
 
@@ -112,7 +113,7 @@ impl Mask {
         let mut map = serde_yaml::Mapping::new();
         for (name, value) in self.pairs() {
             if value > 0 {
-                set(&mut map, name, Value::from(value));
+                Yaml::set(&mut map, name, Value::from(value));
             }
         }
         Some(Value::Mapping(map))
@@ -161,33 +162,35 @@ impl Mask {
     }
 }
 
-/// Что лежит в файле. Мусор в поле — это умолчание, а не отказ собрать конфиг: из-за
-/// настройки маскировки не поднять VPN было бы хуже, чем её не применить.
-pub fn get() -> Mask {
-    files::read(CLIENT)
-        .ok()
-        .and_then(|text| of(&text).ok())
-        .unwrap_or_default()
-}
+impl Mask {
+    /// Что лежит в файле. Мусор в поле — это умолчание, а не отказ собрать конфиг: из-за
+    /// настройки маскировки не поднять VPN было бы хуже, чем её не применить.
+    pub fn get() -> Mask {
+        Documents::read(CLIENT)
+            .ok()
+            .and_then(|text| of(&text).ok())
+            .unwrap_or_default()
+    }
 
-/// Записать и отдать записанное: окно показывает файл, а не свою память о нём.
-pub fn set_mask(mask: Mask) -> Result<Mask> {
-    mask.check()?;
-    let mut map = top_mapping(&files::read(CLIENT)?)?;
-    set(
-        &mut map,
-        KEY,
-        serde_yaml::to_value(mask).map_err(|e| AppError::invalid(e.to_string()))?,
-    );
-    let text = serde_yaml::to_string(&Value::Mapping(map))
-        .map_err(|e| AppError::invalid(e.to_string()))?;
-    files::write(CLIENT, &text)?;
-    Ok(mask)
+    /// Записать и отдать записанное: окно показывает файл, а не свою память о нём.
+    pub fn set_mask(mask: Mask) -> Result<Mask> {
+        mask.check()?;
+        let mut map = Yaml::top_mapping(&Documents::read(CLIENT)?)?;
+        Yaml::set(
+            &mut map,
+            KEY,
+            serde_yaml::to_value(mask).map_err(|e| AppError::invalid(e.to_string()))?,
+        );
+        let text = serde_yaml::to_string(&Value::Mapping(map))
+            .map_err(|e| AppError::invalid(e.to_string()))?;
+        Documents::write(CLIENT, &text)?;
+        Ok(mask)
+    }
 }
 
 /// Разбор отделён от диска — правила проверяются обычным `cargo test`.
 fn of(text: &str) -> Result<Mask> {
-    let map = top_mapping(text)?;
+    let map = Yaml::top_mapping(text)?;
     match map.get(Value::from(KEY)) {
         Some(value) => {
             serde_yaml::from_value(value.clone()).map_err(|e| AppError::invalid(e.to_string()))

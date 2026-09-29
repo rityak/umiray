@@ -14,19 +14,23 @@
 //! Модуль **только замечает**. Что делать с замеченным, решает `app::wake`: здесь нет
 //! ни ядра, ни состояния приложения.
 
-/// Ждать следующего изменения. `false` — система отказала, и звать снова бессмысленно.
-///
-/// Вызов блокирующий: своя нить, а не задача рантайма. Никакого опроса — нить спит
-/// в ядре Windows, пока таблица адресов не изменится.
-#[cfg(windows)]
-pub fn next_change() -> bool {
-    use windows_sys::Win32::NetworkManagement::IpHelper::NotifyAddrChange;
-    // Оба параметра пустые — синхронный режим: функция возвращается, когда изменение
-    // уже случилось.
-    unsafe { NotifyAddrChange(std::ptr::null_mut(), std::ptr::null()) == 0 }
-}
+pub struct AddressWatcher;
 
-#[cfg(not(windows))]
-pub fn next_change() -> bool {
-    false
+impl AddressWatcher {
+    /// Ждать следующего изменения. `false` — система отказала, и звать снова бессмысленно.
+    ///
+    /// Вызов блокирующий: своя нить, а не задача рантайма. Никакого опроса — нить спит
+    /// в ядре Windows, пока таблица адресов не изменится.
+    #[cfg(windows)]
+    pub fn next_change() -> bool {
+        use windows_sys::Win32::NetworkManagement::IpHelper::NotifyAddrChange;
+        // Оба параметра пустые — синхронный режим: функция возвращается, когда изменение
+        // уже случилось.
+        unsafe { NotifyAddrChange(std::ptr::null_mut(), std::ptr::null()) == 0 }
+    }
+
+    #[cfg(not(windows))]
+    pub fn next_change() -> bool {
+        false
+    }
 }

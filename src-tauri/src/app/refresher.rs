@@ -6,23 +6,54 @@
 use crate::app::settings::Refresh;
 use crate::app::state::AppState;
 use crate::error::{AppError, Result};
-use crate::nodes::source_import;
-use crate::nodes::sources;
+use crate::nodes::source_import::SourceImporter;
+use crate::nodes::sources::SourceStore;
 
-/// Заход фазы `tick`: обновить то, чему подошёл срок.
-///
-/// Отказ отдаём одной строкой, а не окном: провайдер мог просто не ответить, узлы остались
-/// прежними, и всплывающее окно посреди работы раздражало бы сильнее, чем помогало. Что
-/// источник не обновился, видно по дате в его карточке — и по строке в логе.
-pub async fn due(state: &AppState, first: bool) -> Result<()> {
-    let Some(period) = period(state.settings().refresh, first) else {
-        return Ok(());
-    };
-    let failures = refresh_all(state, Some(period)).await;
-    if failures.is_empty() {
-        return Ok(());
+pub struct Refresher;
+
+impl Refresher {
+    /// Заход фазы `tick`: обновить то, чему подошёл срок.
+    ///
+    /// Отказ отдаём одной строкой, а не окном: провайдер мог просто не ответить, узлы остались
+    /// прежними, и всплывающее окно посреди работы раздражало бы сильнее, чем помогало. Что
+    /// источник не обновился, видно по дате в его карточке — и по строке в логе.
+    pub async fn due(state: &AppState, first: bool) -> Result<()> {
+        let Some(period) = period(state.settings.get().refresh, first) else {
+            return Ok(());
+        };
+        let failures = Refresher::refresh_all(state, Some(period)).await;
+        if failures.is_empty() {
+            return Ok(());
+        }
+        Err(AppError::network(failures.join("; ")))
     }
-    Err(AppError::network(failures.join("; ")))
+
+    /// Обновить подписки и дать живому ядру перечитать их на месте (S-012).
+    ///
+    /// `period` — сколько минут источник считается свежим; `None` значит «не глядя на срок»,
+    /// и это ровно то, чего ждут от нажатой кнопки: человек нажал именно потому, что
+    /// расписание его не устраивает.
+    ///
+    /// Возвращает строки о том, что **не** получилось. Отказ одного источника не отменяет
+    /// остальных: подписок бывает несколько, и упавшая одна — не повод бросить прочие.
+    pub async fn refresh_all(state: &AppState, period: Option<u64>) -> Vec<String> {
+        let mut failures = Vec::new();
+        for source in SourceStore::list() {
+            if source.url.is_none() || period.is_some_and(|period| !is_due(source.updated, period))
+            {
+                continue;
+            }
+            match SourceImporter::refresh(&source.id).await {
+                Ok((updated, _)) => {
+                    let _ = state.mihomo.reload(&updated.id).await;
+                }
+                Err(why) => {
+                    failures.push(format!("подписка «{}» не обновилась: {why}", source.name))
+                }
+            }
+        }
+        failures
+    }
 }
 
 /// Сколько минут источник считается свежим на этом заходе — и стоит ли вообще заходить.
@@ -37,30 +68,6 @@ fn period(refresh: Refresh, first: bool) -> Option<u64> {
         (false, 0) => None,
         (_, minutes) => Some(u64::from(minutes)),
     }
-}
-
-/// Обновить подписки и дать живому ядру перечитать их на месте (S-012).
-///
-/// `period` — сколько минут источник считается свежим; `None` значит «не глядя на срок»,
-/// и это ровно то, чего ждут от нажатой кнопки: человек нажал именно потому, что
-/// расписание его не устраивает.
-///
-/// Возвращает строки о том, что **не** получилось. Отказ одного источника не отменяет
-/// остальных: подписок бывает несколько, и упавшая одна — не повод бросить прочие.
-pub async fn refresh_all(state: &AppState, period: Option<u64>) -> Vec<String> {
-    let mut failures = Vec::new();
-    for source in sources::list() {
-        if source.url.is_none() || period.is_some_and(|period| !is_due(source.updated, period)) {
-            continue;
-        }
-        match source_import::refresh(&source.id).await {
-            Ok((updated, _)) => {
-                let _ = state.supervisor.reload(&updated.id).await;
-            }
-            Err(why) => failures.push(format!("подписка «{}» не обновилась: {why}", source.name)),
-        }
-    }
-    failures
 }
 
 /// Пора ли. Источник, который не обновлялся ни разу, пора всегда.

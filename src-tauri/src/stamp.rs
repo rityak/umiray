@@ -6,37 +6,41 @@
 
 use crate::error::{AppError, Result};
 
-/// Шестнадцать шестнадцатеричных цифр: коротко, читается глазами в имени файла,
-/// и столкнуться на одной машине нечем.
-pub fn id() -> Result<String> {
-    let mut bytes = [0u8; 8];
-    getrandom::fill(&mut bytes)
-        .map_err(|e| AppError::io(format!("Не удалось получить случайные байты: {e}")))?;
-    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
-}
+pub struct Stamp;
 
-/// Секунды эпохи. `None`, если часы машины стоят до 1970 — форматирует всё равно окно.
-pub fn now() -> Option<u64> {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .map(|since| since.as_secs())
-}
+impl Stamp {
+    /// Шестнадцать шестнадцатеричных цифр: коротко, читается глазами в имени файла,
+    /// и столкнуться на одной машине нечем.
+    pub fn id() -> Result<String> {
+        let mut bytes = [0u8; 8];
+        getrandom::fill(&mut bytes)
+            .map_err(|e| AppError::io(format!("Не удалось получить случайные байты: {e}")))?;
+        Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+    }
 
-/// Местное время строкой, как его пишет mihomo в `time=`: `2026-09-26T17:32:55.123`.
-/// Своим строкам в логе нужно то же время, что у строк ядра, иначе колонка времени
-/// в окне дырявая ровно там, где объясняется нажатие кнопки.
-#[cfg(windows)]
-pub fn local() -> String {
-    use windows_sys::Win32::System::SystemInformation::GetLocalTime;
-    // SAFETY: GetLocalTime только заполняет переданную структуру.
-    let t = unsafe {
-        let mut t = std::mem::zeroed();
-        GetLocalTime(&mut t);
-        t
-    };
-    format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}",
-        t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond, t.wMilliseconds
-    )
+    /// Секунды эпохи. `None`, если часы машины стоят до 1970 — форматирует всё равно окно.
+    pub fn now() -> Option<u64> {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .map(|since| since.as_secs())
+    }
+
+    /// Местное время строкой, как его пишет mihomo в `time=`: `2026-09-26T17:32:55.123`.
+    /// Своим строкам в логе нужно то же время, что у строк ядра, иначе колонка времени
+    /// в окне дырявая ровно там, где объясняется нажатие кнопки.
+    #[cfg(windows)]
+    pub fn local() -> String {
+        use windows_sys::Win32::System::SystemInformation::GetLocalTime;
+        // SAFETY: GetLocalTime только заполняет переданную структуру.
+        let t = unsafe {
+            let mut t = std::mem::zeroed();
+            GetLocalTime(&mut t);
+            t
+        };
+        format!(
+            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}",
+            t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond, t.wMilliseconds
+        )
+    }
 }

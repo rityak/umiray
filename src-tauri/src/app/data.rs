@@ -4,11 +4,16 @@ use std::path::Path;
 
 use crate::error::Result;
 use crate::paths;
+use crate::paths::Paths;
 
 const MARKER: &str = ".data-v2";
 
-pub fn migrate() -> Result<()> {
-    adopt(&paths::legacy_root(), &paths::root())
+pub struct DataDir;
+
+impl DataDir {
+    pub fn migrate() -> Result<()> {
+        adopt(&Paths::legacy_root(), &Paths::root())
+    }
 }
 
 fn adopt(from: &Path, to: &Path) -> Result<()> {
@@ -21,7 +26,7 @@ fn adopt(from: &Path, to: &Path) -> Result<()> {
         copy_missing(from, to, true)?;
     }
     // Только после всех файлов: прерванный переезд продолжится при следующем запуске.
-    crate::atomic::write(marker, "1\n")?;
+    crate::atomic::AtomicFile::write(marker, "1\n")?;
     Ok(())
 }
 
@@ -40,7 +45,7 @@ fn copy_missing(from: &Path, to: &Path, root: bool) -> Result<()> {
         } else if kind.is_file() && !target.exists() {
             // Atomic write не оставляет полфайла, которое следующий прогон принял бы
             // за существующие данные. Исходный каталог остаётся резервной копией.
-            crate::atomic::write(target, std::fs::read(entry.path())?)?;
+            crate::atomic::AtomicFile::write(target, std::fs::read(entry.path())?)?;
         } else if kind.is_symlink() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
@@ -58,8 +63,10 @@ mod tests {
 
     #[test]
     fn migration_preserves_old_and_new_data_and_does_not_reimport_deleted_files() {
-        let temp =
-            std::env::temp_dir().join(format!("umiray-data-{}", crate::stamp::id().unwrap()));
+        let temp = std::env::temp_dir().join(format!(
+            "umiray-data-{}",
+            crate::stamp::Stamp::id().unwrap()
+        ));
         let old = temp.join("old");
         let new = temp.join("new");
         std::fs::create_dir_all(old.join("sources")).unwrap();

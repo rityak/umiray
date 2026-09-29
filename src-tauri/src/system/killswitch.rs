@@ -116,10 +116,54 @@ fn powershell(_script: &str) -> Result<String> {
     ))
 }
 
-/// Состояние профилей брандмауэра. Наружу — ради диагностики (D-097): «включён ли
-/// он вообще» спрашивают до того, как поверят галке защиты.
-pub fn profiles() -> Result<Vec<Profile>> {
-    read_profiles()
+pub struct Firewall;
+
+impl Firewall {
+    /// Состояние профилей брандмауэра. Наружу — ради диагностики (D-097): «включён ли
+    /// он вообще» спрашивают до того, как поверят галке защиты.
+    pub fn profiles() -> Result<Vec<Profile>> {
+        read_profiles()
+    }
+
+    /// Поставить защиту. `core` — путь к бинарю ядра, `device` — имя его адаптера.
+    ///
+    /// Порядок обязателен и обратен интуиции: **сначала разрешения, потом запрет**. Поставь
+    /// запрет первым — и между ним и первым разрешением есть окно, в котором машина уже без
+    /// сети, а ядро ещё не выведено из-под него.
+    /// Поставить защиту. `core` — путь к бинарю ядра, `device` — имя его адаптера.
+    ///
+    /// Порядок обязателен и обратен интуиции: **сначала разрешения, потом запрет**. Поставь
+    /// запрет первым — и между ним и первым разрешением есть окно, в котором машина уже без
+    /// сети, а ядро ещё не выведено из-под него.
+    #[cfg(test)]
+    pub fn engage(core: &std::path::Path, device: &str) -> Result<Backup> {
+        let previous = read_profiles()?;
+        if let Err(why) = Firewall::apply(core, device) {
+            // Полдороги хуже, чем ничего: разрешения без запрета бессмысленны, запрет без
+            // разрешений отнимает сеть. Прибираем за собой и отдаём причину наверх.
+            let _ = Firewall::release(&Backup { profiles: previous });
+            return Err(why);
+        }
+        Ok(Backup { profiles: previous })
+    }
+
+    /// Поставить правила без нового снимка. Снимок хранит приложение до изменения ОС,
+    /// поэтому reconnect не должен заменять его состоянием уже включённого запрета.
+    pub fn apply(core: &std::path::Path, device: &str) -> Result<()> {
+        powershell(&script(&core.display().to_string(), device))?;
+        Ok(())
+    }
+
+    pub fn release(previous: &Backup) -> Result<()> {
+        let restore = restore_script(previous);
+        powershell(&format!(
+            "$ErrorActionPreference='Stop'
+         {restore}
+         Get-NetFirewallRule -DisplayName '{PREFIX}*' -ErrorAction SilentlyContinue | \
+           Remove-NetFirewallRule"
+        ))?;
+        Ok(())
+    }
 }
 
 /// Прочитать состояние профилей — чтобы потом было к чему вернуться.
@@ -175,35 +219,6 @@ fn script(core: &str, device: &str) -> String {
     )
 }
 
-/// Поставить защиту. `core` — путь к бинарю ядра, `device` — имя его адаптера.
-///
-/// Порядок обязателен и обратен интуиции: **сначала разрешения, потом запрет**. Поставь
-/// запрет первым — и между ним и первым разрешением есть окно, в котором машина уже без
-/// сети, а ядро ещё не выведено из-под него.
-/// Поставить защиту. `core` — путь к бинарю ядра, `device` — имя его адаптера.
-///
-/// Порядок обязателен и обратен интуиции: **сначала разрешения, потом запрет**. Поставь
-/// запрет первым — и между ним и первым разрешением есть окно, в котором машина уже без
-/// сети, а ядро ещё не выведено из-под него.
-#[cfg(test)]
-pub fn engage(core: &std::path::Path, device: &str) -> Result<Backup> {
-    let previous = read_profiles()?;
-    if let Err(why) = apply(core, device) {
-        // Полдороги хуже, чем ничего: разрешения без запрета бессмысленны, запрет без
-        // разрешений отнимает сеть. Прибираем за собой и отдаём причину наверх.
-        let _ = release(&Backup { profiles: previous });
-        return Err(why);
-    }
-    Ok(Backup { profiles: previous })
-}
-
-/// Поставить правила без нового снимка. Снимок хранит приложение до изменения ОС,
-/// поэтому reconnect не должен заменять его состоянием уже включённого запрета.
-pub fn apply(core: &std::path::Path, device: &str) -> Result<()> {
-    powershell(&script(&core.display().to_string(), device))?;
-    Ok(())
-}
-
 /// Снять защиту и вернуть умолчание, каким оно было.
 ///
 /// Вызывается при штатной остановке, при выходе и **при старте клиента** — последнее и есть
@@ -239,17 +254,6 @@ pub(crate) fn restore_script(previous: &Backup) -> String {
     } else {
         profiles
     }
-}
-
-pub fn release(previous: &Backup) -> Result<()> {
-    let restore = restore_script(previous);
-    powershell(&format!(
-        "$ErrorActionPreference='Stop'
-         {restore}
-         Get-NetFirewallRule -DisplayName '{PREFIX}*' -ErrorAction SilentlyContinue | \
-           Remove-NetFirewallRule"
-    ))?;
-    Ok(())
 }
 
 #[cfg(test)]

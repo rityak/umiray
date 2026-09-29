@@ -1,19 +1,12 @@
 import { Download, Server, ShieldAlert } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
-import {
-  Button,
-  Callout,
-  Card,
-  EmptyState,
-  Field,
-  Item,
-  PowerButton,
-  SegmentedControl,
-  Text,
-} from "rootik";
+import { Button, Callout, Card, EmptyState, Field, Item, SegmentedControl } from "rootik";
+import type * as api from "../api";
 import NodeDelay from "../connection/NodeDelay";
 import Nodes from "../connection/Nodes";
+import PowerRow from "../connection/PowerRow";
 import Speed from "../connection/Speed";
+import { ENGINES } from "../engines";
 import { useCached } from "../hooks/useCached";
 import { unchanged, usePoll } from "../hooks/usePoll";
 import { type Speed as Rate, ZERO } from "../hooks/useTraffic";
@@ -22,13 +15,14 @@ import { failure, type Message, notice } from "../shell/Banner";
 import Uptime from "../shell/Uptime";
 import * as qd from "./api";
 
-let since: number | null = null;
-
 type Wish = { egress?: boolean; adblock?: boolean };
 
 type Props = {
   status: qd.Status | null;
-  otherRunning: boolean;
+  /// When the tunnel came up — counted by the client, not here: the window outlives it.
+  started: number | null;
+  /// Another engine carries traffic now; turning qd on stops it first (D-154).
+  other: api.Engine | null;
   powering: boolean;
   onPower: () => void;
   onChanged: () => Promise<void> | void;
@@ -40,7 +34,8 @@ type Props = {
 
 export default function QdConnection({
   status,
-  otherRunning,
+  started,
+  other,
   powering,
   onPower,
   onChanged,
@@ -129,44 +124,39 @@ export default function QdConnection({
   const node = connected ? (state?.node ?? null) : null;
   const total = state?.nodes.total ?? 0;
   const face = node ?? (total === 1 ? (nodes[0] ?? null) : null);
-  if (connected && since === null) since = Math.floor(Date.now() / 1000);
-  if (state && !connected) since = null;
 
   return (
     <div className="grid min-h-0 flex-1 grid-cols-[340px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-3">
       <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
         {status?.problem && <Callout tone="danger" title={status.problem} />}
-        {otherRunning && (
-          <Callout tone="info" title={t("mihomo is running now")}>
-            {t("Turning qd on stops mihomo first.")}
+        {other && (
+          <Callout
+            tone="info"
+            title={t("{engine} is running now", { engine: ENGINES[other].label })}
+          >
+            {t("Turning qd on stops {engine} first.", { engine: ENGINES[other].label })}
           </Callout>
         )}
         <Card padding="sm" aria-label={t("Connection")}>
           <div className="flex flex-col gap-3">
-            <div className="flex items-center gap-4">
-              <PowerButton
-                label="VPN"
-                size="sm"
-                on={connected}
-                pending={powering}
-                tone={state?.failed ? "danger" : "accent"}
-                onChange={onPower}
-              />
-              <div className="flex min-w-0 flex-col gap-1">
-                <span className="um-headline">
-                  {powering ? t("Connecting…") : connected ? t("Connected") : t("Disconnected")}
-                </span>
-                <Text tone="muted" size="xs" className="block">
-                  {connected ? (
-                    <>
-                      qd · <Uptime started={since} fallback={t("just now")} />
-                    </>
-                  ) : (
-                    "qd"
-                  )}
-                </Text>
-              </div>
-            </div>
+            <PowerRow
+              on={connected}
+              powering={powering}
+              failed={Boolean(state?.failed)}
+              headline={
+                powering ? t("Connecting…") : connected ? t("Connected") : t("Disconnected")
+              }
+              detail={
+                connected ? (
+                  <>
+                    qd · <Uptime started={started} fallback={t("just now")} />
+                  </>
+                ) : (
+                  "qd"
+                )
+              }
+              onPower={onPower}
+            />
 
             <Item
               className="w-full"
@@ -234,17 +224,18 @@ export default function QdConnection({
         nodes={shown}
         selected={nodes.find((item) => item.selected && connected)?.name ?? null}
         rules={false}
-        method="proxy"
         sources={[]}
         hidden={false}
-        onHidden={() => {}}
         rates={{}}
         onSelect={pick}
         onManual={() => {}}
         onChanged={reloadNodes}
         onAdd={onAdd}
         onMessage={onMessage}
-        qd={{ onRefresh: refresh }}
+        onRefresh={refresh}
+        refreshLabel={t("Refresh the qd subscription")}
+        emptyHint={t("Add the qd:// link in Sources.")}
+        plain
       />
     </div>
   );

@@ -34,12 +34,14 @@ type Props = {
   /// Всё, что нужно форме «Клиента»: статус, настройки и действия над системой (D-089).
   /// Едет одним объектом транзитом — сам редактор про них ничего не знает.
   client: ClientProps;
+  /// A document the engine renders itself — a form over its own API, no file behind it
+  /// (D-154). It gets the section bar's start and nothing else: no reading, no code view.
   own?: { id: string; render: (start: React.ReactNode) => React.ReactNode };
 };
 
 /// Значок документа. Список закрытый: документов в «Настройках» ровно два (D-117),
 /// и знать их в лицо — работа этой полосы, а не повод заводить реестр.
-const ICONS: Record<string, typeof Cpu> = { client: Sparkles, advanced: Cpu, qd: Cpu };
+const ICONS: Record<string, typeof Cpu> = { client: Sparkles, advanced: Cpu };
 
 /// Документ настроек клиента. Идентификаторы документов знает и окно — так же, как знает
 /// их значки: список закрытый, и второй способ его узнать был бы лишним запросом.
@@ -237,7 +239,7 @@ export default function ConfigEditor({
         value={doc.id}
         onChange={setDocId}
         options={section.docs.map((item) => {
-          const Icon = ICONS[item.id] ?? Sparkles;
+          const Icon = ICONS[item.id] ?? Cpu;
           return {
             value: item.id,
             label: `${item.label}${isDirty(drafts[item.id]) ? " •" : ""}`,

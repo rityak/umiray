@@ -114,7 +114,8 @@ on({
     splash.step(t("downloading mihomo — once on first launch"));
     splash.hold();
     try {
-      boot.message(notice(await api.coreInstall()));
+      const version = await api.coreInstall("mihomo");
+      boot.message(notice(t("{engine} {version} downloaded", { engine: "mihomo", version })));
       boot.status(await api.coreStatus());
     } catch (e) {
       // Окно откроется без ядра — и скажет об этом кнопкой, а не только текстом:

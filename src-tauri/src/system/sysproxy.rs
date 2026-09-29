@@ -11,7 +11,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::system::registry;
+use crate::system::registry::Registry;
 
 const KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
 
@@ -47,78 +47,82 @@ pub struct Backup {
     pub bypass: Option<String>,
 }
 
-/// Наш ли адрес сейчас в реестре. По этому признаку и убираем за собой после падения:
-/// чужой прокси трогать нельзя, свой — обязаны.
-pub fn is_ours(address: &str) -> bool {
-    matches!(read(), Ok(current) if current.enabled && current.server == address)
-}
+pub struct WinProxy;
 
-/// Прочитать текущее состояние — чтобы потом было к чему вернуться.
-pub fn read() -> Result<Backup> {
-    Ok(Backup {
-        enabled: registry::read_dword(KEY, "ProxyEnable")?.unwrap_or(0) == 1,
-        server: registry::read_string(KEY, "ProxyServer")?.unwrap_or_default(),
-        // Заполняет `enable`: здесь мы только читаем чужое состояние.
-        ours: String::new(),
-        bypass: registry::read_string(KEY, "ProxyOverride")?,
-    })
-}
-
-/// Включить наш прокси. Возвращает снимок: что стояло раньше и что поставили мы.
-#[cfg(test)]
-pub fn enable(address: &str) -> Result<Backup> {
-    let mut previous = read()?;
-    previous.ours = address.to_string();
-    if let Err(why) = apply(address) {
-        let _ = put(&previous);
-        return Err(why);
+impl WinProxy {
+    /// Наш ли адрес сейчас в реестре. По этому признаку и убираем за собой после падения:
+    /// чужой прокси трогать нельзя, свой — обязаны.
+    pub fn is_ours(address: &str) -> bool {
+        matches!(WinProxy::read(), Ok(current) if current.enabled && current.server == address)
     }
-    Ok(previous)
-}
 
-/// Записать адрес без нового снимка. Нужен при повторном подъёме: исходное состояние
-/// уже сохранено, и подменять его снимком нашей же настройки нельзя.
-pub fn apply(address: &str) -> Result<()> {
-    let current = read()?;
-    if let Err(why) = write(address) {
-        let _ = put(&current);
-        return Err(why);
+    /// Прочитать текущее состояние — чтобы потом было к чему вернуться.
+    pub fn read() -> Result<Backup> {
+        Ok(Backup {
+            enabled: Registry::read_dword(KEY, "ProxyEnable")?.unwrap_or(0) == 1,
+            server: Registry::read_string(KEY, "ProxyServer")?.unwrap_or_default(),
+            // Заполняет `enable`: здесь мы только читаем чужое состояние.
+            ours: String::new(),
+            bypass: Registry::read_string(KEY, "ProxyOverride")?,
+        })
     }
-    Ok(())
+
+    /// Включить наш прокси. Возвращает снимок: что стояло раньше и что поставили мы.
+    #[cfg(test)]
+    pub fn enable(address: &str) -> Result<Backup> {
+        let mut previous = WinProxy::read()?;
+        previous.ours = address.to_string();
+        if let Err(why) = WinProxy::apply(address) {
+            let _ = put(&previous);
+            return Err(why);
+        }
+        Ok(previous)
+    }
+
+    /// Записать адрес без нового снимка. Нужен при повторном подъёме: исходное состояние
+    /// уже сохранено, и подменять его снимком нашей же настройки нельзя.
+    pub fn apply(address: &str) -> Result<()> {
+        let current = WinProxy::read()?;
+        if let Err(why) = write(address) {
+            let _ = put(&current);
+            return Err(why);
+        }
+        Ok(())
+    }
+
+    /// Вернуть как было.
+    ///
+    /// **Чужое не трогаем.** Если в реестре уже не наш адрес, значит прокси сменил кто-то
+    /// другой — другой VPN-клиент, например, — и восстанавливать «как было до нас» нельзя:
+    /// мы затрём его свежую настройку своей несвежей. В этом случае просто забываем снимок.
+    ///
+    /// Снимок обязателен: без него неизвестно, наша ли запись в реестре, а «выключить любой
+    /// прокси» — не наше дело. Кто прибирается, тот и предъявляет снимок.
+    pub fn restore(previous: &Backup) -> Result<()> {
+        if !previous.ours.is_empty() && !WinProxy::is_ours(&previous.ours) {
+            return Ok(());
+        }
+        put(previous)
+    }
 }
 
 fn write(address: &str) -> Result<()> {
-    registry::write_string(KEY, "ProxyServer", address)?;
-    registry::write_string(KEY, "ProxyOverride", BYPASS)?;
-    registry::write_dword(KEY, "ProxyEnable", 1)?;
+    Registry::write_string(KEY, "ProxyServer", address)?;
+    Registry::write_string(KEY, "ProxyOverride", BYPASS)?;
+    Registry::write_dword(KEY, "ProxyEnable", 1)?;
     notify();
     Ok(())
 }
 
 fn put(previous: &Backup) -> Result<()> {
-    registry::write_string(KEY, "ProxyServer", &previous.server)?;
+    Registry::write_string(KEY, "ProxyServer", &previous.server)?;
     match &previous.bypass {
-        Some(bypass) => registry::write_string(KEY, "ProxyOverride", bypass)?,
-        None => registry::delete_value(KEY, "ProxyOverride")?,
+        Some(bypass) => Registry::write_string(KEY, "ProxyOverride", bypass)?,
+        None => Registry::delete_value(KEY, "ProxyOverride")?,
     }
-    registry::write_dword(KEY, "ProxyEnable", u32::from(previous.enabled))?;
+    Registry::write_dword(KEY, "ProxyEnable", u32::from(previous.enabled))?;
     notify();
     Ok(())
-}
-
-/// Вернуть как было.
-///
-/// **Чужое не трогаем.** Если в реестре уже не наш адрес, значит прокси сменил кто-то
-/// другой — другой VPN-клиент, например, — и восстанавливать «как было до нас» нельзя:
-/// мы затрём его свежую настройку своей несвежей. В этом случае просто забываем снимок.
-///
-/// Снимок обязателен: без него неизвестно, наша ли запись в реестре, а «выключить любой
-/// прокси» — не наше дело. Кто прибирается, тот и предъявляет снимок.
-pub fn restore(previous: &Backup) -> Result<()> {
-    if !previous.ours.is_empty() && !is_ours(&previous.ours) {
-        return Ok(());
-    }
-    put(previous)
 }
 
 /// Сказать системе, что настройки изменились. Без этого уже запущенный браузер продолжит

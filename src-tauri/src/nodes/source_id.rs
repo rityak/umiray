@@ -21,7 +21,7 @@ impl SourceId {
     }
 
     pub fn new() -> Result<Self> {
-        Self::parse(&crate::stamp::id()?)
+        Self::parse(&crate::stamp::Stamp::id()?)
     }
 
     pub fn as_str(&self) -> &str {

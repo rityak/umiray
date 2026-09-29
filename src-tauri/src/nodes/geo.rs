@@ -12,10 +12,11 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 
-use crate::config::files::{self, CLIENT};
+use crate::config::files::Documents;
+use crate::config::files::CLIENT;
 use crate::error::Result;
-use crate::paths;
-use crate::yaml::top_mapping;
+use crate::paths::Paths;
+use crate::yaml::Yaml;
 
 /// Поле `client.yaml`: через сколько часов спрашивать заново. Ноль — не спрашивать вовсе.
 const HOURS: &str = "geo-hours";
@@ -47,107 +48,111 @@ pub struct Known {
 
 pub type Cache = BTreeMap<String, Known>;
 
-pub fn load() -> Cache {
-    std::fs::read_to_string(paths::geo())
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default()
+pub struct GeoCache;
+
+impl GeoCache {
+    pub fn load() -> Cache {
+        std::fs::read_to_string(Paths::geo())
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default()
+    }
+
+    /// Через сколько часов спрашивать заново; 0 — геозапросы выключены.
+    ///
+    /// Файл правится руками, и мусор в нём — это умолчание, а не отказ: страна не та вещь,
+    /// ради которой стоит не показать список узлов.
+    pub fn hours() -> u64 {
+        let Ok(text) = Documents::read(CLIENT) else {
+            return DEFAULT_HOURS;
+        };
+        let Ok(map) = Yaml::top_mapping(&text) else {
+            return DEFAULT_HOURS;
+        };
+        match map.get(Value::from(HOURS)) {
+            None => DEFAULT_HOURS,
+            Some(value) => value.as_u64().unwrap_or(DEFAULT_HOURS),
+        }
+    }
+
+    /// Записать срок. Точечно, как режим перехвата (D-052): остальное в `client.yaml` не наше.
+    pub fn set_hours(hours: u64) -> Result<()> {
+        let mut map = Yaml::top_mapping(&Documents::read(CLIENT)?)?;
+        crate::yaml::Yaml::set(&mut map, HOURS, Value::from(hours));
+        let text = serde_yaml::to_string(&Value::Mapping(map))
+            .map_err(|e| crate::error::AppError::invalid(e.to_string()))?;
+        Documents::write(CLIENT, &text)
+    }
+
+    /// Адреса, которые пора спросить: незнакомые и те, чей ответ старше срока.
+    pub fn due(addresses: &[String], cache: &Cache, hours: u64, now: u64) -> Vec<String> {
+        if hours == 0 {
+            return Vec::new();
+        }
+        let age = hours * 3600;
+        let mut want: Vec<String> = addresses
+            .iter()
+            .filter(|address| match cache.get(*address) {
+                None => true,
+                Some(known) if known.country.is_none() => {
+                    now.saturating_sub(known.at) >= age.min(UNKNOWN_RETRY)
+                }
+                Some(known) => now.saturating_sub(known.at) >= age,
+            })
+            .cloned()
+            .collect();
+        want.sort();
+        want.dedup();
+        want
+    }
+
+    /// Спросить про всё, чему подошёл срок, и запомнить.
+    ///
+    /// Последовательно и без спешки: узлов десятки, а не тысячи, и торопиться некуда —
+    /// зато чужой сервис не получает залп.
+    pub async fn refresh() -> Result<()> {
+        let hours = GeoCache::hours();
+        if hours == 0 {
+            return Ok(());
+        }
+        let addresses: Vec<String> = crate::nodes::source_catalog::SourceCatalog::nodes()
+            .into_iter()
+            .filter_map(|node| node.address)
+            .collect();
+        let mut cache = GeoCache::load();
+        let want = GeoCache::due(
+            &addresses,
+            &cache,
+            hours,
+            crate::stamp::Stamp::now().unwrap_or_default(),
+        );
+        if want.is_empty() {
+            return Ok(());
+        }
+        for address in want {
+            // Сервис не ответил — не запоминаем ничего: спросим на следующем такте, а не
+            // через неделю.
+            let Some(country) = ask(&address).await else {
+                continue;
+            };
+            cache.insert(
+                address,
+                // Часы недоступны — ноль: такая запись просто устареет и спросится заново.
+                Known {
+                    country,
+                    at: crate::stamp::Stamp::now().unwrap_or_default(),
+                },
+            );
+        }
+        save(&cache)
+    }
 }
 
 fn save(cache: &Cache) -> Result<()> {
-    paths::ensure_root()?;
+    Paths::ensure_root()?;
     let text = serde_json::to_string_pretty(cache)
         .map_err(|e| crate::error::AppError::io(format!("Кэш стран не записался: {e}")))?;
-    Ok(crate::atomic::write(paths::geo(), text)?)
-}
-
-/// Через сколько часов спрашивать заново; 0 — геозапросы выключены.
-///
-/// Файл правится руками, и мусор в нём — это умолчание, а не отказ: страна не та вещь,
-/// ради которой стоит не показать список узлов.
-pub fn hours() -> u64 {
-    let Ok(text) = files::read(CLIENT) else {
-        return DEFAULT_HOURS;
-    };
-    let Ok(map) = top_mapping(&text) else {
-        return DEFAULT_HOURS;
-    };
-    match map.get(Value::from(HOURS)) {
-        None => DEFAULT_HOURS,
-        Some(value) => value.as_u64().unwrap_or(DEFAULT_HOURS),
-    }
-}
-
-/// Записать срок. Точечно, как режим перехвата (D-052): остальное в `client.yaml` не наше.
-pub fn set_hours(hours: u64) -> Result<()> {
-    let mut map = top_mapping(&files::read(CLIENT)?)?;
-    crate::yaml::set(&mut map, HOURS, Value::from(hours));
-    let text = serde_yaml::to_string(&Value::Mapping(map))
-        .map_err(|e| crate::error::AppError::invalid(e.to_string()))?;
-    files::write(CLIENT, &text)
-}
-
-/// Адреса, которые пора спросить: незнакомые и те, чей ответ старше срока.
-pub fn due(addresses: &[String], cache: &Cache, hours: u64, now: u64) -> Vec<String> {
-    if hours == 0 {
-        return Vec::new();
-    }
-    let age = hours * 3600;
-    let mut want: Vec<String> = addresses
-        .iter()
-        .filter(|address| match cache.get(*address) {
-            None => true,
-            Some(known) if known.country.is_none() => {
-                now.saturating_sub(known.at) >= age.min(UNKNOWN_RETRY)
-            }
-            Some(known) => now.saturating_sub(known.at) >= age,
-        })
-        .cloned()
-        .collect();
-    want.sort();
-    want.dedup();
-    want
-}
-
-/// Спросить про всё, чему подошёл срок, и запомнить.
-///
-/// Последовательно и без спешки: узлов десятки, а не тысячи, и торопиться некуда —
-/// зато чужой сервис не получает залп.
-pub async fn refresh() -> Result<()> {
-    let hours = hours();
-    if hours == 0 {
-        return Ok(());
-    }
-    let addresses: Vec<String> = crate::nodes::source_catalog::nodes()
-        .into_iter()
-        .filter_map(|node| node.address)
-        .collect();
-    let mut cache = load();
-    let want = due(
-        &addresses,
-        &cache,
-        hours,
-        crate::stamp::now().unwrap_or_default(),
-    );
-    if want.is_empty() {
-        return Ok(());
-    }
-    for address in want {
-        // Сервис не ответил — не запоминаем ничего: спросим на следующем такте, а не
-        // через неделю.
-        let Some(country) = ask(&address).await else {
-            continue;
-        };
-        cache.insert(
-            address,
-            // Часы недоступны — ноль: такая запись просто устареет и спросится заново.
-            Known {
-                country,
-                at: crate::stamp::now().unwrap_or_default(),
-            },
-        );
-    }
-    save(&cache)
+    Ok(crate::atomic::AtomicFile::write(Paths::geo(), text)?)
 }
 
 /// Страна одного адреса. Снаружи `None` — ответа не было (сеть, отказ сервиса): это
@@ -158,7 +163,7 @@ async fn ask(address: &str) -> Option<Option<String>> {
         return Some(None);
     };
     // Мимо системного прокси: страна нужна серверу, а не нашему туннелю (GOTCHAS).
-    let response = crate::http::direct()
+    let response = crate::http::Http::direct()
         .ok()?
         .get(format!("{SERVICE}{ip}/country"))
         .send()
@@ -207,8 +212,8 @@ mod tests {
             },
         );
         let address = vec!["pl1:443".to_string()];
-        assert!(due(&address, &cache, 168, 3599).is_empty());
-        assert_eq!(due(&address, &cache, 168, 3600), address);
+        assert!(GeoCache::due(&address, &cache, 168, 3599).is_empty());
+        assert_eq!(GeoCache::due(&address, &cache, 168, 3600), address);
     }
 
     #[test]
@@ -238,7 +243,7 @@ mod tests {
         ];
         // Срок — час; «сейчас» — 4000-я секунда.
         assert_eq!(
-            due(&addresses, &cache, 1, 4000),
+            GeoCache::due(&addresses, &cache, 1, 4000),
             ["new:443", "stale:443"],
             "свежий не спрашивается, повтор не задваивается"
         );
@@ -248,7 +253,7 @@ mod tests {
     #[test]
     fn zero_hours_turns_the_service_off() {
         let addresses = vec!["new:443".to_string()];
-        assert!(due(&addresses, &Cache::new(), 0, 4000).is_empty());
+        assert!(GeoCache::due(&addresses, &Cache::new(), 0, 4000).is_empty());
     }
 
     /// Ответ «не узнали» тоже помнится: иначе безымянный адрес спрашивался бы каждый такт.
@@ -263,6 +268,6 @@ mod tests {
             },
         );
         let addresses = vec!["nowhere:443".to_string()];
-        assert!(due(&addresses, &cache, 1, 4000).is_empty());
+        assert!(GeoCache::due(&addresses, &cache, 1, 4000).is_empty());
     }
 }

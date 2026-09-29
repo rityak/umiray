@@ -20,30 +20,34 @@
 #[cfg(windows)]
 pub const NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 
-/// Попросить процесс выйти самому. `false` — не вышло попросить; звать `kill` всё равно
-/// придётся, эта функция только даёт шанс выйти по-человечески.
-#[cfg(windows)]
-pub fn interrupt(pid: u32) -> bool {
-    use windows_sys::Win32::System::Console::{
-        AttachConsole, FreeConsole, GenerateConsoleCtrlEvent, SetConsoleCtrlHandler,
-        ATTACH_PARENT_PROCESS, CTRL_BREAK_EVENT,
-    };
-    unsafe {
-        // Своя консоль мешает прицепиться к чужой. В релизе её нет, и вызов просто
-        // вернёт ноль.
-        FreeConsole();
-        if AttachConsole(pid) == 0 {
-            // Прицепиться не вышло — возвращаем себе то, что было, и сдаёмся.
+pub struct Console;
+
+impl Console {
+    /// Попросить процесс выйти самому. `false` — не вышло попросить; звать `kill` всё равно
+    /// придётся, эта функция только даёт шанс выйти по-человечески.
+    #[cfg(windows)]
+    pub fn interrupt(pid: u32) -> bool {
+        use windows_sys::Win32::System::Console::{
+            AttachConsole, FreeConsole, GenerateConsoleCtrlEvent, SetConsoleCtrlHandler,
+            ATTACH_PARENT_PROCESS, CTRL_BREAK_EVENT,
+        };
+        unsafe {
+            // Своя консоль мешает прицепиться к чужой. В релизе её нет, и вызов просто
+            // вернёт ноль.
+            FreeConsole();
+            if AttachConsole(pid) == 0 {
+                // Прицепиться не вышло — возвращаем себе то, что было, и сдаёмся.
+                AttachConsole(ATTACH_PARENT_PROCESS);
+                return false;
+            }
+            // Пока мы прицеплены, сигнал прилетит и нам: обработчик `NULL` с `TRUE` велит
+            // его игнорировать. Иначе клиент погасил бы сам себя вместе с ядром.
+            SetConsoleCtrlHandler(None, 1);
+            let sent = GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, pid) != 0;
+            FreeConsole();
+            SetConsoleCtrlHandler(None, 0);
             AttachConsole(ATTACH_PARENT_PROCESS);
-            return false;
+            sent
         }
-        // Пока мы прицеплены, сигнал прилетит и нам: обработчик `NULL` с `TRUE` велит
-        // его игнорировать. Иначе клиент погасил бы сам себя вместе с ядром.
-        SetConsoleCtrlHandler(None, 1);
-        let sent = GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, pid) != 0;
-        FreeConsole();
-        SetConsoleCtrlHandler(None, 0);
-        AttachConsole(ATTACH_PARENT_PROCESS);
-        sent
     }
 }

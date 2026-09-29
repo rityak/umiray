@@ -3,7 +3,8 @@ import * as api from "../api";
 import { useCached } from "../hooks/useCached";
 import { unchanged, usePoll } from "../hooks/usePoll";
 import { useLive } from "../hooks/useTraffic";
-import { failure, type Message } from "../shell/Banner";
+import { t } from "../i18n";
+import { failure, type Message, notice } from "../shell/Banner";
 import ConnectionPath from "./ConnectionPath";
 import Nodes from "./Nodes";
 import Speed from "./Speed";
@@ -102,6 +103,14 @@ export default function Connection({
   );
 
   const pick = useCallback((node: string) => choose("manual", node), [choose]);
+  const measure = useMemo(() => ({ method: ping, run: api.nodesPing }), [ping]);
+  /// Every subscription at once. One that failed does not cancel the rest — it is named.
+  const refreshSources = useCallback(async () => {
+    const failures = await api.sourcesRefreshAll();
+    if (failures.length > 0) {
+      onMessage(notice(t("Some subscriptions could not be refreshed."), failures));
+    }
+  }, [onMessage]);
   const manual = useCallback(() => choose("manual"), [choose]);
 
   // Что отмечено в списке, зависит от направления, а не от того, работает ли ядро (D-092).
@@ -167,16 +176,20 @@ export default function Connection({
         // В RULES маршрут за правилами (D-096): нажатие по узлу предупреждает,
         // а строка над списком предлагает уйти в MANUAL.
         rules={direction === "rules"}
-        method={ping}
         sources={sources}
         hidden={hidden}
-        onHidden={onHidden}
         rates={live.rates}
         onSelect={pick}
         onManual={manual}
         onChanged={poll}
         onAdd={onAdd}
         onMessage={onMessage}
+        onRefresh={refreshSources}
+        refreshLabel={t("Refresh subscriptions and measure latency again")}
+        emptyHint={t("Add a subscription or a link — the core will load it.")}
+        measure={measure}
+        onHidden={onHidden}
+        editable
       />
     </div>
   );

@@ -116,46 +116,49 @@ fn average(rates: &[f64]) -> f64 {
     rates.iter().sum::<f64>() / rates.len() as f64
 }
 
-/// `speed`: полоса и кривая по кускам — напрямую и через туннель.
-///
-/// Оба прогона в одной пробе нарочно: «через VPN медленнее» — это **сравнение**, и цифра
-/// без второй половины на него не отвечает. Порядок тоже не случаен: сперва напрямую,
-/// потом через узел, потому что канал разгоняется, и обратный порядок польстил бы туннелю.
-pub async fn measure(through: Option<u16>) -> Result<Report> {
-    let started = Instant::now();
-    let mut report = Report::new("speed");
-    report.say(
-        Tone::Info,
-        format!(
-            "speed: {CHUNKS} кусков по {} МБ{}",
-            CHUNK / 1024 / 1024,
-            match through {
-                Some(port) => format!(", напрямую и через прокси 127.0.0.1:{port}"),
-                None => ", только напрямую — ядро не запущено".to_string(),
-            }
-        ),
-    );
-    report.columns = ["Как", "Кусок", "За", "Скорость"]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+pub struct SpeedProbe;
 
-    let direct = run(None, &mut report, "напрямую").await?;
-    let tunneled = match through {
-        Some(port) => run(Some(port), &mut report, "через узел").await?,
-        None => Vec::new(),
-    };
-
-    let ms = started.elapsed().as_millis() as u64;
-    if direct.is_empty() && tunneled.is_empty() {
-        report.say(Tone::Bad, "не скачался ни один кусок");
-        return Ok(report.finish(Verdict::Bad, "качать не вышло".to_string(), ms));
-    }
-
-    let mine = average(&direct);
-    let shape = throttling(&direct);
-    if let Some(drop) = shape {
+impl SpeedProbe {
+    /// `speed`: полоса и кривая по кускам — напрямую и через туннель.
+    ///
+    /// Оба прогона в одной пробе нарочно: «через VPN медленнее» — это **сравнение**, и цифра
+    /// без второй половины на него не отвечает. Порядок тоже не случаен: сперва напрямую,
+    /// потом через узел, потому что канал разгоняется, и обратный порядок польстил бы туннелю.
+    pub async fn measure(through: Option<u16>) -> Result<Report> {
+        let started = Instant::now();
+        let mut report = Report::new("speed");
         report.say(
+            Tone::Info,
+            format!(
+                "speed: {CHUNKS} кусков по {} МБ{}",
+                CHUNK / 1024 / 1024,
+                match through {
+                    Some(port) => format!(", напрямую и через прокси 127.0.0.1:{port}"),
+                    None => ", только напрямую — ядро не запущено".to_string(),
+                }
+            ),
+        );
+        report.columns = ["Как", "Кусок", "За", "Скорость"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+
+        let direct = run(None, &mut report, "напрямую").await?;
+        let tunneled = match through {
+            Some(port) => run(Some(port), &mut report, "через узел").await?,
+            None => Vec::new(),
+        };
+
+        let ms = started.elapsed().as_millis() as u64;
+        if direct.is_empty() && tunneled.is_empty() {
+            report.say(Tone::Bad, "не скачался ни один кусок");
+            return Ok(report.finish(Verdict::Bad, "качать не вышло".to_string(), ms));
+        }
+
+        let mine = average(&direct);
+        let shape = throttling(&direct);
+        if let Some(drop) = shape {
+            report.say(
             Tone::Warn,
             format!(
                 "напрямую: первые куски {:.1} Мбит/с, последние {:.1} — минус {drop:.0}%: похоже на душилку",
@@ -163,56 +166,57 @@ pub async fn measure(through: Option<u16>) -> Result<Report> {
                 tail(&direct)
             ),
         );
-    }
+        }
 
-    // Через туннель всегда медленнее — вопрос, насколько. Треть потерь это цена
-    // шифрования и лишнего плеча, а вот десятая доля от прямой скорости — уже беда.
-    let (verdict, headline) = if tunneled.is_empty() {
-        match shape {
-            Some(drop) => (
-                Verdict::Warn,
-                format!("{mine:.0} Мбит/с, к концу падает на {drop:.0}%"),
-            ),
-            None if through.is_none() => (
-                Verdict::Idle,
-                format!("{mine:.0} Мбит/с напрямую; ядро не запущено, сравнить не с чем"),
-            ),
-            None => (Verdict::Ok, format!("{mine:.0} Мбит/с, ровно")),
-        }
-    } else {
-        let out = average(&tunneled);
-        let share = if mine > 0.0 { out / mine * 100.0 } else { 0.0 };
-        report.say(
-            if share >= 50.0 { Tone::Ok } else { Tone::Warn },
-            format!("через узел {out:.1} из {mine:.1} Мбит/с — {share:.0}% прямой скорости"),
-        );
-        report.rows.push(Row {
-            cells: vec![
-                "итог".into(),
-                "—".into(),
-                format!("{share:.0}%"),
-                format!("{out:.0} из {mine:.0} Мбит/с"),
-            ],
-            verdict: if share >= 50.0 {
-                Verdict::Ok
-            } else {
-                Verdict::Warn
-            },
-            mark: true,
-        });
-        if share >= 50.0 {
-            (
-                Verdict::Ok,
-                format!("через узел {out:.0} Мбит/с — {share:.0}% прямой"),
-            )
+        // Через туннель всегда медленнее — вопрос, насколько. Треть потерь это цена
+        // шифрования и лишнего плеча, а вот десятая доля от прямой скорости — уже беда.
+        let (verdict, headline) = if tunneled.is_empty() {
+            match shape {
+                Some(drop) => (
+                    Verdict::Warn,
+                    format!("{mine:.0} Мбит/с, к концу падает на {drop:.0}%"),
+                ),
+                None if through.is_none() => (
+                    Verdict::Idle,
+                    format!("{mine:.0} Мбит/с напрямую; ядро не запущено, сравнить не с чем"),
+                ),
+                None => (Verdict::Ok, format!("{mine:.0} Мбит/с, ровно")),
+            }
         } else {
-            (
-                Verdict::Warn,
-                format!("через узел {out:.0} из {mine:.0} Мбит/с — теряется больше половины"),
-            )
-        }
-    };
-    Ok(report.finish(verdict, headline, ms))
+            let out = average(&tunneled);
+            let share = if mine > 0.0 { out / mine * 100.0 } else { 0.0 };
+            report.say(
+                if share >= 50.0 { Tone::Ok } else { Tone::Warn },
+                format!("через узел {out:.1} из {mine:.1} Мбит/с — {share:.0}% прямой скорости"),
+            );
+            report.rows.push(Row {
+                cells: vec![
+                    "итог".into(),
+                    "—".into(),
+                    format!("{share:.0}%"),
+                    format!("{out:.0} из {mine:.0} Мбит/с"),
+                ],
+                verdict: if share >= 50.0 {
+                    Verdict::Ok
+                } else {
+                    Verdict::Warn
+                },
+                mark: true,
+            });
+            if share >= 50.0 {
+                (
+                    Verdict::Ok,
+                    format!("через узел {out:.0} Мбит/с — {share:.0}% прямой"),
+                )
+            } else {
+                (
+                    Verdict::Warn,
+                    format!("через узел {out:.0} из {mine:.0} Мбит/с — теряется больше половины"),
+                )
+            }
+        };
+        Ok(report.finish(verdict, headline, ms))
+    }
 }
 
 /// На сколько процентов просела скорость к концу. `None` — не просела настолько, чтобы

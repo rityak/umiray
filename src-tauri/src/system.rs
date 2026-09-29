@@ -6,11 +6,13 @@
 pub mod autostart;
 pub mod console;
 pub mod elevation;
+pub mod install;
 pub mod job;
 pub mod killswitch;
 pub mod lang;
 pub mod net;
 pub mod pick;
+pub mod process;
 pub mod registry;
 pub mod sysproxy;
 pub mod task;

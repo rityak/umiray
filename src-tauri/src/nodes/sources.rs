@@ -9,9 +9,9 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, Result};
-use crate::nodes::link;
+use crate::nodes::link::LinkParser;
 use crate::nodes::source_id::SourceId;
-use crate::paths;
+use crate::paths::Paths;
 
 /// Перевод строки отдельной константой: файл правится скриптами, и экранирование
 /// внутри строкового литерала переживает это хуже, чем имя.
@@ -55,101 +55,180 @@ fn stamped(mut source: Source, id: &str) -> Source {
 /// с D-120 значит и «мои ссылки», и «свои узлы». Пустой источник не является ни тем ни
 /// другим — иначе первая же ссылка уедет в документ `proxies:` и сломает его (GOTCHAS).
 fn is_records(id: &str) -> bool {
-    serde_yaml::from_str::<serde_yaml::Value>(&raw(id))
+    serde_yaml::from_str::<serde_yaml::Value>(&SourceStore::raw(id))
         .ok()
         .and_then(|value| value.get("proxies").cloned())
         .is_some()
 }
 
-pub fn list() -> Vec<Source> {
-    let Ok(entries) = std::fs::read_dir(paths::sources_dir()) else {
-        return Vec::new();
-    };
-    let mut sources: Vec<Source> = entries
-        .flatten()
-        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "json"))
-        .filter_map(|entry| std::fs::read_to_string(entry.path()).ok())
-        .filter_map(|text| serde_json::from_str::<Source>(&text).ok())
-        .filter(|source| SourceId::parse(&source.id).is_ok())
-        .map(|source| {
-            let id = source.id.clone();
-            stamped(source, &id)
-        })
-        .collect();
-    // Подписки сверху, «мои ссылки» в конце: так список не прыгает при добавлении.
-    sources.sort_by(|a, b| {
-        a.url
-            .is_none()
-            .cmp(&b.url.is_none())
-            .then(a.name.cmp(&b.name))
-    });
-    sources
-}
+pub struct SourceStore;
 
-pub fn get(id: &str) -> Result<Source> {
-    let id = SourceId::parse(id)?;
-    let id = id.as_str();
-    let text = std::fs::read_to_string(paths::source_meta(id))
-        .map_err(|_| AppError::invalid(format!("Источник не найден: {id}")))?;
-    serde_json::from_str::<Source>(&text)
-        .map(|source| stamped(source, id))
-        .map_err(|e| AppError::invalid(format!("Метаданные источника испорчены: {e}")))
-}
-
-/// Содержимое источника — то, что читает ядро. Отсутствующий файл значит пустой источник.
-pub fn content(id: &str) -> String {
-    let Ok(id) = SourceId::parse(id) else {
-        return String::new();
-    };
-    let id = id.as_str();
-    std::fs::read_to_string(paths::source_links(id)).unwrap_or_default()
-}
-
-/// Сырьё от панели, до чистки имён и правок. Всё, что пересобирает источник, читает **его**:
-/// собранный файл на входе означал бы, что наши же правки вплавляются в исходник.
-pub fn raw(id: &str) -> String {
-    let Ok(id) = SourceId::parse(id) else {
-        return String::new();
-    };
-    let id = id.as_str();
-    std::fs::read_to_string(paths::source_raw(id)).unwrap_or_default()
-}
-
-/// Переписать источник руками (D-065).
-///
-/// Правится именно сырьё: собранный файл пересобирается из него при каждом обновлении,
-/// и правка в нём жила бы до первого «Обновить» **молча**. Дальше текст проходит тот же
-/// путь, что и ответ панели: чистка имён, разведение дубликатов, наложение правок.
-pub fn write_raw(id: &str, text: &str) -> Result<Source> {
-    let mut source = get(id)?;
-    let lines: Vec<String> = text.lines().map(str::to_string).collect();
-    write(&mut source, lines, id, &crate::config::awg::get())?;
-    get(id)
-}
-
-/// Порядок ключей в записи: сначала то, по чему узел узнают, потом остальное как есть.
-///
-/// Нужен не для красоты: объект приезжает из окна через JSON, и по дороге порядок ключей
-/// теряется — в файле оказывалось `name, port, server, type`, и читать это глазами больно.
-pub fn ordered(entry: serde_yaml::Mapping) -> serde_yaml::Mapping {
-    const FIRST: [&str; 4] = ["name", "type", "server", "port"];
-    let mut out = serde_yaml::Mapping::new();
-    for key in FIRST {
-        if let Some(value) = entry.get(serde_yaml::Value::from(key)) {
-            out.insert(serde_yaml::Value::from(key), value.clone());
-        }
+impl SourceStore {
+    pub fn list() -> Vec<Source> {
+        let Ok(entries) = std::fs::read_dir(Paths::sources_dir()) else {
+            return Vec::new();
+        };
+        let mut sources: Vec<Source> = entries
+            .flatten()
+            .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "json"))
+            .filter_map(|entry| std::fs::read_to_string(entry.path()).ok())
+            .filter_map(|text| serde_json::from_str::<Source>(&text).ok())
+            .filter(|source| SourceId::parse(&source.id).is_ok())
+            .map(|source| {
+                let id = source.id.clone();
+                stamped(source, &id)
+            })
+            .collect();
+        // Подписки сверху, «мои ссылки» в конце: так список не прыгает при добавлении.
+        sources.sort_by(|a, b| {
+            a.url
+                .is_none()
+                .cmp(&b.url.is_none())
+                .then(a.name.cmp(&b.name))
+        });
+        sources
     }
-    for (key, value) in entry {
-        if !key.as_str().is_some_and(|key| FIRST.contains(&key)) {
-            out.insert(key, value);
-        }
+
+    pub fn get(id: &str) -> Result<Source> {
+        let id = SourceId::parse(id)?;
+        let id = id.as_str();
+        let text = std::fs::read_to_string(Paths::source_meta(id))
+            .map_err(|_| AppError::invalid(format!("Источник не найден: {id}")))?;
+        serde_json::from_str::<Source>(&text)
+            .map(|source| stamped(source, id))
+            .map_err(|e| AppError::invalid(format!("Метаданные источника испорчены: {e}")))
     }
-    out
+
+    /// Содержимое источника — то, что читает ядро. Отсутствующий файл значит пустой источник.
+    pub fn content(id: &str) -> String {
+        let Ok(id) = SourceId::parse(id) else {
+            return String::new();
+        };
+        let id = id.as_str();
+        std::fs::read_to_string(Paths::source_links(id)).unwrap_or_default()
+    }
+
+    /// Сырьё от панели, до чистки имён и правок. Всё, что пересобирает источник, читает **его**:
+    /// собранный файл на входе означал бы, что наши же правки вплавляются в исходник.
+    pub fn raw(id: &str) -> String {
+        let Ok(id) = SourceId::parse(id) else {
+            return String::new();
+        };
+        let id = id.as_str();
+        std::fs::read_to_string(Paths::source_raw(id)).unwrap_or_default()
+    }
+
+    /// Переписать источник руками (D-065).
+    ///
+    /// Правится именно сырьё: собранный файл пересобирается из него при каждом обновлении,
+    /// и правка в нём жила бы до первого «Обновить» **молча**. Дальше текст проходит тот же
+    /// путь, что и ответ панели: чистка имён, разведение дубликатов, наложение правок.
+    pub fn write_raw(id: &str, text: &str) -> Result<Source> {
+        let mut source = SourceStore::get(id)?;
+        let lines: Vec<String> = text.lines().map(str::to_string).collect();
+        write(&mut source, lines, id, &crate::config::awg::Mask::get())?;
+        SourceStore::get(id)
+    }
+
+    /// Порядок ключей в записи: сначала то, по чему узел узнают, потом остальное как есть.
+    ///
+    /// Нужен не для красоты: объект приезжает из окна через JSON, и по дороге порядок ключей
+    /// теряется — в файле оказывалось `name, port, server, type`, и читать это глазами больно.
+    pub fn ordered(entry: serde_yaml::Mapping) -> serde_yaml::Mapping {
+        const FIRST: [&str; 4] = ["name", "type", "server", "port"];
+        let mut out = serde_yaml::Mapping::new();
+        for key in FIRST {
+            if let Some(value) = entry.get(serde_yaml::Value::from(key)) {
+                out.insert(serde_yaml::Value::from(key), value.clone());
+            }
+        }
+        for (key, value) in entry {
+            if !key.as_str().is_some_and(|key| FIRST.contains(&key)) {
+                out.insert(key, value);
+            }
+        }
+        out
+    }
+
+    /// Каталог источников. Ядру он нужен как разрешённый путь провайдеров (`SAFE_PATHS`),
+    /// а раскладку внутри знает только это хранилище (D-155).
+    pub fn dir() -> std::path::PathBuf {
+        Paths::sources_dir()
+    }
+
+    /// Файл провайдера источника — то, что читает ядро.
+    pub fn provider(id: &str) -> std::path::PathBuf {
+        Paths::source_links(id)
+    }
+
+    /// Стереть все источники: сброс к состоянию «как после установки». Каталог целиком —
+    /// выборочная чистка означала бы помнить список файлов источника в двух местах.
+    pub fn clear() -> Result<()> {
+        if Paths::sources_dir().exists() {
+            std::fs::remove_dir_all(Paths::sources_dir())?;
+        }
+        Paths::ensure_sources_dir()?;
+        Ok(())
+    }
+
+    pub fn delete(id: &str) -> Result<()> {
+        SourceId::parse(id)?;
+        let _ = std::fs::remove_file(Paths::source_links(id));
+        let _ = std::fs::remove_file(Paths::source_raw(id));
+        let _ = std::fs::remove_file(Paths::source_patches(id));
+        std::fs::remove_file(Paths::source_meta(id))
+            .map_err(|_| AppError::invalid(format!("Источник не найден: {id}")))?;
+        Ok(())
+    }
+
+    /// Довести прерванную публикацию до состояния, которое описывает raw. Metadata пишется
+    /// последней, поэтому источник с ней — существующий; файлы без неё были незавершённым
+    /// добавлением и в список никогда не попадали.
+    pub fn repair_all() -> Result<()> {
+        Paths::ensure_sources_dir()?;
+        let mask = crate::config::awg::Mask::get();
+        let entries = std::fs::read_dir(Paths::sources_dir())?;
+        let mut known = HashSet::new();
+        for entry in entries.flatten() {
+            if entry.path().extension().is_none_or(|ext| ext != "json")
+                || entry
+                    .path()
+                    .file_name()
+                    .is_some_and(|name| name.to_string_lossy().ends_with(".patch.json"))
+            {
+                continue;
+            }
+            let Ok(text) = std::fs::read_to_string(entry.path()) else {
+                continue;
+            };
+            let Ok(mut source) = serde_json::from_str::<Source>(&text) else {
+                continue;
+            };
+            let Ok(id) = SourceId::parse(&source.id) else {
+                continue;
+            };
+            known.insert(id.as_str().to_string());
+            rebuild(&mut source, id.as_str(), &mask)?;
+        }
+        for entry in std::fs::read_dir(Paths::sources_dir())?.flatten() {
+            let path = entry.path();
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            let Some(id) = name.split('.').next() else {
+                continue;
+            };
+            if SourceId::parse(id).is_ok() && !known.contains(id) {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Записи, которые уже лежат в источнике.
 pub(super) fn own_proxies(id: &str) -> Vec<serde_yaml::Value> {
-    serde_yaml::from_str::<serde_yaml::Value>(&raw(id))
+    serde_yaml::from_str::<serde_yaml::Value>(&SourceStore::raw(id))
         .ok()
         .and_then(|value| {
             value
@@ -158,16 +237,6 @@ pub(super) fn own_proxies(id: &str) -> Vec<serde_yaml::Value> {
                 .cloned()
         })
         .unwrap_or_default()
-}
-
-pub fn delete(id: &str) -> Result<()> {
-    SourceId::parse(id)?;
-    let _ = std::fs::remove_file(paths::source_links(id));
-    let _ = std::fs::remove_file(paths::source_raw(id));
-    let _ = std::fs::remove_file(paths::source_patches(id));
-    std::fs::remove_file(paths::source_meta(id))
-        .map_err(|_| AppError::invalid(format!("Источник не найден: {id}")))?;
-    Ok(())
 }
 
 /// Записать источник: сырьё от панели кладём как есть, а то, что читает ядро, генерируем.
@@ -181,52 +250,8 @@ pub(super) fn write(
     mask: &crate::config::awg::Mask,
 ) -> Result<()> {
     SourceId::parse(id)?;
-    paths::ensure_sources_dir()?;
+    Paths::ensure_sources_dir()?;
     publish(source, id, &lines.join("\n"), mask)
-}
-
-/// Довести прерванную публикацию до состояния, которое описывает raw. Metadata пишется
-/// последней, поэтому источник с ней — существующий; файлы без неё были незавершённым
-/// добавлением и в список никогда не попадали.
-pub fn repair_all() -> Result<()> {
-    paths::ensure_sources_dir()?;
-    let mask = crate::config::awg::get();
-    let entries = std::fs::read_dir(paths::sources_dir())?;
-    let mut known = HashSet::new();
-    for entry in entries.flatten() {
-        if entry.path().extension().is_none_or(|ext| ext != "json")
-            || entry
-                .path()
-                .file_name()
-                .is_some_and(|name| name.to_string_lossy().ends_with(".patch.json"))
-        {
-            continue;
-        }
-        let Ok(text) = std::fs::read_to_string(entry.path()) else {
-            continue;
-        };
-        let Ok(mut source) = serde_json::from_str::<Source>(&text) else {
-            continue;
-        };
-        let Ok(id) = SourceId::parse(&source.id) else {
-            continue;
-        };
-        known.insert(id.as_str().to_string());
-        rebuild(&mut source, id.as_str(), &mask)?;
-    }
-    for entry in std::fs::read_dir(paths::sources_dir())?.flatten() {
-        let path = entry.path();
-        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-            continue;
-        };
-        let Some(id) = name.split('.').next() else {
-            continue;
-        };
-        if SourceId::parse(id).is_ok() && !known.contains(id) {
-            let _ = std::fs::remove_file(path);
-        }
-    }
-    Ok(())
 }
 
 /// Собрать то, что читает ядро: сырьё + чистка имён + правки пользователя.
@@ -239,7 +264,7 @@ pub(super) fn rebuild(
     mask: &crate::config::awg::Mask,
 ) -> Result<()> {
     SourceId::parse(id)?;
-    publish(source, id, &raw(id), mask)
+    publish(source, id, &SourceStore::raw(id), mask)
 }
 
 /// Подготовить все три представления до первой замены и опубликовать metadata последней.
@@ -256,7 +281,7 @@ fn publish(
     let text = if lines.iter().any(|line| line.contains("://")) {
         let (document, skipped) = crate::nodes::source_build::converted(
             id,
-            link::clean(&lines, &mut taken_by_others(id)),
+            LinkParser::clean(&lines, &mut taken_by_others(id)),
             mask,
         )?;
         source.skipped = skipped;
@@ -272,20 +297,20 @@ fn publish(
     let meta = serde_json::to_string_pretty(source)
         .map_err(|e| AppError::io(format!("Не удалось записать источник: {e}")))?;
     let files = [
-        (paths::source_raw(id), raw.as_bytes()),
-        (paths::source_links(id), text.as_bytes()),
-        (paths::source_meta(id), meta.as_bytes()),
+        (Paths::source_raw(id), raw.as_bytes()),
+        (Paths::source_links(id), text.as_bytes()),
+        (Paths::source_meta(id), meta.as_bytes()),
     ];
     let before: Vec<Option<Vec<u8>>> = files
         .iter()
         .map(|(path, _)| std::fs::read(path).ok())
         .collect();
     for (at, (path, contents)) in files.iter().enumerate() {
-        if let Err(why) = crate::atomic::write(path, contents) {
+        if let Err(why) = crate::atomic::AtomicFile::write(path, contents) {
             for ((path, _), old) in files.iter().zip(&before).take(at + 1) {
                 match old {
                     Some(contents) => {
-                        let _ = crate::atomic::write(path, contents);
+                        let _ = crate::atomic::AtomicFile::write(path, contents);
                     }
                     None => {
                         let _ = std::fs::remove_file(path);
@@ -300,7 +325,7 @@ fn publish(
 
 /// Записи из **собранного** файла — того, что читает ядро.
 pub(super) fn built_proxies(id: &str) -> Vec<serde_yaml::Mapping> {
-    serde_yaml::from_str::<serde_yaml::Value>(&content(id))
+    serde_yaml::from_str::<serde_yaml::Value>(&SourceStore::content(id))
         .ok()
         .and_then(|value| value.get("proxies")?.as_sequence().cloned())
         .unwrap_or_default()
@@ -321,13 +346,13 @@ fn count(text: &str) -> usize {
 /// Имена, занятые другими источниками: ядро складывает все узлы в одну группу выбора,
 /// а одинаковые имена делают выбор неоднозначным (S-012).
 pub(super) fn taken_by_others(id: &str) -> HashSet<String> {
-    list()
+    SourceStore::list()
         .iter()
         .filter(|source| source.id != id)
         .flat_map(|source| {
-            content(&source.id)
+            SourceStore::content(&source.id)
                 .lines()
-                .filter_map(link::name_of)
+                .filter_map(LinkParser::name_of)
                 .collect::<Vec<_>>()
         })
         .collect()
@@ -340,10 +365,10 @@ mod tests {
     static DISK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     use super::*;
-    use crate::nodes::entries;
-    use crate::nodes::source_catalog::*;
-    use crate::nodes::source_editor::*;
-    use crate::nodes::source_import::*;
+    use crate::nodes::entries::EntryPatch;
+    use crate::nodes::source_catalog::SourceCatalog;
+    use crate::nodes::source_editor::SourceEditor;
+    use crate::nodes::source_import::{host_of, SourceImporter};
 
     #[test]
     fn startup_repairs_a_source_from_its_canonical_raw_file() {
@@ -352,7 +377,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::env::set_var("LOCALAPPDATA", &dir);
-        paths::ensure_sources_dir().unwrap();
+        Paths::ensure_sources_dir().unwrap();
 
         let id = "00000000000000dd";
         let source = Source {
@@ -364,22 +389,22 @@ mod tests {
             records: false,
             skipped: Vec::new(),
         };
-        crate::atomic::write(
-            paths::source_raw(id),
+        crate::atomic::AtomicFile::write(
+            Paths::source_raw(id),
             "vless://11111111-1111-1111-1111-111111111111@example.com:443#Fresh",
         )
         .unwrap();
-        crate::atomic::write(paths::source_links(id), "stale").unwrap();
-        crate::atomic::write(
-            paths::source_meta(id),
+        crate::atomic::AtomicFile::write(Paths::source_links(id), "stale").unwrap();
+        crate::atomic::AtomicFile::write(
+            Paths::source_meta(id),
             serde_json::to_string(&source).unwrap(),
         )
         .unwrap();
 
-        repair_all().unwrap();
-        assert!(!content(id).contains("stale"));
-        assert!(content(id).contains("name: Fresh"));
-        assert_eq!(get(id).unwrap().nodes, 1);
+        SourceStore::repair_all().unwrap();
+        assert!(!SourceStore::content(id).contains("stale"));
+        assert!(SourceStore::content(id).contains("name: Fresh"));
+        assert_eq!(SourceStore::get(id).unwrap().nodes, 1);
     }
 
     /// Живая проверка всего пути: скачать настоящую подписку, вычистить имена, записать.
@@ -402,24 +427,26 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::env::set_var("LOCALAPPDATA", &dir);
 
-        let (source, notices) = add_subscription(&url).await.expect("подписка не открылась");
+        let (source, notices) = SourceImporter::add_subscription(&url)
+            .await
+            .expect("подписка не открылась");
         println!("источник: {} | узлов: {}", source.name, source.nodes);
         for notice in &notices {
             println!("служебная запись: {notice}");
         }
-        for line in content(&source.id).lines() {
+        for line in SourceStore::content(&source.id).lines() {
             println!(
                 "  {:10} {:28} {}",
                 line.split("://").next().unwrap_or("?"),
-                link::endpoint_of(line).unwrap_or_default(),
-                link::name_of(line).unwrap_or_default()
+                LinkParser::endpoint_of(line).unwrap_or_default(),
+                LinkParser::name_of(line).unwrap_or_default()
             );
         }
 
         assert!(source.nodes > 0, "узлов не пришло");
-        let names: Vec<String> = content(&source.id)
+        let names: Vec<String> = SourceStore::content(&source.id)
             .lines()
-            .filter_map(link::name_of)
+            .filter_map(LinkParser::name_of)
             .collect();
         assert!(
             names.iter().all(|name| name
@@ -456,22 +483,22 @@ Endpoint = a.example:51820
         )
         .unwrap();
 
-        let source = import_file(&file).unwrap();
+        let source = SourceImporter::import_file(&file).unwrap();
         assert_eq!(source.nodes, 1, "узел приехал");
         assert!(source.url.is_none(), "это не подписка");
         assert!(
-            !content(&source.id).contains("://"),
+            !SourceStore::content(&source.id).contains("://"),
             "узел лежит записью, а не ссылкой: {}",
-            content(&source.id)
+            SourceStore::content(&source.id)
         );
 
-        let node = nodes()
+        let node = SourceCatalog::nodes()
             .into_iter()
             .find(|node| node.name == "Дом")
             .expect("узел в списке");
         assert!(node.supported, "ядро такой узел поднимет");
 
-        let code = node_code(&source.id, "Дом").unwrap();
+        let code = SourceEditor::node_code(&source.id, "Дом").unwrap();
         assert!(code.editable, "свой узел правится целиком");
         assert!(code.text.contains("type: wireguard"), "{}", code.text);
         assert!(
@@ -485,11 +512,17 @@ Endpoint = a.example:51820
         assert_eq!(object["type"], "wireguard");
         assert_eq!(object["amnezia-wg-option"]["jc"], 4);
         assert!(code.why.is_none(), "форма есть — объяснять нечего");
-        assert!(get(&source.id).unwrap().records, "источник хранит записи");
+        assert!(
+            SourceStore::get(&source.id).unwrap().records,
+            "источник хранит записи"
+        );
 
         // Второй такой же файл не затирает первый и не даёт ядру двух одинаковых имён.
-        import_file(&file).unwrap();
-        let names: Vec<String> = nodes().into_iter().map(|node| node.name).collect();
+        SourceImporter::import_file(&file).unwrap();
+        let names: Vec<String> = SourceCatalog::nodes()
+            .into_iter()
+            .map(|node| node.name)
+            .collect();
         assert_eq!(
             names,
             vec!["Дом".to_string(), "Дом 2".to_string()],
@@ -500,9 +533,9 @@ Endpoint = a.example:51820
         let mut changed = object.clone();
         changed["mtu"] = serde_json::json!(1300);
         changed["name"] = serde_json::json!("Дом");
-        set_node_entry(&source.id, "Дом", changed).unwrap();
+        SourceEditor::set_node_entry(&source.id, "Дом", changed).unwrap();
         assert!(
-            node_code(&source.id, "Дом")
+            SourceEditor::node_code(&source.id, "Дом")
                 .unwrap()
                 .text
                 .contains("mtu: 1300"),
@@ -510,8 +543,11 @@ Endpoint = a.example:51820
         );
 
         // Свой узел убирается целиком, и соседа это не трогает (D-121).
-        delete_node(&source.id, "Дом").unwrap();
-        let left: Vec<String> = nodes().into_iter().map(|node| node.name).collect();
+        SourceEditor::delete_node(&source.id, "Дом").unwrap();
+        let left: Vec<String> = SourceCatalog::nodes()
+            .into_iter()
+            .map(|node| node.name)
+            .collect();
         assert_eq!(left, vec!["Дом 2".to_string()], "{left:?}");
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -546,7 +582,7 @@ Endpoint = a.example:51820
         )
         .unwrap();
 
-        let code = node_code("00000000000000aa", "Home").unwrap();
+        let code = SourceEditor::node_code("00000000000000aa", "Home").unwrap();
         assert!(
             code.editable,
             "запись wireguard собирает клиент — она правится"
@@ -559,17 +595,17 @@ Endpoint = a.example:51820
             "udp: true
 remote-dns-resolve: true",
         );
-        edit_node_code("00000000000000aa", "Home", &edited).unwrap();
+        SourceEditor::edit_node_code("00000000000000aa", "Home", &edited).unwrap();
 
-        let stored = entries::load("00000000000000aa");
+        let stored = EntryPatch::load("00000000000000aa");
         let patch = stored.values().next().expect("правка записи сохранена");
         assert_eq!(patch.len(), 2, "хранится только разница: {patch:?}");
 
-        let again = node_code("00000000000000aa", "Home").unwrap();
+        let again = SourceEditor::node_code("00000000000000aa", "Home").unwrap();
         assert!(again.text.contains("mtu: 1280"), "{}", again.text);
         assert!(again.text.contains("remote-dns-resolve: true"));
         assert!(
-            nodes()
+            SourceCatalog::nodes()
                 .iter()
                 .any(|node| node.name == "Home" && node.edited),
             "узел помечен правленым"
@@ -584,16 +620,16 @@ remote-dns-resolve: true",
             &crate::config::awg::Mask::default(),
         )
         .unwrap();
-        let fresh = node_code("00000000000000aa", "Home").unwrap();
+        let fresh = SourceEditor::node_code("00000000000000aa", "Home").unwrap();
         assert!(fresh.text.contains("bm92eWotа2V5"), "{}", fresh.text);
         assert!(fresh.text.contains("mtu: 1280"), "правка уцелела");
 
-        reset_node("00000000000000aa", "Home").unwrap();
+        SourceEditor::reset_node("00000000000000aa", "Home").unwrap();
         assert!(
-            entries::load("00000000000000aa").is_empty(),
+            EntryPatch::load("00000000000000aa").is_empty(),
             "откат снял правку записи"
         );
-        let back = node_code("00000000000000aa", "Home").unwrap();
+        let back = SourceEditor::node_code("00000000000000aa", "Home").unwrap();
         assert!(back.text.contains("mtu: 1420"), "{}", back.text);
         assert!(!back.text.contains("remote-dns-resolve"));
 
@@ -630,7 +666,7 @@ remote-dns-resolve: true",
         )
         .unwrap();
 
-        let built = content("00000000000000bb");
+        let built = SourceStore::content("00000000000000bb");
         assert!(built.contains("amnezia-wg-option"), "{built}");
         assert_eq!(
             built.matches("amnezia-wg-option").count(),
@@ -675,25 +711,25 @@ remote-dns-resolve: true",
         .unwrap();
         assert_eq!(source.nodes, 1);
         assert!(
-            content("00000000000000cc").contains("type: vless"),
+            SourceStore::content("00000000000000cc").contains("type: vless"),
             "источник хранит запись, а не ссылку: {}",
-            content("00000000000000cc")
+            SourceStore::content("00000000000000cc")
         );
 
         // Пользователь поправил отпечаток — формой или кодом, дорога одна.
         let mut edited = built_proxies("00000000000000cc").remove(0);
-        crate::yaml::set(
+        crate::yaml::Yaml::set(
             &mut edited,
             "client-fingerprint",
             serde_yaml::Value::from("safari"),
         );
-        edit_node_code(
+        SourceEditor::edit_node_code(
             "00000000000000cc",
             "Sweden 0",
             &serde_yaml::to_string(&serde_yaml::Value::Mapping(edited)).unwrap(),
         )
         .unwrap();
-        assert!(content("00000000000000cc").contains("client-fingerprint: safari"));
+        assert!(SourceStore::content("00000000000000cc").contains("client-fingerprint: safari"));
 
         // Обновление: панель сменила секрет и переименовала узел.
         let second = "vless://новый@a.example:443?encryption=none&fp=chrome&security=tls&sni=a.example#%F0%9F%87%B8%F0%9F%87%AA Sweden 0";
@@ -705,7 +741,7 @@ remote-dns-resolve: true",
         )
         .unwrap();
 
-        let built = content("00000000000000cc");
+        let built = SourceStore::content("00000000000000cc");
         assert!(
             built.contains("uuid: новый"),
             "свежий секрет доехал: {built}"
@@ -725,8 +761,8 @@ remote-dns-resolve: true",
         );
 
         // Сброс возвращает то, что прислала панель.
-        reset_node("00000000000000cc", "Sweden 0").unwrap();
-        let built = content("00000000000000cc");
+        SourceEditor::reset_node("00000000000000cc", "Sweden 0").unwrap();
+        let built = SourceStore::content("00000000000000cc");
         assert!(
             built.contains("client-fingerprint: chrome"),
             "откат вернул присланное: {built}"

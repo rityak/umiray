@@ -14,6 +14,7 @@ import type * as api from "../api";
 const now = () => Math.floor(Date.now() / 1000);
 
 let status: api.Status = {
+  active: null,
   running: false,
   mode: null,
   desiredMode: "local",
@@ -300,11 +301,17 @@ const tools: api.Tool[] = [
   },
 ];
 
-const status_ = () => ({ ...status, started: status.running ? status.started : null });
+/// Работающее ядро — одно (D-154): mihomo, если запущен, иначе qd, если поднят.
+const status_ = (): api.Status => {
+  const active = status.running ? "mihomo" : qdUp ? "qd" : null;
+  const started = active === "mihomo" ? status.started : active === "qd" ? qdSince : null;
+  return { ...status, active, started };
+};
 
 type Args = Record<string, unknown>;
 
 let qdUp = false;
+let qdSince: number | null = null;
 let qdFlags = { egress: false, adblock: true };
 const qdNodes = [
   { id: 1, name: "Entry A", role: "ingress", reachable: true, selected: true, latencyMs: 9 },
@@ -343,6 +350,7 @@ const qdCall = (method: string, path: string, body: Record<string, unknown> | nu
   if (at === "state") return qdState();
   if (at === "connect" || at === "disconnect") {
     qdUp = at === "connect";
+    qdSince = qdUp ? now() : null;
     return qdState();
   }
   if (at === "toggle") {
@@ -399,9 +407,18 @@ const qdCall = (method: string, path: string, body: Record<string, unknown> | nu
   return qdState();
 };
 
+const qdLogs = ["qd  embedded: api on 127.0.0.1:52100", "tunnel  up via Entry A, 9 ms"];
+
 const HANDLERS: Record<string, (args: Args) => unknown> = {
   core_status: status_,
   core_start: () => {
+    // Клиент гасит остальные ядра сам (D-154): поднимается выбранное в шапке.
+    if (settings.engine === "qd") {
+      status = { ...status, running: false, mode: null, systemProxy: false, started: null };
+      qdCall("POST", "/client/api/connect", null);
+      return status_();
+    }
+    qdCall("POST", "/client/api/disconnect", null);
     status = {
       ...status,
       running: true,
@@ -412,13 +429,14 @@ const HANDLERS: Record<string, (args: Args) => unknown> = {
     return status_();
   },
   core_stop: () => {
+    qdCall("POST", "/client/api/disconnect", null);
     status = { ...status, running: false, mode: null, systemProxy: false, started: null };
     return status_();
   },
   core_restart: () => HANDLERS.core_start({}),
   core_traffic: traffic,
-  core_logs: () => logs,
-  core_install: () => "Ядро скачано: mihomo v1.19.0",
+  core_logs: ({ engine }) => (engine === "qd" ? qdLogs : logs),
+  core_install: ({ engine }) => (engine === "qd" ? "v0.1.4-alpha" : "v1.19.0"),
   core_flush_fake_ip: () => null,
   mode_set: ({ mode }) => {
     status = { ...status, desiredMode: mode as api.Choice };
@@ -451,6 +469,7 @@ const HANDLERS: Record<string, (args: Args) => unknown> = {
   groups_render: ({ groups: list }) => text(list),
   rules_parse: ({ text: body }) => JSON.parse(String(body)),
   rules_render: ({ routing: value }) => text(value),
+  rules_processes: () => [{ name: "chrome.exe" }, { name: "notepad.exe" }],
   sources_list: () => sources,
   sources_add: ({ input }) => {
     if (!String(input).includes("://"))
@@ -622,12 +641,8 @@ const HANDLERS: Record<string, (args: Args) => unknown> = {
   }),
   qd_call: ({ method, path, body }) =>
     qdCall(String(method), String(path), (body as Record<string, unknown>) ?? null),
-  qd_start: () => qdCall("POST", "/client/api/connect", null),
-  qd_stop: () => qdCall("POST", "/client/api/disconnect", null),
-  qd_install: () => "v0.1.4-alpha",
   qd_rules_export: () => "C:\\Users\\demo\\rules.qdr",
   qd_rules_import: () => ({ rules: 2 }),
-  qd_logs: () => ["qd  embedded: api on 127.0.0.1:52100", "tunnel  up via Entry A, 9 ms"],
   diag_tools: () => tools,
   diag_run: ({ id }) => ({
     tool: id,

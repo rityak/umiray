@@ -16,6 +16,7 @@ import {
 import { useEffect, useState } from "react";
 import { Button, ChoiceCards, Code, ConfirmButton, Select, Switch, Tooltip } from "rootik";
 import * as api from "../api";
+import { ENGINES } from "../engines";
 import { useCached } from "../hooks/useCached";
 import { type LanguagePreference, languagePreference, t, tk } from "../i18n";
 import { failure, type Message } from "../shell/Banner";
@@ -105,26 +106,17 @@ const GEO = [
   { hours: 720, label: tk("Every month") },
 ];
 
-const MIHOMO_ONLY = new Set([
-  "guard",
-  "antidpi",
-  "nodes",
-  "service-rules",
-  "service-core",
-  "device",
-  "flush",
-]);
-
-function forQd(groups: Group[]): Group[] {
+/// Drop what the engine does not have (D-154): the list is the engine's, the form only obeys.
+function without(groups: Group[], hidden: ReadonlySet<string>): Group[] {
   return groups
-    .filter((group) => !MIHOMO_ONLY.has(group.id))
+    .filter((group) => !hidden.has(group.id))
     .map((group) => ({
       ...group,
       parts: group.parts
-        .filter((part) => !MIHOMO_ONLY.has(part.id))
+        .filter((part) => !hidden.has(part.id))
         .map((part) => ({
           ...part,
-          settings: part.settings.filter((setting) => !MIHOMO_ONLY.has(setting.id)),
+          settings: part.settings.filter((setting) => !hidden.has(setting.id)),
         })),
     }));
 }
@@ -654,7 +646,7 @@ export default function ClientForm({
 
   return (
     <Page
-      groups={settings.engine === "qd" ? forQd(groups) : groups}
+      groups={without(groups, ENGINES[settings.engine].hiddenClientSettings)}
       // Кнопок записи нет: каждая настройка клиента пишется сразу (D-117).
       bar={<SectionBar start={start} hint={hint} />}
     />

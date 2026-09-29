@@ -1,6 +1,7 @@
 import { Eye, EyeOff, Rss } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, Card, EmptyState, IconButton, Select, Text } from "rootik";
+import { formatBytes } from "../api";
 import { useCached } from "../hooks/useCached";
 import { useNow } from "../hooks/useNow";
 import { unchanged, usePoll } from "../hooks/usePoll";
@@ -23,17 +24,6 @@ type Props = {
 };
 
 const EVERY = [30, 60, 180, 480, 1440];
-
-function volume(bytes: number): string {
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit++;
-  }
-  return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
-}
 
 function every(minutes: number): string {
   return minutes < 60 ? t("{n} min", { n: minutes }) : t("{n} h", { n: minutes / 60 });
@@ -133,14 +123,27 @@ export default function QdSource({
     about?.expiresAt
       ? t("until {date}", { date: new Date(about.expiresAt).toLocaleDateString() })
       : null,
-    about ? `↓ ${volume(about.down)} · ↑ ${volume(about.up)}` : null,
+    about ? `↓ ${formatBytes(about.down)} · ↑ ${formatBytes(about.up)}` : null,
   ]
     .filter(Boolean)
     .join(" · ");
 
   return (
     <>
-      {adding && <LinkDialog qd={take} onDone={() => {}} onClose={() => setAdding(false)} />}
+      {adding && (
+        <LinkDialog
+          onSubmit={take}
+          onClose={() => setAdding(false)}
+          copy={{
+            description: t(
+              "One qd:// link from your provider. It carries the entry nodes and the network key.",
+            ),
+            label: t("Link"),
+            placeholder: "qd://…",
+            type: "text",
+          }}
+        />
+      )}
       <SectionBar
         end={
           <IconButton

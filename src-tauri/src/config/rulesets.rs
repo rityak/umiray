@@ -16,9 +16,11 @@ use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 
 use crate::collections;
-use crate::config::files::{self, CLIENT};
+use crate::collections::Collections;
+use crate::config::files::Documents;
+use crate::config::files::CLIENT;
 use crate::error::{AppError, Result};
-use crate::yaml::{set, top_mapping};
+use crate::yaml::Yaml;
 
 /// Поле `client.yaml`, в котором лежит список включённых.
 const KEY: &str = "rulesets";
@@ -38,81 +40,126 @@ pub struct Ruleset {
     pub rules: Vec<String>,
 }
 
-/// Все наборы коллекции, по алфавиту: порядок в окне не должен зависеть от того,
-/// как файлы легли на диск.
-pub fn list() -> Vec<Ruleset> {
-    let on = enabled();
-    collections::folder(collections::RULES)
-        .into_iter()
-        .filter_map(|(id, text)| {
-            let mut set = parse(&id, &text)?;
-            set.on = on.contains(&set.id);
-            Some(set)
-        })
-        .collect()
-}
+pub struct RulesetStore;
 
-/// Строки включённых наборов — то, что уходит в сборку.
-///
-/// Порядок между наборами — тот же алфавитный: два набора редко спорят за один домен,
-/// а стабильный порядок важнее, чем возможность их переставлять.
-pub fn enabled_rules() -> Vec<String> {
-    list()
-        .into_iter()
-        .filter(|set| set.on)
-        .flat_map(|set| set.rules)
-        .collect()
-}
-
-/// Текст набора как есть — тот же файл, что правят руками (D-104).
-///
-/// Идентификатор приходит из вебвью, поэтому путём он не становится: файл ищется среди
-/// тех, что коллекция и так перечисляет.
-pub fn read(id: &str) -> Result<String> {
-    collections::folder(collections::RULES)
-        .into_iter()
-        .find(|(name, _)| name == id)
-        .map(|(_, text)| text)
-        .ok_or_else(|| AppError::invalid(format!("Неизвестный набор правил: {id}")))
-}
-
-/// Завести свой набор (D-110). Возвращает идентификатор — окно раскроет его редактором.
-///
-/// Файл сразу с правилом-примером: набор без правил не показывается вовсе (`parse`),
-/// и заведённый из окна пропал бы у пользователя на глазах. Правило выбрано заведомо
-/// безобидное — новый набор ещё и выключен, так что в сборку оно не попадёт.
-pub fn create(title: &str) -> Result<String> {
-    let title = title.trim();
-    if title.is_empty() {
-        return Err(AppError::invalid("У набора должно быть имя"));
+impl RulesetStore {
+    /// Все наборы коллекции, по алфавиту: порядок в окне не должен зависеть от того,
+    /// как файлы легли на диск.
+    pub fn list() -> Vec<Ruleset> {
+        let on = enabled();
+        Collections::folder(collections::RULES)
+            .into_iter()
+            .filter_map(|(id, text)| {
+                let mut set = parse(&id, &text)?;
+                set.on = on.contains(&set.id);
+                Some(set)
+            })
+            .collect()
     }
-    let id = free(&slug(title));
-    let text = format!(
-        "title: {title}
+
+    /// Строки включённых наборов — то, что уходит в сборку.
+    ///
+    /// Порядок между наборами — тот же алфавитный: два набора редко спорят за один домен,
+    /// а стабильный порядок важнее, чем возможность их переставлять.
+    pub fn enabled_rules() -> Vec<String> {
+        RulesetStore::list()
+            .into_iter()
+            .filter(|set| set.on)
+            .flat_map(|set| set.rules)
+            .collect()
+    }
+
+    /// Текст набора как есть — тот же файл, что правят руками (D-104).
+    ///
+    /// Идентификатор приходит из вебвью, поэтому путём он не становится: файл ищется среди
+    /// тех, что коллекция и так перечисляет.
+    pub fn read(id: &str) -> Result<String> {
+        Collections::folder(collections::RULES)
+            .into_iter()
+            .find(|(name, _)| name == id)
+            .map(|(_, text)| text)
+            .ok_or_else(|| AppError::invalid(format!("Неизвестный набор правил: {id}")))
+    }
+
+    /// Завести свой набор (D-110). Возвращает идентификатор — окно раскроет его редактором.
+    ///
+    /// Файл сразу с правилом-примером: набор без правил не показывается вовсе (`parse`),
+    /// и заведённый из окна пропал бы у пользователя на глазах. Правило выбрано заведомо
+    /// безобидное — новый набор ещё и выключен, так что в сборку оно не попадёт.
+    pub fn create(title: &str) -> Result<String> {
+        let title = title.trim();
+        if title.is_empty() {
+            return Err(AppError::invalid("У набора должно быть имя"));
+        }
+        let id = free(&slug(title));
+        let text = format!(
+            "title: {title}
 rules:
   - DOMAIN-SUFFIX,example.com,DIRECT
 "
-    );
-    crate::atomic::write(path(&id), text)?;
-    Ok(id)
-}
+        );
+        crate::atomic::AtomicFile::write(path(&id), text)?;
+        Ok(id)
+    }
 
-/// Удалить набор вместе с файлом. Включённый сначала выключается: иначе он остался бы
-/// в `client.yaml` именем, которому больше ничего не соответствует.
-///
-/// Удаляем и поставляемый тоже — коллекция принадлежит пользователю (D-100), и
-/// «этот трогать нельзя» было бы враньём: файл всё равно правится руками.
-pub fn delete(id: &str) -> Result<()> {
-    read(id)?;
-    toggle(id, false)?;
-    std::fs::remove_file(path(id))?;
-    Ok(())
+    /// Удалить набор вместе с файлом. Включённый сначала выключается: иначе он остался бы
+    /// в `client.yaml` именем, которому больше ничего не соответствует.
+    ///
+    /// Удаляем и поставляемый тоже — коллекция принадлежит пользователю (D-100), и
+    /// «этот трогать нельзя» было бы враньём: файл всё равно правится руками.
+    pub fn delete(id: &str) -> Result<()> {
+        RulesetStore::read(id)?;
+        RulesetStore::toggle(id, false)?;
+        std::fs::remove_file(path(id))?;
+        Ok(())
+    }
+
+    /// Записать правку. Перед записью — разбор: файл, который не читается, означал бы набор,
+    /// молча выпавший из сборки, а окно показывало бы тумблер включённым.
+    ///
+    /// Заводить новые файлы этим нельзя: правится то, что уже лежит в папке — для нового
+    /// есть `create`.
+    pub fn write(id: &str, text: &str) -> Result<()> {
+        RulesetStore::read(id)?;
+        if parse(id, text).is_none() {
+            return Err(AppError::invalid(
+                "Набор должен быть YAML со списком `rules:` — и хотя бы одним правилом",
+            ));
+        }
+        crate::atomic::AtomicFile::write(path(id), text)?;
+        Ok(())
+    }
+
+    /// Включить или выключить. Пишем точечно, как режим перехвата (D-052): остальное
+    /// в `client.yaml` не наше.
+    pub fn toggle(id: &str, on: bool) -> Result<()> {
+        // Идентификатор приходит из вебвью. Путь из него не строится, но в `client.yaml`
+        // он попадает — а туда пишем только то, что правда лежит в папке.
+        if on && !RulesetStore::list().iter().any(|set| set.id == id) {
+            return Err(AppError::invalid(format!("Неизвестный набор правил: {id}")));
+        }
+        let mut names = enabled();
+        names.retain(|name| name != id);
+        if on {
+            names.push(id.to_string());
+        }
+        names.sort();
+        let mut map = Yaml::top_mapping(&Documents::read(CLIENT)?)?;
+        Yaml::set(
+            &mut map,
+            KEY,
+            Value::Sequence(names.into_iter().map(Value::from).collect()),
+        );
+        let text = serde_yaml::to_string(&Value::Mapping(map))
+            .map_err(|e| AppError::invalid(e.to_string()))?;
+        Documents::write(CLIENT, &text)
+    }
 }
 
 /// Путь к файлу набора. Одно место на весь модуль: идентификатор приходит из вебвью,
 /// и склеивать его с путём где попало — способ однажды склеить непроверенный.
 fn path(id: &str) -> std::path::PathBuf {
-    crate::paths::collection_folder(collections::RULES).join(format!("{id}.yaml"))
+    Collections::file(collections::RULES, id)
 }
 
 /// Имя файла из имени набора. Всё, что не буква, не цифра и не дефис, становится дефисом:
@@ -152,7 +199,7 @@ fn slug(title: &str) -> String {
 /// Свободное имя рядом с занятым: `свой`, `свой-2`, `свой-3`. Второй набор с тем же
 /// именем — обычное дело, а молча перезаписать чужой файл нельзя.
 fn free(wanted: &str) -> String {
-    let taken: Vec<String> = collections::folder(collections::RULES)
+    let taken: Vec<String> = Collections::folder(collections::RULES)
         .into_iter()
         .map(|(id, _)| id)
         .collect();
@@ -165,55 +212,14 @@ fn free(wanted: &str) -> String {
         .unwrap_or_else(|| wanted.to_string())
 }
 
-/// Записать правку. Перед записью — разбор: файл, который не читается, означал бы набор,
-/// молча выпавший из сборки, а окно показывало бы тумблер включённым.
-///
-/// Заводить новые файлы этим нельзя: правится то, что уже лежит в папке — для нового
-/// есть `create`.
-pub fn write(id: &str, text: &str) -> Result<()> {
-    read(id)?;
-    if parse(id, text).is_none() {
-        return Err(AppError::invalid(
-            "Набор должен быть YAML со списком `rules:` — и хотя бы одним правилом",
-        ));
-    }
-    crate::atomic::write(path(id), text)?;
-    Ok(())
-}
-
-/// Включить или выключить. Пишем точечно, как режим перехвата (D-052): остальное
-/// в `client.yaml` не наше.
-pub fn toggle(id: &str, on: bool) -> Result<()> {
-    // Идентификатор приходит из вебвью. Путь из него не строится, но в `client.yaml`
-    // он попадает — а туда пишем только то, что правда лежит в папке.
-    if on && !list().iter().any(|set| set.id == id) {
-        return Err(AppError::invalid(format!("Неизвестный набор правил: {id}")));
-    }
-    let mut names = enabled();
-    names.retain(|name| name != id);
-    if on {
-        names.push(id.to_string());
-    }
-    names.sort();
-    let mut map = top_mapping(&files::read(CLIENT)?)?;
-    set(
-        &mut map,
-        KEY,
-        Value::Sequence(names.into_iter().map(Value::from).collect()),
-    );
-    let text = serde_yaml::to_string(&Value::Mapping(map))
-        .map_err(|e| AppError::invalid(e.to_string()))?;
-    files::write(CLIENT, &text)
-}
-
 /// Что включено по мнению `client.yaml`. Файл правится руками, поэтому мусор здесь —
 /// это «ничего не включено», а не отказ собрать конфиг: правила не та вещь, ради которой
 /// стоит не поднять VPN.
 fn enabled() -> Vec<String> {
-    let Ok(text) = files::read(CLIENT) else {
+    let Ok(text) = Documents::read(CLIENT) else {
         return Vec::new();
     };
-    let Ok(map) = top_mapping(&text) else {
+    let Ok(map) = Yaml::top_mapping(&text) else {
         return Vec::new();
     };
     names(map.get(Value::from(KEY)))
@@ -234,7 +240,7 @@ fn names(value: Option<&Value>) -> Vec<String> {
 /// Файл набора: наш `title` и правила ядра. Без правил набор бессмыслен — такой файл
 /// в списке не показываем вовсе.
 fn parse(id: &str, text: &str) -> Option<Ruleset> {
-    let map = top_mapping(text).ok()?;
+    let map = Yaml::top_mapping(text).ok()?;
     let rules: Vec<String> = map
         .get(Value::from("rules"))?
         .as_sequence()?
@@ -320,9 +326,19 @@ mod tests {
     /// собрать конфиг.
     #[test]
     fn nonsense_in_the_field_turns_off_everything_instead_of_breaking_the_vpn() {
-        let map = top_mapping("rulesets: [direct-ru, block-ads]").unwrap();
+        let map = Yaml::top_mapping("rulesets: [direct-ru, block-ads]").unwrap();
         assert_eq!(names(map.get(Value::from(KEY))), ["direct-ru", "block-ads"]);
-        assert!(names(top_mapping("rulesets: 12").unwrap().get(Value::from(KEY))).is_empty());
-        assert!(names(top_mapping("ping: tcp").unwrap().get(Value::from(KEY))).is_empty());
+        assert!(names(
+            Yaml::top_mapping("rulesets: 12")
+                .unwrap()
+                .get(Value::from(KEY))
+        )
+        .is_empty());
+        assert!(names(
+            Yaml::top_mapping("ping: tcp")
+                .unwrap()
+                .get(Value::from(KEY))
+        )
+        .is_empty());
     }
 }

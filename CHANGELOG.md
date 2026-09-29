@@ -3,6 +3,18 @@
 The version comes from `package.json`, is mirrored in `Cargo.toml`, and appears in
 the subscription User-Agent as `umiray/<version>`.
 
+## 1.2.0
+
+### Fixes
+
+- Launch a release build through the installed client. A newer build copies itself to the
+  installation directory; an older build cannot replace a newer installed version.
+- Repair an administrator startup task that still points to another copy of the client.
+  Debug builds keep their separate data, process and startup task.
+
+For Windows x64, download `umiray_1.2.0_x64-setup.exe` from this release's assets.
+Existing installations can update from within the client.
+
 ## 1.1.0
 
 ### New

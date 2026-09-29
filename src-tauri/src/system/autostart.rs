@@ -11,13 +11,15 @@
 //! в `Run` подняла бы **вторую** копию без прав. Поэтому переключение одного всегда
 //! перекладывает и другой — здесь, в одном месте, а не в двух командах.
 //!
-//! «Есть задача» здесь означает `task::usable`, а не `task::exists`: задача, чей файл
+//! «Есть задача» здесь означает `SchedulerTask::usable`, а не `SchedulerTask::exists`: задача, чей файл
 //! исчез, не поднимает ничего и прав не даёт (B-015). Для всех вопросов «кто сейчас
 //! за запуск» такая задача — отсутствующая; убрать её из планировщика по-прежнему
 //! можно, и «всегда от администратора» её же и перезаводит поверх.
 
 use crate::error::Result;
-use crate::system::{registry, task};
+use crate::system::registry::Registry;
+use crate::system::task;
+use crate::system::task::SchedulerTask;
 
 const RUN: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 
@@ -28,10 +30,81 @@ const NAME: &str = crate::paths::APP_NAME;
 /// показывать не надо (D-129).
 pub const AT_LOGON: &str = "--autostart";
 
-/// Подняла ли клиента система, а не человек (D-129).
-pub fn by_system() -> bool {
-    let args: Vec<String> = std::env::args().collect();
-    decide(&args, task::handed_over, task::at_logon)
+pub struct Autostart;
+
+impl Autostart {
+    /// Подняла ли клиента система, а не человек (D-129).
+    pub fn by_system() -> bool {
+        let args: Vec<String> = std::env::args().collect();
+        decide(&args, SchedulerTask::handed_over, SchedulerTask::at_logon)
+    }
+
+    /// Запись в `Run`, заведённая до D-129, флага не несёт — дописываем его. Путь при этом
+    /// не трогаем: отладочная сборка иначе перевела бы на себя автозапуск установленного клиента.
+    pub fn refresh() -> Result<()> {
+        let Some(next) = Registry::read_string(RUN, NAME)?
+            .as_deref()
+            .and_then(with_flag)
+        else {
+            return Ok(());
+        };
+        // Запуском заведует задача — запись в `Run` тогда не наша забота (D-087).
+        if SchedulerTask::usable() {
+            return Ok(());
+        }
+        Registry::write_string(RUN, NAME, &next)
+    }
+
+    /// Стоит ли автозапуск сейчас. Ошибку чтения считаем за «нет»: показывать «включено»,
+    /// не сумев это подтвердить, — врать.
+    ///
+    /// Спрашиваем у того, кто сейчас за запуск и отвечает: есть задача — у неё, нет —
+    /// у реестра. Смотреть в оба места и складывать ответы значило бы показывать «включено»
+    /// по забытой записи, которая всё равно не сработает.
+    pub fn enabled() -> bool {
+        if SchedulerTask::usable() {
+            return SchedulerTask::at_logon();
+        }
+        in_registry()
+    }
+
+    /// Поднимается ли клиент с правами администратора всегда. Это и есть наличие задачи:
+    /// другого её назначения нет.
+    ///
+    /// Спрашиваем `usable`, а не `exists`: задача, чей файл исчез, прав не даёт и клиента
+    /// не поднимает (B-015). Показывать по ней «включено» — то же враньё, что и по забытой
+    /// записи в реестре, только дороже: человек уверен, что TUN встанет без UAC.
+    pub fn always_admin() -> bool {
+        SchedulerTask::usable()
+    }
+
+    /// Переложить запуск с одного способа на другой, сохранив автозапуск как он есть.
+    ///
+    /// Права нужны, чтобы **завести или убрать** задачу, а не чтобы ей пользоваться.
+    /// Отказ приходит как `NeedsElevation` — у окна на него уже есть кнопка (D-028).
+    pub fn set_always_admin(on: bool) -> Result<()> {
+        let at_logon = Autostart::enabled();
+        if on {
+            SchedulerTask::apply(at_logon)?;
+            // Запись в реестре теперь лишняя и вредная: она подняла бы вторую копию,
+            // и уже без прав.
+            return Registry::delete_value(RUN, NAME);
+        }
+        SchedulerTask::remove()?;
+        write_registry(at_logon)
+    }
+
+    pub fn set(on: bool) -> Result<()> {
+        if SchedulerTask::usable() {
+            // Задача уже есть — значит запуском заведует она, и автозапуск для неё
+            // это наличие триггера, а не строчка в реестре.
+            return SchedulerTask::apply(on);
+        }
+        // Протухшая задача (B-015) считается отсутствующей: она всё равно ничего не поднимет,
+        // а требовать прав ради её починки там, где человек просил всего лишь автозапуск,
+        // незачем. Починится сама, когда включат «всегда от администратора».
+        write_registry(on)
+    }
 }
 
 /// Разбор без побочных действий — ради теста. Метка и триггер спрашиваются лениво: первое
@@ -50,22 +123,6 @@ fn decide(args: &[String], handed: impl FnOnce() -> bool, at_logon: impl FnOnce(
     !handed() && at_logon()
 }
 
-/// Запись в `Run`, заведённая до D-129, флага не несёт — дописываем его. Путь при этом
-/// не трогаем: отладочная сборка иначе перевела бы на себя автозапуск установленного клиента.
-pub fn refresh() -> Result<()> {
-    let Some(next) = registry::read_string(RUN, NAME)?
-        .as_deref()
-        .and_then(with_flag)
-    else {
-        return Ok(());
-    };
-    // Запуском заведует задача — запись в `Run` тогда не наша забота (D-087).
-    if task::usable() {
-        return Ok(());
-    }
-    registry::write_string(RUN, NAME, &next)
-}
-
 /// Команда с флагом автозапуска. `None` — флаг уже есть или записи нет вовсе.
 fn with_flag(value: &str) -> Option<String> {
     let value = value.trim_end();
@@ -75,47 +132,8 @@ fn with_flag(value: &str) -> Option<String> {
     Some(format!("{value} {AT_LOGON}"))
 }
 
-/// Стоит ли автозапуск сейчас. Ошибку чтения считаем за «нет»: показывать «включено»,
-/// не сумев это подтвердить, — врать.
-///
-/// Спрашиваем у того, кто сейчас за запуск и отвечает: есть задача — у неё, нет —
-/// у реестра. Смотреть в оба места и складывать ответы значило бы показывать «включено»
-/// по забытой записи, которая всё равно не сработает.
-pub fn enabled() -> bool {
-    if task::usable() {
-        return task::at_logon();
-    }
-    in_registry()
-}
-
 fn in_registry() -> bool {
-    matches!(registry::read_string(RUN, NAME), Ok(Some(value)) if !value.is_empty())
-}
-
-/// Поднимается ли клиент с правами администратора всегда. Это и есть наличие задачи:
-/// другого её назначения нет.
-///
-/// Спрашиваем `usable`, а не `exists`: задача, чей файл исчез, прав не даёт и клиента
-/// не поднимает (B-015). Показывать по ней «включено» — то же враньё, что и по забытой
-/// записи в реестре, только дороже: человек уверен, что TUN встанет без UAC.
-pub fn always_admin() -> bool {
-    task::usable()
-}
-
-/// Переложить запуск с одного способа на другой, сохранив автозапуск как он есть.
-///
-/// Права нужны, чтобы **завести или убрать** задачу, а не чтобы ей пользоваться.
-/// Отказ приходит как `NeedsElevation` — у окна на него уже есть кнопка (D-028).
-pub fn set_always_admin(on: bool) -> Result<()> {
-    let at_logon = enabled();
-    if on {
-        task::apply(at_logon)?;
-        // Запись в реестре теперь лишняя и вредная: она подняла бы вторую копию,
-        // и уже без прав.
-        return registry::delete_value(RUN, NAME);
-    }
-    task::remove()?;
-    write_registry(at_logon)
+    matches!(Registry::read_string(RUN, NAME), Ok(Some(value)) if !value.is_empty())
 }
 
 /// Строка команды для автозагрузки.
@@ -126,23 +144,11 @@ fn command(exe: &std::path::Path) -> String {
     format!("\"{}\" {AT_LOGON}", exe.display())
 }
 
-pub fn set(on: bool) -> Result<()> {
-    if task::usable() {
-        // Задача уже есть — значит запуском заведует она, и автозапуск для неё
-        // это наличие триггера, а не строчка в реестре.
-        return task::apply(on);
-    }
-    // Протухшая задача (B-015) считается отсутствующей: она всё равно ничего не поднимет,
-    // а требовать прав ради её починки там, где человек просил всего лишь автозапуск,
-    // незачем. Починится сама, когда включат «всегда от администратора».
-    write_registry(on)
-}
-
 fn write_registry(on: bool) -> Result<()> {
     if !on {
-        return registry::delete_value(RUN, NAME);
+        return Registry::delete_value(RUN, NAME);
     }
-    registry::write_string(RUN, NAME, &command(&std::env::current_exe()?))
+    Registry::write_string(RUN, NAME, &command(&std::env::current_exe()?))
 }
 
 #[cfg(test)]

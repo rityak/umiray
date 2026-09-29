@@ -1,31 +1,45 @@
 import { Plus } from "lucide-react";
 import { useState } from "react";
 import { Button, Dialog, Field, Input } from "rootik";
-import * as api from "../api";
 import { t } from "../i18n";
 import { failure } from "../shell/Banner";
 
+/// What kind of link the dialog takes. Every engine has its own (D-154).
+export type LinkCopy = {
+  description: string;
+  label: string;
+  placeholder: string;
+  type: "url" | "text";
+};
+
 type Props = {
-  onDone: (result: api.Import) => void;
+  /// Take the link. A refusal is thrown and shown at the field; the caller closes on success.
+  onSubmit: (link: string) => Promise<void>;
   onClose: () => void;
-  qd?: (link: string) => Promise<void>;
+  /// A subscription address or a link to one server, unless said otherwise.
+  copy?: LinkCopy;
 };
 
 /**
  * Add a subscription or a link to one server (D-120). A refusal shows right here, at the
  * field being edited; success closes the dialog.
  */
-export default function LinkDialog({ onDone, onClose, qd }: Props) {
+export default function LinkDialog({ onSubmit, onClose, copy }: Props) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
+  const text = copy ?? {
+    description: t("A subscription address from your provider or a link to one server."),
+    label: t("Subscription address"),
+    placeholder: t("https://… or vless://…"),
+    type: "url",
+  };
 
   const add = async () => {
     setBusy(true);
     setFailed(null);
     try {
-      if (qd) await qd(input.trim());
-      else onDone(await api.sourcesAdd(input.trim()));
+      await onSubmit(input.trim());
     } catch (e) {
       setFailed(failure(e).text);
     } finally {
@@ -38,11 +52,7 @@ export default function LinkDialog({ onDone, onClose, qd }: Props) {
       open
       size="sm"
       title={t("Link")}
-      description={
-        qd
-          ? t("One qd:// link from your provider. It carries the entry nodes and the network key.")
-          : t("A subscription address from your provider or a link to one server.")
-      }
+      description={text.description}
       onClose={onClose}
       footer={
         <>
@@ -61,12 +71,12 @@ export default function LinkDialog({ onDone, onClose, qd }: Props) {
         </>
       }
     >
-      <Field label={qd ? t("Link") : t("Subscription address")} error={failed ?? undefined}>
+      <Field label={text.label} error={failed ?? undefined}>
         <Input
-          type={qd ? "text" : "url"}
+          type={text.type}
           mono
           value={input}
-          placeholder={qd ? "qd://…" : t("https://… or vless://…")}
+          placeholder={text.placeholder}
           spellCheck={false}
           onChange={(event) => setInput(event.target.value)}
           onKeyDown={(event) => {

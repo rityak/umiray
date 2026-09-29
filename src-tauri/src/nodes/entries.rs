@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use serde_yaml::{Mapping, Value};
 
 use crate::error::{AppError, Result};
-use crate::paths;
+use crate::paths::Paths;
 
 /// Разница для одной записи: ключ → значение, `null` — убрать ключ.
 pub type Patch = Mapping;
@@ -22,49 +22,53 @@ pub type Patch = Mapping;
 /// Все правки записей одного источника, по тождеству узла (`link::identity_of`).
 pub type Entries = BTreeMap<String, Patch>;
 
-pub fn load(source: &str) -> Entries {
-    std::fs::read_to_string(paths::source_entries(source))
-        .ok()
-        .and_then(|text| serde_yaml::from_str(&text).ok())
-        .unwrap_or_default()
-}
+pub struct EntryPatch;
 
-pub fn save(source: &str, entries: &Entries) -> Result<()> {
-    paths::ensure_sources_dir()?;
-    let path = paths::source_entries(source);
-    if entries.is_empty() {
-        // Пустой файл не нужен: отсутствие правок и есть отсутствие файла.
-        let _ = std::fs::remove_file(&path);
-        return Ok(());
+impl EntryPatch {
+    pub fn load(source: &str) -> Entries {
+        std::fs::read_to_string(Paths::source_entries(source))
+            .ok()
+            .and_then(|text| serde_yaml::from_str(&text).ok())
+            .unwrap_or_default()
     }
-    let text = serde_yaml::to_string(entries)
-        .map_err(|e| AppError::io(format!("Не удалось записать правки узла: {e}")))?;
-    Ok(crate::atomic::write(path, text)?)
-}
 
-/// Чем правленая запись отличается от собранной. Пустая разница означает «не правили».
-pub fn diff(built: &Mapping, edited: &Mapping) -> Patch {
-    let mut patch = Mapping::new();
-    for (key, value) in edited {
-        if built.get(key) != Some(value) {
-            patch.insert(key.clone(), value.clone());
+    pub fn save(source: &str, entries: &Entries) -> Result<()> {
+        Paths::ensure_sources_dir()?;
+        let path = Paths::source_entries(source);
+        if entries.is_empty() {
+            // Пустой файл не нужен: отсутствие правок и есть отсутствие файла.
+            let _ = std::fs::remove_file(&path);
+            return Ok(());
         }
+        let text = serde_yaml::to_string(entries)
+            .map_err(|e| AppError::io(format!("Не удалось записать правки узла: {e}")))?;
+        Ok(crate::atomic::AtomicFile::write(path, text)?)
     }
-    for key in built.keys() {
-        if !edited.contains_key(key) {
-            patch.insert(key.clone(), Value::Null);
-        }
-    }
-    patch
-}
 
-/// Наложить разницу на собранную запись.
-pub fn apply(patch: &Patch, built: &mut Mapping) {
-    for (key, value) in patch {
-        if value.is_null() {
-            built.remove(key);
-        } else {
-            built.insert(key.clone(), value.clone());
+    /// Чем правленая запись отличается от собранной. Пустая разница означает «не правили».
+    pub fn diff(built: &Mapping, edited: &Mapping) -> Patch {
+        let mut patch = Mapping::new();
+        for (key, value) in edited {
+            if built.get(key) != Some(value) {
+                patch.insert(key.clone(), value.clone());
+            }
+        }
+        for key in built.keys() {
+            if !edited.contains_key(key) {
+                patch.insert(key.clone(), Value::Null);
+            }
+        }
+        patch
+    }
+
+    /// Наложить разницу на собранную запись.
+    pub fn apply(patch: &Patch, built: &mut Mapping) {
+        for (key, value) in patch {
+            if value.is_null() {
+                built.remove(key);
+            } else {
+                built.insert(key.clone(), value.clone());
+            }
         }
     }
 }
@@ -93,7 +97,7 @@ mod tests {
             ("udp", Value::from(true)),
             ("dialer-proxy", Value::from("sock")),
         ]);
-        let patch = diff(&built, &edited);
+        let patch = EntryPatch::diff(&built, &edited);
         assert_eq!(patch.len(), 2, "только изменённое и добавленное: {patch:?}");
         assert_eq!(patch.get(Value::from("mtu")), Some(&Value::from(1280)));
         assert_eq!(
@@ -107,11 +111,11 @@ mod tests {
     fn a_removed_key_is_remembered_as_null() {
         let built = map(&[("name", Value::from("wg")), ("mtu", Value::from(1420))]);
         let edited = map(&[("name", Value::from("wg"))]);
-        let patch = diff(&built, &edited);
+        let patch = EntryPatch::diff(&built, &edited);
         assert_eq!(patch.get(Value::from("mtu")), Some(&Value::Null));
 
         let mut again = built.clone();
-        apply(&patch, &mut again);
+        EntryPatch::apply(&patch, &mut again);
         assert_eq!(again, edited);
     }
 
@@ -122,7 +126,7 @@ mod tests {
             ("private-key", Value::from("старый")),
             ("mtu", Value::from(1420)),
         ]);
-        let patch = diff(
+        let patch = EntryPatch::diff(
             &built,
             &map(&[
                 ("private-key", Value::from("старый")),
@@ -134,7 +138,7 @@ mod tests {
             ("private-key", Value::from("новый")),
             ("mtu", Value::from(1420)),
         ]);
-        apply(&patch, &mut fresh);
+        EntryPatch::apply(&patch, &mut fresh);
         assert_eq!(
             fresh.get(Value::from("private-key")),
             Some(&Value::from("новый")),
@@ -146,6 +150,6 @@ mod tests {
     #[test]
     fn an_untouched_entry_leaves_no_patch() {
         let built = map(&[("name", Value::from("wg")), ("mtu", Value::from(1420))]);
-        assert!(diff(&built, &built.clone()).is_empty());
+        assert!(EntryPatch::diff(&built, &built.clone()).is_empty());
     }
 }

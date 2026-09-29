@@ -113,7 +113,7 @@ impl Report {
                 Verdict::Bad => Tone::Bad,
                 Verdict::Idle => Tone::Dim,
             },
-            format!("{headline} · {}", millis(ms)),
+            format!("{headline} · {}", Report::millis(ms)),
         );
         self.verdict = verdict;
         self.headline = headline;
@@ -122,12 +122,14 @@ impl Report {
     }
 }
 
-/// Время по-человечески: миллисекунды до секунды, дальше секунды с десятой.
-pub fn millis(ms: u64) -> String {
-    if ms < 1000 {
-        format!("{ms} мс")
-    } else {
-        format!("{},{} с", ms / 1000, (ms % 1000) / 100)
+impl Report {
+    /// Время по-человечески: миллисекунды до секунды, дальше секунды с десятой.
+    pub fn millis(ms: u64) -> String {
+        if ms < 1000 {
+            format!("{ms} мс")
+        } else {
+            format!("{},{} с", ms / 1000, (ms % 1000) / 100)
+        }
     }
 }
 
@@ -137,10 +139,10 @@ mod tests {
 
     #[test]
     fn time_reads_as_people_write_it() {
-        assert_eq!(millis(0), "0 мс");
-        assert_eq!(millis(999), "999 мс");
-        assert_eq!(millis(1000), "1,0 с");
-        assert_eq!(millis(2140), "2,1 с");
+        assert_eq!(Report::millis(0), "0 мс");
+        assert_eq!(Report::millis(999), "999 мс");
+        assert_eq!(Report::millis(1000), "1,0 с");
+        assert_eq!(Report::millis(2140), "2,1 с");
     }
 
     /// Вердикт, заголовок и последняя строка консоли обязаны говорить одно и то же:

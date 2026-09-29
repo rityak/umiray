@@ -285,7 +285,12 @@ export default function Sources({
 
   return (
     <>
-      {adding === "link" && <LinkDialog onDone={added} onClose={() => setAdding(null)} />}
+      {adding === "link" && (
+        <LinkDialog
+          onSubmit={async (link) => added(await api.sourcesAdd(link))}
+          onClose={() => setAdding(null)}
+        />
+      )}
       {adding === "node" && (
         <NodeDialog
           onDone={added}

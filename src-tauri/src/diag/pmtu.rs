@@ -25,112 +25,118 @@ const HIGH: u32 = 1500;
 
 const TIMEOUT: Duration = Duration::from_millis(1200);
 
-/// `pmtu`: наибольший пакет, доходящий до адреса целиком.
-pub fn measure(host: &str) -> Result<Report> {
-    let started = Instant::now();
-    let mut report = Report::new("pmtu");
-    let address =
-        resolve(host).ok_or_else(|| AppError::invalid(format!("«{host}» не адрес и не имя")))?;
-    report.say(
-        Tone::Info,
-        format!("pmtu {host} → {address}, DF, {LOW}…{HIGH}"),
-    );
-    report.columns = ["Пробовали", "Тело", "Результат"]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+pub struct PmtuProbe;
 
-    // Сперва убеждаемся, что адрес вообще отвечает: без этого поиск сойдётся в «ничего
-    // не проходит» и обвинит канал в том, чего он не делал.
-    if !fits(address, LOW - HEADERS) {
+impl PmtuProbe {
+    /// `pmtu`: наибольший пакет, доходящий до адреса целиком.
+    pub fn measure(host: &str) -> Result<Report> {
+        let started = Instant::now();
+        let mut report = Report::new("pmtu");
+        let address = resolve(host)
+            .ok_or_else(|| AppError::invalid(format!("«{host}» не адрес и не имя")))?;
         report.say(
-            Tone::Bad,
-            format!("{LOW} байт не прошли — узел молчит по ICMP"),
+            Tone::Info,
+            format!("pmtu {host} → {address}, DF, {LOW}…{HIGH}"),
         );
-        return Ok(report.finish(
-            Verdict::Idle,
-            "узел не отвечает по ICMP — мерить нечем".to_string(),
-            started.elapsed().as_millis() as u64,
-        ));
-    }
+        report.columns = ["Пробовали", "Тело", "Результат"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
 
-    let mut low = LOW;
-    search(address, |size, passed| {
-        low = size.max(low);
+        // Сперва убеждаемся, что адрес вообще отвечает: без этого поиск сойдётся в «ничего
+        // не проходит» и обвинит канал в том, чего он не делал.
+        if !fits(address, LOW - HEADERS) {
+            report.say(
+                Tone::Bad,
+                format!("{LOW} байт не прошли — узел молчит по ICMP"),
+            );
+            return Ok(report.finish(
+                Verdict::Idle,
+                "узел не отвечает по ICMP — мерить нечем".to_string(),
+                started.elapsed().as_millis() as u64,
+            ));
+        }
+
+        let mut low = LOW;
+        search(address, |size, passed| {
+            low = size.max(low);
+            report.say(
+                if passed { Tone::Ok } else { Tone::Dim },
+                format!(
+                    "{size:>5} байт  тело {:>5}  {}",
+                    size - HEADERS,
+                    if passed {
+                        "прошло"
+                    } else {
+                        "не прошло"
+                    }
+                ),
+            );
+            report.rows.push(Row {
+                cells: vec![
+                    size.to_string(),
+                    (size - HEADERS).to_string(),
+                    if passed {
+                        "прошло"
+                    } else {
+                        "не прошло"
+                    }
+                    .to_string(),
+                ],
+                verdict: if passed { Verdict::Ok } else { Verdict::Idle },
+                mark: false,
+            });
+        });
+
+        let ms = started.elapsed().as_millis() as u64;
+        let advice = low.saturating_sub(TUNNEL);
         report.say(
-            if passed { Tone::Ok } else { Tone::Dim },
+            Tone::Info,
             format!(
-                "{size:>5} байт  тело {:>5}  {}",
-                size - HEADERS,
-                if passed {
-                    "прошло"
-                } else {
-                    "не прошло"
-                }
+                "путь держит {low}; туннелю оставить {advice} — 60 байт уходят под его заголовок"
             ),
         );
         report.rows.push(Row {
             cells: vec![
-                size.to_string(),
-                (size - HEADERS).to_string(),
-                if passed {
-                    "прошло"
-                } else {
-                    "не прошло"
-                }
-                .to_string(),
+                "итог".into(),
+                advice.to_string(),
+                format!("MTU пути {low}, туннелю {advice}"),
             ],
-            verdict: if passed { Verdict::Ok } else { Verdict::Idle },
-            mark: false,
+            verdict: Verdict::Ok,
+            mark: true,
         });
-    });
 
-    let ms = started.elapsed().as_millis() as u64;
-    let advice = low.saturating_sub(TUNNEL);
-    report.say(
-        Tone::Info,
-        format!("путь держит {low}; туннелю оставить {advice} — 60 байт уходят под его заголовок"),
-    );
-    report.rows.push(Row {
-        cells: vec![
-            "итог".into(),
-            advice.to_string(),
-            format!("MTU пути {low}, туннелю {advice}"),
-        ],
-        verdict: Verdict::Ok,
-        mark: true,
-    });
+        let (verdict, headline) = if low >= HIGH {
+            (Verdict::Ok, format!("{low} — полный кадр"))
+        } else {
+            (Verdict::Warn, format!("{low}, туннелю {advice}"))
+        };
+        Ok(report.finish(verdict, headline, ms))
+    }
 
-    let (verdict, headline) = if low >= HIGH {
-        (Verdict::Ok, format!("{low} — полный кадр"))
-    } else {
-        (Verdict::Warn, format!("{low}, туннелю {advice}"))
-    };
-    Ok(report.finish(verdict, headline, ms))
+    /// Наибольший пакет, доходящий до адреса целиком, — типизированный слой под отчётом
+    /// (D-097). Пусто — узел молчит по ICMP, и мерить нечем.
+    ///
+    /// Им пользуется и таблица выше, и автоподбор MTU (D-105): второго двоичного поиска
+    /// в клиенте быть не должно.
+    pub fn path(host: &str) -> Result<Option<u32>> {
+        let address = resolve(host)
+            .ok_or_else(|| AppError::invalid(format!("«{host}» не адрес и не имя")))?;
+        if !fits(address, LOW - HEADERS) {
+            return Ok(None);
+        }
+        let mut low = LOW;
+        search(address, |size, passed| {
+            if passed {
+                low = size.max(low);
+            }
+        });
+        Ok(Some(low))
+    }
 }
 
 /// Сколько уходит под собственный заголовок туннеля: у WireGuard это 60 байт на IPv4.
 pub const TUNNEL: u32 = 60;
-
-/// Наибольший пакет, доходящий до адреса целиком, — типизированный слой под отчётом
-/// (D-097). Пусто — узел молчит по ICMP, и мерить нечем.
-///
-/// Им пользуется и таблица выше, и автоподбор MTU (D-105): второго двоичного поиска
-/// в клиенте быть не должно.
-pub fn path(host: &str) -> Result<Option<u32>> {
-    let address =
-        resolve(host).ok_or_else(|| AppError::invalid(format!("«{host}» не адрес и не имя")))?;
-    if !fits(address, LOW - HEADERS) {
-        return Ok(None);
-    }
-    let mut low = LOW;
-    search(address, |size, passed| {
-        if passed {
-            low = size.max(low);
-        }
-    });
-    Ok(Some(low))
-}
 
 /// Сам поиск: `low` всегда проходит, `high` всегда нет. О каждой пробе рассказывает
 /// вызывающему — таблице нужны все шаги, автоподбору только итог.

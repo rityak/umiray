@@ -6,18 +6,28 @@
 //! раскладки.
 
 pub mod boot;
+pub mod catalog;
 pub mod client;
 pub mod connect;
 pub mod data;
+pub mod diagnostics;
+pub mod engine;
 pub mod guard;
+pub mod killswitch;
 pub mod lifecycle;
+pub mod maintenance;
 pub mod measure;
 pub mod migrate;
+pub mod mihomo;
 pub mod mode;
 pub mod notice;
+pub mod presets;
+pub mod proxy;
+pub mod qd;
 pub mod refresher;
-pub mod reset;
+pub mod routing;
 pub mod settings;
+pub mod sources;
 pub mod state;
 pub mod status;
 pub mod tick;

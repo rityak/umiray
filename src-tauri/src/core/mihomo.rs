@@ -1,33 +1,35 @@
-//! Процесс ядра: запуск в нужном режиме, ожидание готовности, лог и остановка.
+//! Ядро mihomo. Сам модуль — процесс: запуск в нужном режиме, ожидание готовности, лог
+//! и остановка; владеет дочерним процессом и его выводом, наружу отдаёт только состояние
+//! и строки лога — команды Tauri про `Child` ничего не знают.
 //!
-//! Владеет дочерним процессом и его выводом. Наружу отдаёт только состояние и строки лога —
-//! команды Tauri про `Child` ничего не знают.
+//! Остальное разделено по тому, чем управляет: `controller` — работающим ядром через
+//! `external-controller` (D-007), `download` — файлом ядра на диске (D-006), `apply` —
+//! тем, доедет ли правка до живого ядра перезагрузкой (D-102).
 
-use std::collections::VecDeque;
-use std::io::{BufRead, BufReader, Read};
-use std::os::windows::io::AsRawHandle;
+pub mod apply;
+pub mod controller;
+pub mod download;
+
 use std::process::{Child, Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use crate::core::controller::{self, Controller};
+use controller::Controller;
 
 use crate::config::mode::Mode;
+use crate::core::process::CoreProcess;
+use crate::core::process::LogRing;
 use crate::error::{AppError, Result};
-use crate::paths;
+use crate::nodes::sources::SourceStore;
+use crate::paths::Paths;
 use crate::render::mihomo::Effective;
-use crate::system::elevation;
+use crate::system::elevation::Elevation;
 
-/// Сколько строк вывода ядра держим. Единственный источник правды о том, почему оно не встало.
-const LOG_LINES: usize = 500;
 /// Сколько ждём, пока ядро начнёт отвечать: большой конфиг грузится небыстро.
 const READY_TIMEOUT: Duration = Duration::from_secs(10);
 /// Сколько ждём, пока ядро выйдет само после Ctrl+Break. Замер даёт около ста
 /// миллисекунд (S-021); полсекунды — потолок на медленную машину, после него гасим.
 const GRACE: Duration = Duration::from_millis(500);
-/// Без этого флага при каждом запуске мигает окно консоли.
-#[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[derive(Default)]
 struct Running {
@@ -39,6 +41,8 @@ struct Running {
     /// Порт служебного входа под замер «через прокси, keep-alive» (D-072). Живёт столько же,
     /// сколько процесс: вход заводится в конфиге при каждом запуске.
     probe: Option<u16>,
+    /// Адаптер TUN работающего конфига; пусто — не TUN.
+    device: Option<String>,
     /// Живёт ровно столько же, сколько процесс: секрет одноразовый.
     controller: Option<Controller>,
     /// Когда ядро поднялось, в секундах эпохи. Живёт столько же, сколько процесс:
@@ -62,18 +66,21 @@ pub struct Status {
     /// Когда ядро поднялось. Считает здесь, а не окно: окно переживает перезапуск ядра
     /// и живёт дольше него, и таймер на его стороне врал бы после каждого падения.
     pub started: Option<u64>,
+    /// Ядро **должно** работать (D-057): живое при `running: false` — упало само.
+    pub wanted: bool,
+    pub device: Option<String>,
 }
 
-pub struct Supervisor {
+pub struct Mihomo {
     running: Mutex<Running>,
-    logs: Arc<Mutex<VecDeque<String>>>,
+    log: LogRing,
 }
 
-impl Supervisor {
+impl Mihomo {
     pub fn new() -> Self {
         Self {
             running: Mutex::new(Running::default()),
-            logs: Arc::new(Mutex::new(VecDeque::new())),
+            log: LogRing::default(),
         }
     }
 
@@ -89,6 +96,7 @@ impl Supervisor {
             running.mode = None;
             running.port = None;
             running.probe = None;
+            running.device = None;
             running.controller = None;
             running.started = None;
             running.launched = None;
@@ -98,6 +106,8 @@ impl Supervisor {
             mode: running.mode,
             port: running.port,
             started: running.started,
+            wanted: running.wanted,
+            device: running.device.clone(),
         }
     }
 
@@ -107,47 +117,8 @@ impl Supervisor {
         self.running.lock().unwrap().launched.clone()
     }
 
-    pub fn logs(&self) -> Vec<String> {
-        self.logs.lock().unwrap().iter().cloned().collect()
-    }
-
-    /// Ядро умерло само, хотя должно работать. Единственный способ отличить падение
-    /// от штатной остановки — флаг `wanted`: смерть процесса его не снимает (D-057).
-    pub fn crashed(&self) -> bool {
-        // `status` заодно подчищает состояние, поэтому он первым — и не под своим замком.
-        let alive = self.status().running;
-        !alive && self.running.lock().unwrap().wanted
-    }
-
-    /// Своя строка в логе ядра. Формат — тот же `time=… level=… msg=…`, которым пишет
-    /// ядро: окно уже умеет его разбирать и фильтровать, время встаёт в ту же колонку,
-    /// а `umiray:` говорит, кто автор строки.
-    pub fn note(&self, level: &str, message: &str) {
-        push(
-            &self.logs,
-            format!(
-                "time=\"{}\" level={level} msg=\"umiray: {message}\"",
-                crate::stamp::local()
-            ),
-        );
-    }
-
-    /// Вернуть в кольцо строки прошлой жизни ядра. Запуск кольцо чистит, поэтому надзор
-    /// снимает хвост до подъёма и возвращает после — иначе причина падения пропадёт
-    /// вместе с ним (D-057).
-    pub fn recall(&self, lines: Vec<String>) {
-        for line in lines {
-            push(&self.logs, line);
-        }
-    }
-
-    /// Хвост лога списком строк: интерфейс отрисует их сам, склеивать в текст ошибки нечего.
-    pub fn tail(&self, lines: usize) -> Vec<String> {
-        let logs = self.logs.lock().unwrap();
-        logs.iter()
-            .skip(logs.len().saturating_sub(lines))
-            .cloned()
-            .collect()
+    pub fn log(&self) -> &LogRing {
+        &self.log
     }
 
     /// Ручка к API ядра. Приватна намеренно: наружу из `core` торчат доменные операции
@@ -231,14 +202,15 @@ impl Supervisor {
         let Some(controller) = self.controller() else {
             return Ok(());
         };
-        paths::ensure_run_dir()?;
-        crate::atomic::write(paths::effective_config(), &effective.yaml)?;
-        controller.apply(&paths::effective_config()).await?;
+        Paths::ensure_run_dir()?;
+        crate::atomic::AtomicFile::write(Paths::effective_config(), &effective.yaml)?;
+        controller.apply(&Paths::effective_config()).await?;
         // Запомненное «чем запускали» обязано догнать: по нему считается, нужен ли
         // перезапуск (D-102), и разъехаться с работающим ядром ему нельзя.
         let mut running = self.running.lock().unwrap();
         running.mode = Some(effective.mode);
         running.port = effective.port;
+        running.device = effective.device.clone();
         running.launched = Some(effective.yaml.clone());
         Ok(())
     }
@@ -276,20 +248,20 @@ impl Supervisor {
     /// Режим при этом читается из самого конфига, а не из настроек рядом (D-052): правку
     /// руками в разделе «Настройки» и нажатие в шапке ядро видит одинаково.
     pub async fn start(&self, effective: &Effective) -> Result<()> {
-        check_privileges(effective.mode, elevation::is_elevated())?;
+        Mihomo::check_privileges(effective.mode, Elevation::is_elevated())?;
         self.stop();
 
-        let core = paths::core();
+        let core = Paths::core();
         if !core.exists() {
             return Err(AppError::CoreMissing {
                 path: core.display().to_string(),
             });
         }
 
-        paths::ensure_run_dir()?;
-        crate::atomic::write(paths::effective_config(), &effective.yaml)?;
+        Paths::ensure_run_dir()?;
+        crate::atomic::AtomicFile::write(Paths::effective_config(), &effective.yaml)?;
 
-        self.logs.lock().unwrap().clear();
+        self.log.clear();
         let controller = Controller::new()?;
         let mut child = self.spawn(&core, &controller)?;
 
@@ -299,7 +271,7 @@ impl Supervisor {
             let _ = child.wait();
             return Err(AppError::CoreFailed {
                 message: why,
-                log: self.tail(6),
+                log: self.log.tail(6),
             });
         }
 
@@ -308,8 +280,9 @@ impl Supervisor {
         running.mode = Some(effective.mode);
         running.port = effective.port;
         running.probe = effective.probe;
+        running.device = effective.device.clone();
         running.controller = Some(controller);
-        running.started = crate::stamp::now();
+        running.started = crate::stamp::Stamp::now();
         running.wanted = true;
         running.launched = Some(effective.yaml.clone());
         Ok(())
@@ -324,22 +297,14 @@ impl Supervisor {
     pub fn stop(&self) {
         let mut running = self.running.lock().unwrap();
         if let Some(mut child) = running.child.take() {
-            if crate::system::console::interrupt(child.id()) {
-                let began = std::time::Instant::now();
-                while began.elapsed() < GRACE {
-                    if matches!(child.try_wait(), Ok(Some(_))) {
-                        break;
-                    }
-                    std::thread::sleep(Duration::from_millis(20));
-                }
-            }
-            let _ = child.kill();
-            let _ = child.wait();
+            let asked = crate::system::console::Console::interrupt(child.id());
+            CoreProcess::finish(&mut child, if asked { GRACE } else { Duration::ZERO });
         }
         running.wanted = false;
         running.mode = None;
         running.port = None;
         running.probe = None;
+        running.device = None;
         running.controller = None;
         running.started = None;
         running.launched = None;
@@ -349,15 +314,15 @@ impl Supervisor {
         let mut command = Command::new(core);
         command
             .arg("-d")
-            .arg(paths::run_dir())
+            .arg(Paths::run_dir())
             .arg("-f")
-            .arg(paths::effective_config())
+            .arg(Paths::effective_config())
             // Ядро отказывается читать файлы провайдеров вне своего рабочего каталога:
             // «path is not subpath of home directory or SAFE_PATHS». Рабочий каталог —
             // `run/`, а источники лежат в соседнем `sources/` (D-014), и это правильно:
             // они наши, а не его. Открываем ему ровно один каталог, а не расширяем `-d`
             // до корня — иначе ядро начало бы писать свой кэш вперемешку с нашими файлами.
-            .env("SAFE_PATHS", paths::sources_dir())
+            .env("SAFE_PATHS", SourceStore::dir())
             .args(controller.args())
             // `null`, а не наследование: после мягкой остановки (S-021) клиент отцепляется
             // от консоли ядра, и его собственные стандартные дескрипторы становятся
@@ -367,82 +332,46 @@ impl Supervisor {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            // Своя группа процессов — ради мягкой остановки: без неё Ctrl+Break
-            // прилетел бы и клиенту (S-021).
-            command.creation_flags(CREATE_NO_WINDOW | crate::system::console::NEW_PROCESS_GROUP);
-        }
-
-        let mut child = command.spawn().map_err(|e| AppError::CoreFailed {
-            message: format!("Не удалось запустить ядро: {e}"),
-            log: Vec::new(),
-        })?;
-        // Клетка до всего остального: с этой секунды ядро не переживёт падение клиента
-        // (D-058). Между спавном и этой строкой окно всё-таки есть — микросекунды,
-        // и закрыть его можно только запуском в приостановленном виде.
-        // Потолок: окно в микросекунды, лечится CREATE_SUSPENDED + ResumeThread.
-        if !crate::system::job::attach(child.as_raw_handle()) {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(AppError::CoreFailed {
-                message: "Не удалось привязать ядро к процессу клиента".into(),
-                log: vec!["Windows job object не принял процесс ядра".into()],
-            });
-        }
+        // Своя группа процессов — ради мягкой остановки: без неё Ctrl+Break
+        // прилетел бы и клиенту (S-021).
+        let mut child =
+            CoreProcess::spawn(command, crate::system::console::NEW_PROCESS_GROUP, "mihomo")?;
         if let Some(out) = child.stdout.take() {
-            pump(out, self.logs.clone());
+            self.log.pump(out);
         }
         if let Some(err) = child.stderr.take() {
-            pump(err, self.logs.clone());
+            self.log.pump(err);
         }
         Ok(child)
     }
 }
 
-/// Ядро, пережившее прошлую жизнь клиента, — прибрать при запуске (D-059).
-///
-/// Клетка (D-058) осиротеть ему не даёт, но она появилась не всегда и может не создаться,
-/// а осиротевшее ядро ломает ровно всё: держит порт, держит рабочий каталог, а в TUN —
-/// адаптер со всем трафиком машины, и выключить его из окна нельзя, потому что клиент
-/// про него ничего не знает. Поэтому бьём по имени файла ядра, не разбираясь, чей процесс:
-/// stable и dev имеют разные имена ядра и не трогают друг друга (D-150).
-///
-/// Зовётся **только** из `setup`, и это важно: вторая копия приложения гасится плагином
-/// одиночного запуска раньше (D-046), а вызов до сборки приложения убивал бы ядро первой.
-pub fn sweep() {
-    let Some(name) = paths::core().file_name().map(std::ffi::OsString::from) else {
-        return;
-    };
-    let mut command = Command::new("taskkill");
-    command
-        .arg("/IM")
-        .arg(name)
-        .arg("/F")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(CREATE_NO_WINDOW);
+impl Mihomo {
+    /// Бинарь ядра. Где он лежит, знает только mihomo (D-155): диагностике и статусу
+    /// его отдают отсюда.
+    pub fn binary() -> std::path::PathBuf {
+        Paths::core()
     }
-    // Код возврата не смотрим: «процесса нет» — обычный случай, а не ошибка.
-    let _ = command.status();
-}
 
-/// TUN настраивает виртуальный адаптер и без прав администратора падает уже после запуска,
-/// в логе ядра: `configure tun interface: Access is denied`. Ловим раньше и говорим понятнее.
-///
-/// Открыта ради перезапуска (D-143): он проверяет права **до** остановки работающего
-/// ядра — иначе переключение на TUN без прав гасило бы VPN, а поднять не могло.
-pub fn check_privileges(mode: Mode, elevated: bool) -> Result<()> {
-    if mode == Mode::Tun && !elevated {
-        return Err(AppError::NeedsElevation {
-            message: "Для режима TUN нужны права администратора — перезапустите приложение".into(),
-        });
+    /// Рабочий каталог ядра: кэш, собранный конфиг, пробные прогоны.
+    pub fn workdir() -> std::path::PathBuf {
+        Paths::run_dir()
     }
-    Ok(())
+
+    /// TUN настраивает виртуальный адаптер и без прав администратора падает уже после запуска,
+    /// в логе ядра: `configure tun interface: Access is denied`. Ловим раньше и говорим понятнее.
+    ///
+    /// Открыта ради перезапуска (D-143): он проверяет права **до** остановки работающего
+    /// ядра — иначе переключение на TUN без прав гасило бы VPN, а поднять не могло.
+    pub fn check_privileges(mode: Mode, elevated: bool) -> Result<()> {
+        if mode == Mode::Tun && !elevated {
+            return Err(AppError::NeedsElevation {
+                message: "Для режима TUN нужны права администратора — перезапустите приложение"
+                    .into(),
+            });
+        }
+        Ok(())
+    }
 }
 
 /// Ждём не «процесс жив» и даже не «порт принимает», а «ядро отвечает» — на своём API.
@@ -470,24 +399,6 @@ async fn wait_ready(child: &mut Child, controller: &Controller) -> std::result::
     }
 }
 
-/// Вывод ядра — единственный способ понять, почему оно не поднялось.
-fn pump(stream: impl Read + Send + 'static, logs: Arc<Mutex<VecDeque<String>>>) {
-    std::thread::spawn(move || {
-        for line in BufReader::new(stream).lines().map_while(|line| line.ok()) {
-            push(&logs, line);
-        }
-    });
-}
-
-/// Кольцо на `LOG_LINES` строк: пишут в него и ядро, и клиент (`note`).
-fn push(logs: &Mutex<VecDeque<String>>, line: String) {
-    let mut logs = logs.lock().unwrap();
-    if logs.len() >= LOG_LINES {
-        logs.pop_front();
-    }
-    logs.push_back(line);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -495,15 +406,15 @@ mod tests {
     #[test]
     fn only_tun_demands_administrator() {
         assert!(
-            check_privileges(Mode::Local, false).is_ok(),
+            Mihomo::check_privileges(Mode::Local, false).is_ok(),
             "local работает без прав"
         );
         assert!(
-            check_privileges(Mode::Tun, true).is_ok(),
+            Mihomo::check_privileges(Mode::Tun, true).is_ok(),
             "с правами TUN разрешён"
         );
 
-        let refusal = check_privileges(Mode::Tun, false).unwrap_err();
+        let refusal = Mihomo::check_privileges(Mode::Tun, false).unwrap_err();
         assert_eq!(
             refusal.kind(),
             "needsElevation",

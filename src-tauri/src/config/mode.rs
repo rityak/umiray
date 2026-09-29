@@ -21,62 +21,65 @@ pub enum Mode {
 }
 
 use crate::config::files;
+use crate::config::files::Documents;
 use crate::error::{AppError, Result};
-use crate::yaml::{fill, set, sub, top_mapping};
+use crate::yaml::Yaml;
 
 /// Записать режим, не тронув ничего лишнего.
 /// Как ядро называет свой адаптер, если `tun.device` не задан.
 pub const DEFAULT_DEVICE: &str = "Meta";
 
-pub fn write(mode: Mode) -> Result<()> {
-    let mut map = top_mapping(&files::read(files::ADVANCED)?)?;
-    apply(&mut map, mode);
-    let text = serde_yaml::to_string(&Value::Mapping(map))
-        .map_err(|e| AppError::invalid(e.to_string()))?;
-    files::write(files::ADVANCED, &text)
-}
-
-/// Режим, записанный в файле. Читать его нужно и до запуска ядра: переключатель в шапке
-/// показывает выбранное, а не работающее (D-060).
-///
-/// Достаточно одного файла: `tun.enable` — поле конфига ядра, и оно же перекрывает всё
-/// при сборке (D-029). Нечитаемый файл — это `Local`: без TUN клиент работает, с ним —
-/// перехватывает весь трафик машины, и ошибаться в эту сторону нельзя.
-pub fn current() -> Mode {
-    files::read(files::ADVANCED)
-        .and_then(|text| top_mapping(&text))
-        .map(|map| of(&map))
-        .unwrap_or_default()
-}
-
-/// Режим документа. Отсутствие `tun.enable` — это local, а не «неизвестно».
-pub fn of(map: &Mapping) -> Mode {
-    let on = map
-        .get(Value::from("tun"))
-        .and_then(Value::as_mapping)
-        .and_then(|tun| tun.get(Value::from("enable")))
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    if on {
-        Mode::Tun
-    } else {
-        Mode::Local
+impl Mode {
+    pub fn write(mode: Mode) -> Result<()> {
+        let mut map = Yaml::top_mapping(&Documents::read(files::ADVANCED)?)?;
+        apply(&mut map, mode);
+        let text = serde_yaml::to_string(&Value::Mapping(map))
+            .map_err(|e| AppError::invalid(e.to_string()))?;
+        Documents::write(files::ADVANCED, &text)
     }
-}
 
-/// Имя адаптера, который поднимает TUN. Читается отсюда, а не угадывается: пользователь
-/// вправе написать своё `tun.device` в «Настройках», а kill switch привязывается именно
-/// к адаптеру (D-073) — ошибись здесь, и правило разрешит выход не через тот интерфейс.
-///
-/// Умолчание `Meta` — то, что ставит само ядро, когда поля нет (замерено в S-002).
-pub fn tun_device(map: &Mapping) -> String {
-    map.get(Value::from("tun"))
-        .and_then(Value::as_mapping)
-        .and_then(|tun| tun.get(Value::from("device")))
-        .and_then(Value::as_str)
-        .filter(|name| !name.trim().is_empty())
-        .unwrap_or(DEFAULT_DEVICE)
-        .to_string()
+    /// Режим, записанный в файле. Читать его нужно и до запуска ядра: переключатель в шапке
+    /// показывает выбранное, а не работающее (D-060).
+    ///
+    /// Достаточно одного файла: `tun.enable` — поле конфига ядра, и оно же перекрывает всё
+    /// при сборке (D-029). Нечитаемый файл — это `Local`: без TUN клиент работает, с ним —
+    /// перехватывает весь трафик машины, и ошибаться в эту сторону нельзя.
+    pub fn current() -> Mode {
+        Documents::read(files::ADVANCED)
+            .and_then(|text| Yaml::top_mapping(&text))
+            .map(|map| Mode::of(&map))
+            .unwrap_or_default()
+    }
+
+    /// Режим документа. Отсутствие `tun.enable` — это local, а не «неизвестно».
+    pub fn of(map: &Mapping) -> Mode {
+        let on = map
+            .get(Value::from("tun"))
+            .and_then(Value::as_mapping)
+            .and_then(|tun| tun.get(Value::from("enable")))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if on {
+            Mode::Tun
+        } else {
+            Mode::Local
+        }
+    }
+
+    /// Имя адаптера, который поднимает TUN. Читается отсюда, а не угадывается: пользователь
+    /// вправе написать своё `tun.device` в «Настройках», а kill switch привязывается именно
+    /// к адаптеру (D-073) — ошибись здесь, и правило разрешит выход не через тот интерфейс.
+    ///
+    /// Умолчание `Meta` — то, что ставит само ядро, когда поля нет (замерено в S-002).
+    pub fn tun_device(map: &Mapping) -> String {
+        map.get(Value::from("tun"))
+            .and_then(Value::as_mapping)
+            .and_then(|tun| tun.get(Value::from("device")))
+            .and_then(Value::as_str)
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or(DEFAULT_DEVICE)
+            .to_string()
+    }
 }
 
 /// Правило записи: `set` — только то, что и есть режим (`tun.enable`, а для TUN ещё и
@@ -85,27 +88,27 @@ pub fn tun_device(map: &Mapping) -> String {
 fn apply(map: &mut Mapping, mode: Mode) {
     match mode {
         Mode::Local => {
-            set(sub(map, "tun"), "enable", Value::from(false));
-            fill(map, "mixed-port", Value::from(LOCAL_PROXY_PORT));
+            Yaml::set(Yaml::sub(map, "tun"), "enable", Value::from(false));
+            Yaml::fill(map, "mixed-port", Value::from(LOCAL_PROXY_PORT));
         }
         Mode::Tun => {
-            let tun = sub(map, "tun");
-            set(tun, "enable", Value::from(true));
-            fill(tun, "stack", Value::from("mixed"));
-            fill(tun, "auto-route", Value::from(true));
-            fill(tun, "auto-detect-interface", Value::from(true));
+            let tun = Yaml::sub(map, "tun");
+            Yaml::set(tun, "enable", Value::from(true));
+            Yaml::fill(tun, "stack", Value::from("mixed"));
+            Yaml::fill(tun, "auto-route", Value::from(true));
+            Yaml::fill(tun, "auto-detect-interface", Value::from(true));
             // Windows-default закрывает обход DNS через физический адаптер (D-139).
-            fill(tun, "strict-route", Value::from(true));
-            fill(
+            Yaml::fill(tun, "strict-route", Value::from(true));
+            Yaml::fill(
                 tun,
                 "dns-hijack",
                 Value::Sequence(vec![Value::from("any:53"), Value::from("tcp://any:53")]),
             );
 
-            let dns = sub(map, "dns");
-            set(dns, "enable", Value::from(true));
-            fill(dns, "enhanced-mode", Value::from("fake-ip"));
-            fill(
+            let dns = Yaml::sub(map, "dns");
+            Yaml::set(dns, "enable", Value::from(true));
+            Yaml::fill(dns, "enhanced-mode", Value::from("fake-ip"));
+            Yaml::fill(
                 dns,
                 "nameserver",
                 Value::Sequence(vec![Value::from("https://1.1.1.1/dns-query")]),
@@ -119,7 +122,7 @@ mod tests {
     use super::*;
 
     fn switched(document: &str, mode: Mode) -> Value {
-        let mut map = top_mapping(document).unwrap();
+        let mut map = Yaml::top_mapping(document).unwrap();
         apply(&mut map, mode);
         Value::Mapping(map)
     }
@@ -182,13 +185,13 @@ rules:
     fn a_document_without_tun_reads_as_local() {
         for text in ["", "tun:\n  enable: false\n", "tun: не маппинг\n"] {
             assert_eq!(
-                of(&top_mapping(text).unwrap()),
+                Mode::of(&Yaml::top_mapping(text).unwrap()),
                 Mode::Local,
                 "«{text}» не должно читаться как TUN"
             );
         }
         assert_eq!(
-            of(&top_mapping("tun:\n  enable: true\n").unwrap()),
+            Mode::of(&Yaml::top_mapping("tun:\n  enable: true\n").unwrap()),
             Mode::Tun
         );
     }
@@ -198,9 +201,9 @@ rules:
     #[test]
     fn what_was_written_reads_back_the_same() {
         for mode in [Mode::Local, Mode::Tun] {
-            let mut map = top_mapping("").unwrap();
+            let mut map = Yaml::top_mapping("").unwrap();
             apply(&mut map, mode);
-            assert_eq!(of(&map), mode);
+            assert_eq!(Mode::of(&map), mode);
         }
     }
 }

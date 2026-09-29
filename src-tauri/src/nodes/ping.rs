@@ -25,6 +25,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use crate::nodes::health;
+use crate::nodes::health::HealthCheck;
 
 /// Сколько ждём ответа. Секунда с лишним: дальние серверы отвечают за 300–400 мс,
 /// а таблица из тридцати узлов не должна собираться полминуты.
@@ -39,22 +40,75 @@ const TUNNEL: Duration = Duration::from_millis(2500);
 /// Раньше здесь стояла своя константа, и один узел получал от клиента и от ядра два
 /// разных вердикта. 204 без тела — самый дешёвый ответ, какой бывает; замерен в S-016.
 fn target() -> (String, String) {
-    let url = health::url().unwrap_or_else(|_| health::DEFAULT.to_string());
-    let (host, path) = health::split(&url)
-        .unwrap_or_else(|| health::split(health::DEFAULT).expect("умолчание обязано разбираться"));
+    let url = HealthCheck::url().unwrap_or_else(|_| health::DEFAULT.to_string());
+    let (host, path) = HealthCheck::split(&url).unwrap_or_else(|| {
+        HealthCheck::split(health::DEFAULT).expect("умолчание обязано разбираться")
+    });
     (host.to_string(), path.to_string())
 }
 
-/// Протоколы, у которых нет TCP-порта вовсе: они живут на UDP, и «порт закрыт» про них
-/// не значит ничего. TCP-замер у такого узла молчит **всегда** — даже у совершенно
-/// живого, — и колонка задержки годами показывала бы прочерк или ICMP до хоста.
-///
-/// Список по подстроке, а не точным совпадением: имя схемы приходит от парсера ссылки
-/// и пишется по-разному («Hysteria2», «hysteria2», «wireguard»).
-pub fn udp_only(kind: &str) -> bool {
-    const MARKS: [&str; 4] = ["hysteria", "tuic", "wireguard", "juicity"];
-    let lower = kind.to_lowercase();
-    MARKS.iter().any(|mark| lower.contains(mark))
+pub struct Pinger;
+
+impl Pinger {
+    /// Протоколы, у которых нет TCP-порта вовсе: они живут на UDP, и «порт закрыт» про них
+    /// не значит ничего. TCP-замер у такого узла молчит **всегда** — даже у совершенно
+    /// живого, — и колонка задержки годами показывала бы прочерк или ICMP до хоста.
+    ///
+    /// Список по подстроке, а не точным совпадением: имя схемы приходит от парсера ссылки
+    /// и пишется по-разному («Hysteria2», «hysteria2», «wireguard»).
+    pub fn udp_only(kind: &str) -> bool {
+        const MARKS: [&str; 4] = ["hysteria", "tuic", "wireguard", "juicity"];
+        let lower = kind.to_lowercase();
+        MARKS.iter().any(|mark| lower.contains(mark))
+    }
+
+    /// Померить все адреса разом.
+    ///
+    /// Каждый замер уходит в отдельный поток пула: ICMP и `connect` блокирующие, а тридцать
+    /// узлов по секунде подряд — это полминуты ожидания вместо одной.
+    pub async fn sweep(addresses: Vec<String>, method: Method) -> Table {
+        let mut tasks = Vec::with_capacity(addresses.len());
+        for address in addresses {
+            tasks.push(tokio::task::spawn_blocking(move || {
+                let reply = measure(&address, method);
+                (address, reply)
+            }));
+        }
+        let mut table = Table::new();
+        for task in tasks {
+            if let Ok((address, Some(reply))) = task.await {
+                table.insert(address, reply);
+            }
+        }
+        table
+    }
+
+    /// Сколько отвечает узел по **уже поднятому** туннелю (D-072, замерено в S-016).
+    ///
+    /// Меряем не первый запрос, а второй: в первом лежит рукопожатие с сервером, и оно
+    /// в разы больше самого ответа — 635 мс против 122 у одного и того же узла. Туннель идёт
+    /// через служебный вход ядра, а какой узел на том конце — решает вызывающий, наведя
+    /// служебную группу.
+    ///
+    /// Здесь нет ни слова про ядро: снаружи это просто локальный прокси на порту.
+    pub fn keepalive(port: u16) -> Option<u32> {
+        let (host, path) = target();
+        let entrance = SocketAddr::from(([127, 0, 0, 1], port));
+        let mut socket = TcpStream::connect_timeout(&entrance, TUNNEL).ok()?;
+        socket.set_read_timeout(Some(TUNNEL)).ok()?;
+        socket.set_write_timeout(Some(TUNNEL)).ok()?;
+        socket
+            .write_all(format!("CONNECT {host}:80 HTTP/1.1\r\nHost: {host}:80\r\n\r\n").as_bytes())
+            .ok()?;
+        let mut head = [0u8; 128];
+        let read = socket.read(&mut head).ok()?;
+        if !String::from_utf8_lossy(&head[..read]).contains(" 200 ") {
+            return None;
+        }
+        // Первый запрос поднимает соединение до сервера, второй меряет ответ по нему.
+        in_tunnel(&mut socket, &host, &path)?;
+        in_tunnel(&mut socket, &host, &path)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -83,27 +137,6 @@ pub struct Reply {
 /// подписки, а адрес — то, что мы на самом деле пинговали.
 pub type Table = HashMap<String, Reply>;
 
-/// Померить все адреса разом.
-///
-/// Каждый замер уходит в отдельный поток пула: ICMP и `connect` блокирующие, а тридцать
-/// узлов по секунде подряд — это полминуты ожидания вместо одной.
-pub async fn sweep(addresses: Vec<String>, method: Method) -> Table {
-    let mut tasks = Vec::with_capacity(addresses.len());
-    for address in addresses {
-        tasks.push(tokio::task::spawn_blocking(move || {
-            let reply = measure(&address, method);
-            (address, reply)
-        }));
-    }
-    let mut table = Table::new();
-    for task in tasks {
-        if let Ok((address, Some(reply))) = task.await {
-            table.insert(address, reply);
-        }
-    }
-    table
-}
-
 /// Один замер выбранным способом; промолчал — фолбэк на ICMP (D-069).
 ///
 /// «Через прокси» прямого замера здесь не имеет: его делает ядро, а сюда такой запрос
@@ -131,33 +164,6 @@ fn measure(address: &str, method: Method) -> Option<Reply> {
         method: Method::Icmp,
         fallback: true,
     })
-}
-
-/// Сколько отвечает узел по **уже поднятому** туннелю (D-072, замерено в S-016).
-///
-/// Меряем не первый запрос, а второй: в первом лежит рукопожатие с сервером, и оно
-/// в разы больше самого ответа — 635 мс против 122 у одного и того же узла. Туннель идёт
-/// через служебный вход ядра, а какой узел на том конце — решает вызывающий, наведя
-/// служебную группу.
-///
-/// Здесь нет ни слова про ядро: снаружи это просто локальный прокси на порту.
-pub fn keepalive(port: u16) -> Option<u32> {
-    let (host, path) = target();
-    let entrance = SocketAddr::from(([127, 0, 0, 1], port));
-    let mut socket = TcpStream::connect_timeout(&entrance, TUNNEL).ok()?;
-    socket.set_read_timeout(Some(TUNNEL)).ok()?;
-    socket.set_write_timeout(Some(TUNNEL)).ok()?;
-    socket
-        .write_all(format!("CONNECT {host}:80 HTTP/1.1\r\nHost: {host}:80\r\n\r\n").as_bytes())
-        .ok()?;
-    let mut head = [0u8; 128];
-    let read = socket.read(&mut head).ok()?;
-    if !String::from_utf8_lossy(&head[..read]).contains(" 200 ") {
-        return None;
-    }
-    // Первый запрос поднимает соединение до сервера, второй меряет ответ по нему.
-    in_tunnel(&mut socket, &host, &path)?;
-    in_tunnel(&mut socket, &host, &path)
 }
 
 /// Один запрос в открытом туннеле.
@@ -261,10 +267,10 @@ mod tests {
     #[test]
     fn udp_protocols_are_recognised_whatever_the_spelling() {
         for kind in ["Hysteria2", "hysteria2", "TUIC", "Wireguard", "juicity"] {
-            assert!(udp_only(kind), "{kind}");
+            assert!(Pinger::udp_only(kind), "{kind}");
         }
         for kind in ["Vless", "Trojan", "Shadowsocks", "vmess", ""] {
-            assert!(!udp_only(kind), "{kind}");
+            assert!(!Pinger::udp_only(kind), "{kind}");
         }
     }
 

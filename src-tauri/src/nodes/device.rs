@@ -5,36 +5,56 @@
 //! ограничивает длину 36 символами — MachineGuid укладывается ровно.
 
 use crate::error::{AppError, Result};
-use crate::paths;
+use crate::paths::Paths;
 
-/// Идентификатор устройства для подписок с привязкой (D-016, D-034).
-///
-/// MachineGuid из реестра — настоящий идентификатор машины. Он переживает переустановку
-/// клиента, поэтому повторное добавление подписки не съедает у провайдера ещё один слот;
-/// прежний случайный идентификатор умирал вместе с каталогом данных и съедал.
-///
-/// Файл рядом — не источник истины, а слепок: если реестр недоступен, берём из него,
-/// иначе перезаписываем. Два разных значения означали бы два устройства в панели.
-pub fn hwid() -> Result<String> {
-    let path = paths::hwid();
-    let cached = std::fs::read_to_string(&path)
-        .ok()
-        .map(|text| text.trim().to_string())
-        .filter(|id| is_valid(id));
+pub struct Device;
 
-    let id = match machine_guid() {
-        Some(id) => id,
-        None => match cached.clone() {
+impl Device {
+    /// Идентификатор устройства для подписок с привязкой (D-016, D-034).
+    ///
+    /// MachineGuid из реестра — настоящий идентификатор машины. Он переживает переустановку
+    /// клиента, поэтому повторное добавление подписки не съедает у провайдера ещё один слот;
+    /// прежний случайный идентификатор умирал вместе с каталогом данных и съедал.
+    ///
+    /// Файл рядом — не источник истины, а слепок: если реестр недоступен, берём из него,
+    /// иначе перезаписываем. Два разных значения означали бы два устройства в панели.
+    pub fn hwid() -> Result<String> {
+        let path = Paths::hwid();
+        let cached = std::fs::read_to_string(&path)
+            .ok()
+            .map(|text| text.trim().to_string())
+            .filter(|id| is_valid(id));
+
+        let id = match machine_guid() {
             Some(id) => id,
-            None => random()?,
-        },
-    };
+            None => match cached.clone() {
+                Some(id) => id,
+                None => random()?,
+            },
+        };
 
-    if cached.as_deref() != Some(id.as_str()) {
-        paths::ensure_root()?;
-        crate::atomic::write(&path, &id)?;
+        if cached.as_deref() != Some(id.as_str()) {
+            Paths::ensure_root()?;
+            crate::atomic::AtomicFile::write(&path, &id)?;
+        }
+        Ok(id)
     }
-    Ok(id)
+
+    /// Описание устройства. Панели это не обязательно, но по нему она различает устройства
+    /// в списке — человеку иначе не понять, какой слот чей.
+    pub fn os_version() -> String {
+        #[cfg(windows)]
+        {
+            // Версию берём у самой системы: «11» константой врёт на любой другой сборке.
+            if let Some(version) = registry(
+                "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
+                "CurrentBuild",
+            ) {
+                return format!("10.0.{version}");
+            }
+        }
+        "unknown".into()
+    }
 }
 
 /// Панель проверяет значение регуляркой — мусор она отвергнет вместе со всей подпиской.
@@ -43,22 +63,6 @@ fn is_valid(id: &str) -> bool {
         && id
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '=' || c == '-')
-}
-
-/// Описание устройства. Панели это не обязательно, но по нему она различает устройства
-/// в списке — человеку иначе не понять, какой слот чей.
-pub fn os_version() -> String {
-    #[cfg(windows)]
-    {
-        // Версию берём у самой системы: «11» константой врёт на любой другой сборке.
-        if let Some(version) = registry(
-            "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
-            "CurrentBuild",
-        ) {
-            return format!("10.0.{version}");
-        }
-    }
-    "unknown".into()
 }
 
 #[cfg(windows)]
@@ -159,7 +163,7 @@ mod tests {
     #[test]
     #[cfg(windows)]
     fn the_os_version_is_read_from_the_system() {
-        let version = os_version();
+        let version = Device::os_version();
         assert!(
             version.starts_with("10.0.") || version == "unknown",
             "неожиданная версия: {version}"

@@ -15,5 +15,5 @@ pub async fn mode_set(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Status> {
-    crate::app::connect::set_mode(&app, &state, mode).await
+    state.connection.set_mode(&app, &state, mode).await
 }

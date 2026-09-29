@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager};
 
-use crate::app::lifecycle::line;
+use crate::app::lifecycle::Lifecycle;
 use crate::app::state::AppState;
 use crate::error::Result;
 
@@ -75,48 +75,53 @@ const TICKS: &[Tick] = &[
     },
 ];
 
-/// Завести часы. Отдельная задача, а не таймер во фронтенде: периодика обязана идти
-/// и при спрятанном окне, и независимо от того, какой раздел открыт.
-pub fn spawn(app: AppHandle) {
-    tauri::async_runtime::spawn(async move {
-        // Первый заход — сразу и у всех: срок у шага считается от прошлого прогона,
-        // а прошлого ещё не было.
-        let mut due: Vec<Instant> = TICKS.iter().map(|_| Instant::now()).collect();
-        let mut first = true;
-        loop {
-            let state = app.state::<AppState>();
-            let now = Instant::now();
-            for (at, tick) in due.iter_mut().zip(TICKS) {
-                if *at > now {
-                    continue;
+pub struct Clock;
+
+impl Clock {
+    /// Завести часы. Отдельная задача, а не таймер во фронтенде: периодика обязана идти
+    /// и при спрятанном окне, и независимо от того, какой раздел открыт.
+    pub fn spawn(app: AppHandle) {
+        tauri::async_runtime::spawn(async move {
+            // Первый заход — сразу и у всех: срок у шага считается от прошлого прогона,
+            // а прошлого ещё не было.
+            let mut due: Vec<Instant> = TICKS.iter().map(|_| Instant::now()).collect();
+            let mut first = true;
+            loop {
+                let state = app.state::<AppState>();
+                let now = Instant::now();
+                for (at, tick) in due.iter_mut().zip(TICKS) {
+                    if *at > now {
+                        continue;
+                    }
+                    let began = Instant::now();
+                    let outcome = (tick.run)(&state, first).await;
+                    let (level, text) =
+                        Lifecycle::line("tick", tick.id, tick.label, began.elapsed(), &outcome);
+                    eprintln!("{text}");
+                    if outcome.is_err() {
+                        state.note(level, &text);
+                    }
+                    *at = Instant::now() + tick.every;
                 }
-                let began = Instant::now();
-                let outcome = (tick.run)(&state, first).await;
-                let (level, text) = line("tick", tick.id, tick.label, began.elapsed(), &outcome);
-                eprintln!("{text}");
-                if outcome.is_err() {
-                    state.supervisor.note(level, &text);
-                }
-                *at = Instant::now() + tick.every;
+                first = false;
+                // Спим до ближайшего срока, а не фиксированную минуту: иначе шаг с периодом
+                // короче общего такта получал бы не свой период, а такт.
+                let next = due.iter().min().copied().unwrap_or_else(Instant::now);
+                tokio::time::sleep(next.saturating_duration_since(Instant::now())).await;
             }
-            first = false;
-            // Спим до ближайшего срока, а не фиксированную минуту: иначе шаг с периодом
-            // короче общего такта получал бы не свой период, а такт.
-            let next = due.iter().min().copied().unwrap_or_else(Instant::now);
-            tokio::time::sleep(next.saturating_duration_since(Instant::now())).await;
-        }
-    });
+        });
+    }
 }
 
 fn sources(state: &AppState, first: bool) -> Job<'_> {
-    Box::pin(crate::app::refresher::due(state, first))
+    Box::pin(crate::app::refresher::Refresher::due(state, first))
 }
 
 /// Правда ли трафик идёт через туннель (D-107). Пять минут: чаще — это лишний запрос
 /// наружу каждую минуту, реже — обрыв висит незамеченным полчаса.
 fn guard(state: &AppState, _first: bool) -> Job<'_> {
     Box::pin(async move {
-        crate::app::guard::look(state).await;
+        crate::app::guard::Guard::look(state).await;
         Ok(())
     })
 }
@@ -129,14 +134,14 @@ fn guard(state: &AppState, _first: bool) -> Job<'_> {
 /// угодно, и висеть без туннеля полчаса нельзя.
 fn routes(state: &AppState, _first: bool) -> Job<'_> {
     Box::pin(async move {
-        let core = state.supervisor.status();
+        let core = state.mihomo.status();
         if !core.running || core.mode != Some(crate::config::mode::Mode::Tun) {
             state.notices.set(crate::app::notice::ROUTE, None);
             return Ok(());
         }
         state.notices.set(
             crate::app::notice::ROUTE,
-            crate::diag::system::thief_of_the_route().map(|thief| {
+            crate::diag::system::SystemProbe::thief_of_the_route().map(|thief| {
                 crate::app::notice::Notice::about_core(
                     format!(
                         "Трафик уходит мимо туннеля: маршрут по умолчанию держит «{thief}». Выключите его или поднимите метрику."
@@ -157,11 +162,11 @@ fn routes(state: &AppState, _first: bool) -> Job<'_> {
 /// Спрашиваем только пока запрет стоит: нет запрета — нечего и исполнять.
 fn firewall(state: &AppState, _first: bool) -> Job<'_> {
     Box::pin(async move {
-        if state.settings().kill_switch_backup.is_none() {
+        if state.settings.get().kill_switch_backup.is_none() {
             state.notices.set(crate::app::notice::FIREWALL, None);
             return Ok(());
         }
-        let off: Vec<String> = crate::system::killswitch::profiles()?
+        let off: Vec<String> = crate::system::killswitch::Firewall::profiles()?
             .into_iter()
             .filter(|profile| !profile.enabled.eq_ignore_ascii_case("true"))
             .map(|profile| profile.name)
@@ -181,5 +186,5 @@ fn firewall(state: &AppState, _first: bool) -> Job<'_> {
 
 /// Страны узлов (D-084): у записи свой срок в неделю, здесь только «не пора ли».
 fn geo(_state: &AppState, _first: bool) -> Job<'static> {
-    Box::pin(crate::nodes::geo::refresh())
+    Box::pin(crate::nodes::geo::GeoCache::refresh())
 }

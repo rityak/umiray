@@ -21,13 +21,13 @@ const LEVEL: Record<Level, LogLevel | undefined> = {
 /// output, yet they are exactly what explains what a button press did. The source names them.
 const OWN = "umiray:";
 
-/// Core output. Polled only while the section is open: the reason for a failed start
-/// arrives in the error's `details` anyway (D-028).
-export default function Logs({ hidden }: { hidden: boolean }) {
-  const [raw, setRaw] = useCached<string[]>("logs.core", []);
+/// Output of the engine the sections show (D-154). Polled only while the section is open:
+/// the reason for a failed start arrives in the error's `details` anyway (D-028).
+export default function Logs({ engine, hidden }: { engine: api.Engine; hidden: boolean }) {
+  const [raw, setRaw] = useCached<string[]>(`logs.${engine}`, []);
 
   usePoll(() => {
-    api.coreLogs().then(unchanged(setRaw), () => {});
+    api.coreLogs(engine).then(unchanged(setRaw), () => {});
   }, !hidden);
 
   const lines = useMemo<LogLine[]>(
@@ -39,10 +39,10 @@ export default function Logs({ hidden }: { hidden: boolean }) {
           message: own ? line.text.slice(OWN.length).trim() : line.text,
           level: LEVEL[line.level],
           time: line.time ?? undefined,
-          source: own ? "umiray" : "mihomo",
+          source: own ? "umiray" : engine,
         };
       }),
-    [raw],
+    [raw, engine],
   );
 
   if (hidden) {

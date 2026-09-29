@@ -21,8 +21,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, Result};
-use crate::paths;
-use crate::stamp;
+use crate::paths::Paths;
+use crate::stamp::Stamp;
 
 /// Из чего состоит набор. Имя части — оно же идентификатор раздела окна; `files.rs`
 /// строит по нему список документов и стережёт совпадение тестом.
@@ -49,7 +49,7 @@ pub struct Preset {
 }
 
 /// Идентификатор приходит из вебвью, а это недоверенные данные: он не должен превращаться
-/// в путь. Форма закрытая — ровно то, что выдаёт `stamp::id`.
+/// в путь. Форма закрытая — ровно то, что выдаёт `Stamp::id`.
 fn valid(id: &str) -> bool {
     id.len() == 16 && id.chars().all(|c| c.is_ascii_hexdigit())
 }
@@ -73,97 +73,108 @@ fn check_part(part: &str) -> Result<()> {
     }
 }
 
-pub fn list() -> Vec<Preset> {
-    let Ok(entries) = std::fs::read_dir(paths::presets_dir()) else {
-        return Vec::new();
-    };
-    let mut presets: Vec<Preset> = entries
-        .flatten()
-        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "json"))
-        .filter_map(|entry| std::fs::read_to_string(entry.path()).ok())
-        .filter_map(|text| serde_json::from_str(&text).ok())
-        .collect();
-    // Порядок в окне не должен скакать от того, как файлы легли на диске.
-    presets.sort_by(|a, b| a.created.cmp(&b.created).then_with(|| a.id.cmp(&b.id)));
-    presets
-}
+pub struct PresetStore;
 
-pub fn get(id: &str) -> Result<Preset> {
-    check(id)?;
-    let text = std::fs::read_to_string(paths::preset_meta(id))
-        .map_err(|_| AppError::invalid(format!("Набора «{id}» нет")))?;
-    serde_json::from_str(&text).map_err(|e| AppError::invalid(format!("Набор не читается: {e}")))
-}
-
-/// Часть набора как текст. Отсутствие файла — пустой документ, а не ошибка: часть мог
-/// не записать снимок более ранней сборки, и разделу всё равно есть что показать.
-pub fn read(id: &str, part: &str) -> Result<String> {
-    check(id)?;
-    check_part(part)?;
-    Ok(std::fs::read_to_string(paths::preset_part(id, part)).unwrap_or_default())
-}
-
-pub fn write(id: &str, part: &str, text: &str) -> Result<()> {
-    check(id)?;
-    check_part(part)?;
-    // Набор без описания — не набор: писать в несуществующий значит завести файлы,
-    // которых потом никто не покажет.
-    get(id)?;
-    paths::ensure_presets_dir()?;
-    Ok(crate::atomic::write(paths::preset_part(id, part), text)?)
-}
-
-/// Содержимое набора — то, что уходит в сборку. Это ровно маршрутизация (D-075).
-pub fn content(id: &str) -> Result<String> {
-    read(id, RULES)
-}
-
-/// Завести набор с готовым содержимым.
-///
-/// Содержимое приходит снаружи, а не собирается здесь: клиенту его собирает рендер,
-/// а хранилищу знать про рендер незачем.
-pub fn create(name: &str, rules: &str) -> Result<Preset> {
-    let preset = Preset {
-        id: stamp::id()?,
-        name: unique_name(name, &list()),
-        created: stamp::now(),
-    };
-    paths::ensure_presets_dir()?;
-    write_meta(&preset)?;
-    crate::atomic::write(paths::preset_part(&preset.id, RULES), rules)?;
-    Ok(preset)
-}
-
-/// Переименовать. Имя приходит от человека, поэтому приводим его к уникальному:
-/// два набора с одинаковой подписью в списке неразличимы.
-pub fn rename(id: &str, name: &str) -> Result<Preset> {
-    let mut preset = get(id)?;
-    let name = name.trim();
-    if name.is_empty() {
-        return Err(AppError::invalid("У набора должно быть имя"));
+impl PresetStore {
+    pub fn list() -> Vec<Preset> {
+        let Ok(entries) = std::fs::read_dir(Paths::presets_dir()) else {
+            return Vec::new();
+        };
+        let mut presets: Vec<Preset> = entries
+            .flatten()
+            .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "json"))
+            .filter_map(|entry| std::fs::read_to_string(entry.path()).ok())
+            .filter_map(|text| serde_json::from_str(&text).ok())
+            .collect();
+        // Порядок в окне не должен скакать от того, как файлы легли на диске.
+        presets.sort_by(|a, b| a.created.cmp(&b.created).then_with(|| a.id.cmp(&b.id)));
+        presets
     }
-    // Себя из списка занятых исключаем, иначе переименование в то же самое даст «имя 2».
-    let others: Vec<Preset> = list().into_iter().filter(|other| other.id != id).collect();
-    preset.name = unique_name(name, &others);
-    write_meta(&preset)?;
-    Ok(preset)
-}
 
-/// Удалить набор целиком: описание и его часть.
-///
-/// Отсутствие части — не ошибка: её мог не записать более ранний снимок, а результат
-/// нужен один и тот же — набора больше нет.
-pub fn delete(id: &str) -> Result<()> {
-    check(id)?;
-    for part in PARTS {
-        let _ = std::fs::remove_file(paths::preset_part(id, part));
+    pub fn get(id: &str) -> Result<Preset> {
+        check(id)?;
+        let text = std::fs::read_to_string(Paths::preset_meta(id))
+            .map_err(|_| AppError::invalid(format!("Набора «{id}» нет")))?;
+        serde_json::from_str(&text)
+            .map_err(|e| AppError::invalid(format!("Набор не читается: {e}")))
     }
-    Ok(std::fs::remove_file(paths::preset_meta(id))?)
-}
 
-/// Имя первого набора.
-pub fn default_name() -> &'static str {
-    FIRST
+    /// Часть набора как текст. Отсутствие файла — пустой документ, а не ошибка: часть мог
+    /// не записать снимок более ранней сборки, и разделу всё равно есть что показать.
+    pub fn read(id: &str, part: &str) -> Result<String> {
+        check(id)?;
+        check_part(part)?;
+        Ok(std::fs::read_to_string(Paths::preset_part(id, part)).unwrap_or_default())
+    }
+
+    pub fn write(id: &str, part: &str, text: &str) -> Result<()> {
+        check(id)?;
+        check_part(part)?;
+        // Набор без описания — не набор: писать в несуществующий значит завести файлы,
+        // которых потом никто не покажет.
+        PresetStore::get(id)?;
+        Paths::ensure_presets_dir()?;
+        Ok(crate::atomic::AtomicFile::write(
+            Paths::preset_part(id, part),
+            text,
+        )?)
+    }
+
+    /// Содержимое набора — то, что уходит в сборку. Это ровно маршрутизация (D-075).
+    pub fn content(id: &str) -> Result<String> {
+        PresetStore::read(id, RULES)
+    }
+
+    /// Завести набор с готовым содержимым.
+    ///
+    /// Содержимое приходит снаружи, а не собирается здесь: клиенту его собирает рендер,
+    /// а хранилищу знать про рендер незачем.
+    pub fn create(name: &str, rules: &str) -> Result<Preset> {
+        let preset = Preset {
+            id: Stamp::id()?,
+            name: unique_name(name, &PresetStore::list()),
+            created: Stamp::now(),
+        };
+        Paths::ensure_presets_dir()?;
+        write_meta(&preset)?;
+        crate::atomic::AtomicFile::write(Paths::preset_part(&preset.id, RULES), rules)?;
+        Ok(preset)
+    }
+
+    /// Переименовать. Имя приходит от человека, поэтому приводим его к уникальному:
+    /// два набора с одинаковой подписью в списке неразличимы.
+    pub fn rename(id: &str, name: &str) -> Result<Preset> {
+        let mut preset = PresetStore::get(id)?;
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(AppError::invalid("У набора должно быть имя"));
+        }
+        // Себя из списка занятых исключаем, иначе переименование в то же самое даст «имя 2».
+        let others: Vec<Preset> = PresetStore::list()
+            .into_iter()
+            .filter(|other| other.id != id)
+            .collect();
+        preset.name = unique_name(name, &others);
+        write_meta(&preset)?;
+        Ok(preset)
+    }
+
+    /// Удалить набор целиком: описание и его часть.
+    ///
+    /// Отсутствие части — не ошибка: её мог не записать более ранний снимок, а результат
+    /// нужен один и тот же — набора больше нет.
+    pub fn delete(id: &str) -> Result<()> {
+        check(id)?;
+        for part in PARTS {
+            let _ = std::fs::remove_file(Paths::preset_part(id, part));
+        }
+        Ok(std::fs::remove_file(Paths::preset_meta(id))?)
+    }
+
+    /// Имя первого набора.
+    pub fn default_name() -> &'static str {
+        FIRST
+    }
 }
 
 /// Имя, которого ещё нет. Два набора с одинаковой подписью в списке неразличимы.
@@ -181,7 +192,10 @@ fn unique_name(base: &str, taken: &[Preset]) -> String {
 fn write_meta(preset: &Preset) -> Result<()> {
     let text = serde_json::to_string_pretty(preset)
         .map_err(|e| AppError::io(format!("Не удалось записать набор: {e}")))?;
-    Ok(crate::atomic::write(paths::preset_meta(&preset.id), text)?)
+    Ok(crate::atomic::AtomicFile::write(
+        Paths::preset_meta(&preset.id),
+        text,
+    )?)
 }
 
 #[cfg(test)]

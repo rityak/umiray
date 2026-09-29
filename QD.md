@@ -1,9 +1,11 @@
 # qd inside umiray
 
 umiray can drive two engines: **mihomo** (as before) and **qd** (github.com/jaywehosl/qd).
-The engine switch in the title bar keeps the same tabs and swaps what is inside them. The backend is swapped
-when the power button is pressed: turning qd on stops mihomo first (its system proxy and kill
-switch go with it), turning mihomo on stops qd first. They never capture traffic at the same time.
+The engine switch in the title bar is a view: it picks which engine the tabs show and which one the
+power button turns on. The running engine keeps running until power is pressed; the header and the
+tray always speak about the running one. Only one engine carries traffic at a time, and the client
+enforces that, not the engines: before turning one on it stops every other (its system proxy and
+kill switch go with it), under the same transition lock.
 
 ## What each tab becomes in qd mode
 
@@ -26,7 +28,10 @@ switch go with it), turning mihomo on stops qd first. They never capture traffic
   The core build has no window, tray, page or admin panel: only the tunnel and the local API.
 - Needs administrator rights: qd captures traffic with WinDivert, and its manifest asks for elevation.
   Without them qd mode shows the usual "restart as administrator" action.
-- Started lazily, the first time a qd tab needs it, inside the same job object as mihomo:
+- Started lazily, the first time a qd tab needs it, inside the same job object as mihomo.
+  If it dies while the tunnel should be up, the client raises it again (three tries), and an
+  orphan left by a crashed client is killed at startup — by its full path, so a standalone qd
+  client running elsewhere is left alone:
 
   ```
   qd.exe -embedded -ui-port 0 -state %LOCALAPPDATA%\umiray\qd\client.db
@@ -61,8 +66,17 @@ switch go with it), turning mihomo on stops qd first. They never capture traffic
 
 ## Code
 
-- `src-tauri/src/core/qd.rs` — process, handshake, API proxy, download.
-- `src-tauri/src/commands/qd.rs` — `qd_status`, `qd_call`, `qd_start`, `qd_stop`, `qd_install`, `qd_logs`,
-  `qd_rules_export`, `qd_rules_import` (native save/open dialogs from `src-tauri/src/system/pick.rs`).
-- `src-tauri/src/app/connect.rs` — mihomo start stops qd; tray toggle and autoconnect follow the engine.
-- `src/qd/*` — the qd tabs; `src/App.tsx` and `src/chrome/TitleBar.tsx` — the switch.
+qd is one engine behind the client's engine contract — see `trait Engine` in
+`src-tauri/src/app/engine.rs`. A third engine follows the same shape.
+
+- `src-tauri/src/core/qd.rs` — process, handshake, API proxy, download. The process plumbing
+  (caged spawn, log ring, graceful stop, sweep) is shared: `src-tauri/src/core/process.rs`.
+- `src-tauri/src/app/qd.rs` — qd as the client's engine: its start hooks (process, then `connect`)
+  and `impl Engine`. Capture is `Divert`: no system proxy, no kill switch.
+- `src-tauri/src/app/connect.rs` — power for any engine, one engine at a time, crash recovery.
+- `src-tauri/src/commands/qd.rs` — only what qd alone has: `qd_status`, `qd_call`, `qd_rules_export`,
+  `qd_rules_import` (native save/open dialogs from `src-tauri/src/system/pick.rs`). Power, logs and
+  install are the shared `core_start`, `core_stop`, `core_logs`, `core_install`.
+- `src/engines.tsx` — what the window knows about each engine: label, header line, sections,
+  client settings it hides.
+- `src/qd/*` — the qd tabs; `QdSection.tsx` is the one place `App.tsx` hands them over.

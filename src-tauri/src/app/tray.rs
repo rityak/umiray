@@ -28,7 +28,8 @@ pub enum Look {
     /// Local proxy, прописанный в систему: для пользователя это отдельное состояние —
     /// от него зависит, идёт трафик браузера через нас или нет.
     System,
-    Qd,
+    /// Перехват по приложениям (qd): ни прокси, ни адаптера на всю машину.
+    Divert,
 }
 
 impl Look {
@@ -42,7 +43,7 @@ impl Look {
             Look::Local => "Proxy",
             Look::Tun => "TUN",
             Look::System => "System: прокси прописан в Windows",
-            Look::Qd => "qd",
+            Look::Divert => "по приложениям",
         };
         format!("{} — {state}", crate::paths::APP_NAME)
     }
@@ -59,8 +60,8 @@ impl Look {
             (Look::Local, true) => include_bytes!("../../icons/tray/light/local.png"),
             (Look::Tun, true) => include_bytes!("../../icons/tray/light/tun.png"),
             (Look::System, true) => include_bytes!("../../icons/tray/light/system.png"),
-            (Look::Qd, false) => include_bytes!("../../icons/tray/dark/tun.png"),
-            (Look::Qd, true) => include_bytes!("../../icons/tray/light/tun.png"),
+            (Look::Divert, false) => include_bytes!("../../icons/tray/dark/tun.png"),
+            (Look::Divert, true) => include_bytes!("../../icons/tray/light/tun.png"),
         }
     }
 }
@@ -71,7 +72,7 @@ static SHOWN: Mutex<Option<(Look, bool)>> = Mutex::new(None);
 
 // The taskbar follows the Windows system theme, not the application's theme.
 fn light_taskbar() -> bool {
-    crate::system::registry::read_dword(
+    crate::system::registry::Registry::read_dword(
         r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
         "SystemUsesLightTheme",
     )
@@ -101,66 +102,70 @@ fn menu<R: Runtime>(app: &AppHandle<R>, running: bool) -> tauri::Result<Menu<R>>
     Menu::with_items(app, &[&power, &show, &quit])
 }
 
-/// Что делает пункт питания, приходит снаружи: значок — это индикатор, которым правит
-/// `connect`, и знать про `connect` в ответ он не должен (иначе модули ссылаются друг
-/// на друга по кругу). Указатель на функцию, а не абстракция: реализация
-/// ровно одна, и живёт она там, где собирается приложение.
-pub fn build<R: Runtime>(app: &AppHandle<R>, power: fn(&AppHandle<R>)) -> tauri::Result<()> {
-    let mut tray = TrayIconBuilder::with_id(TRAY_ID)
-        .tooltip(Look::Off.tooltip())
-        .menu(&menu(app, false)?)
-        // Левая кнопка показывает окно, меню — по правой. Иначе основное действие
-        // («покажи окно») требовало бы двух нажатий вместо одного.
-        .show_menu_on_left_click(false)
-        .on_menu_event(move |app, event| match event.id().as_ref() {
-            // Питание доступно, не открывая окна: закрытый крестиком клиент живёт
-            // в трее (D-046), и включать VPN из него — то же основное действие.
-            POWER => power(app),
-            SHOW => show(app),
-            // Выход именно здесь: `RunEvent::Exit` по-прежнему гасит ядро, иначе
-            // осиротевший mihomo держал бы порт (GOTCHAS).
-            QUIT => app.exit(0),
-            _ => {}
-        })
-        .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Up,
-                ..
-            } = event
-            {
-                show(tray.app_handle());
-            }
-        });
+pub struct Tray;
 
-    // Свой значок, а не иконка окна: он меняется по режиму, и форма у всех четырёх
-    // одна — различается только цвет луча (D-051).
-    let light = light_taskbar();
-    tray = tray.icon(Image::from_bytes(Look::Off.png(light))?);
+impl Tray {
+    /// Что делает пункт питания, приходит снаружи: значок — это индикатор, которым правит
+    /// `connect`, и знать про `connect` в ответ он не должен (иначе модули ссылаются друг
+    /// на друга по кругу). Указатель на функцию, а не абстракция: реализация
+    /// ровно одна, и живёт она там, где собирается приложение.
+    pub fn build<R: Runtime>(app: &AppHandle<R>, power: fn(&AppHandle<R>)) -> tauri::Result<()> {
+        let mut tray = TrayIconBuilder::with_id(TRAY_ID)
+            .tooltip(Look::Off.tooltip())
+            .menu(&menu(app, false)?)
+            // Левая кнопка показывает окно, меню — по правой. Иначе основное действие
+            // («покажи окно») требовало бы двух нажатий вместо одного.
+            .show_menu_on_left_click(false)
+            .on_menu_event(move |app, event| match event.id().as_ref() {
+                // Питание доступно, не открывая окна: закрытый крестиком клиент живёт
+                // в трее (D-046), и включать VPN из него — то же основное действие.
+                POWER => power(app),
+                SHOW => Tray::show(app),
+                // Выход именно здесь: `RunEvent::Exit` по-прежнему гасит ядро, иначе
+                // осиротевший mihomo держал бы порт (GOTCHAS).
+                QUIT => app.exit(0),
+                _ => {}
+            })
+            .on_tray_icon_event(|tray, event| {
+                if let TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
+                } = event
+                {
+                    Tray::show(tray.app_handle());
+                }
+            });
 
-    tray.build(app)?;
-    *SHOWN.lock().unwrap() = Some((Look::Off, light));
-    Ok(())
-}
+        // Свой значок, а не иконка окна: он меняется по режиму, и форма у всех четырёх
+        // одна — различается только цвет луча (D-051).
+        let light = light_taskbar();
+        tray = tray.icon(Image::from_bytes(Look::Off.png(light))?);
 
-/// Показать окно и поднять его наверх. Спрятанное окно ещё и свёрнутым может быть —
-/// одного `show` тогда мало.
-pub fn show<R: Runtime>(app: &AppHandle<R>) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
-        crate::system::webview::set_visible(&window, true);
+        tray.build(app)?;
+        *SHOWN.lock().unwrap() = Some((Look::Off, light));
+        Ok(())
     }
-}
 
-/// Привести значок к текущему состоянию.
-///
-/// Ошибки глотаем: значок в трее — это индикация, и её пропажа не повод завалить
-/// запуск или остановку ядра.
-pub fn refresh<R: Runtime>(app: &AppHandle<R>, look: Look) {
-    let handle = app.clone();
-    let _ = app.run_on_main_thread(move || apply(&handle, look));
+    /// Показать окно и поднять его наверх. Спрятанное окно ещё и свёрнутым может быть —
+    /// одного `show` тогда мало.
+    pub fn show<R: Runtime>(app: &AppHandle<R>) {
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.show();
+            let _ = window.unminimize();
+            let _ = window.set_focus();
+            crate::system::webview::Webview::set_visible(&window, true);
+        }
+    }
+
+    /// Привести значок к текущему состоянию.
+    ///
+    /// Ошибки глотаем: значок в трее — это индикация, и её пропажа не повод завалить
+    /// запуск или остановку ядра.
+    pub fn refresh<R: Runtime>(app: &AppHandle<R>, look: Look) {
+        let handle = app.clone();
+        let _ = app.run_on_main_thread(move || apply(&handle, look));
+    }
 }
 
 fn apply<R: Runtime>(app: &AppHandle<R>, look: Look) {

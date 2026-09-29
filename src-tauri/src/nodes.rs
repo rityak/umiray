@@ -38,25 +38,27 @@ pub struct Node {
     pub edited: bool,
 }
 
-/// Дописать узлам то, чего не знает файл источника: замеры до серверов.
-///
-/// Адрес и правки проставляет уже `sources::nodes` — там же, где читается сама ссылка.
-/// Замеры живут дольше одного вызова (их собирает отдельная команда), поэтому приходят
-/// таблицей снаружи.
-pub fn enrich(nodes: &mut [Node], pings: &ping::Table, countries: &geo::Cache) {
-    for node in nodes {
-        let Some(address) = node.address.clone() else {
-            continue;
-        };
-        node.country = countries
-            .get(&address)
-            .and_then(|known| known.country.clone());
-        let Some(reply) = pings.get(&address) else {
-            continue;
-        };
-        node.delay = Some(reply.ms);
-        node.method = Some(reply.method);
-        node.fallback = reply.fallback;
+impl Node {
+    /// Дописать узлам то, чего не знает файл источника: замеры до серверов.
+    ///
+    /// Адрес и правки проставляет уже `sources::nodes` — там же, где читается сама ссылка.
+    /// Замеры живут дольше одного вызова (их собирает отдельная команда), поэтому приходят
+    /// таблицей снаружи.
+    pub fn enrich(nodes: &mut [Node], pings: &ping::Table, countries: &geo::Cache) {
+        for node in nodes {
+            let Some(address) = node.address.clone() else {
+                continue;
+            };
+            node.country = countries
+                .get(&address)
+                .and_then(|known| known.country.clone());
+            let Some(reply) = pings.get(&address) else {
+                continue;
+            };
+            node.delay = Some(reply.ms);
+            node.method = Some(reply.method);
+            node.fallback = reply.fallback;
+        }
     }
 }
 

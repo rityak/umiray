@@ -11,7 +11,7 @@
 use serde_yaml::{Mapping, Value};
 
 use crate::error::Result;
-use crate::yaml::top_mapping;
+use crate::yaml::Yaml;
 
 /// Что нужно сделать, чтобы разница доехала до ядра.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,18 +58,20 @@ fn at<'a>(map: &'a Mapping, path: &[&str]) -> Option<&'a Value> {
     here.get(Value::from(*last))
 }
 
-/// Чем доедет разница между работающим конфигом и собранным. Пусто — доезжать нечему.
-pub fn needed(launched: &str, assembled: &str) -> Result<Option<Apply>> {
-    let (was, now) = (top_mapping(launched)?, top_mapping(assembled)?);
-    if was == now {
-        return Ok(None);
-    }
-    let stale = ON_START
-        .iter()
-        .find(|(path, _)| at(&was, path) != at(&now, path));
-    match stale {
-        Some((_, why)) => Ok(Some(Apply::Restart(why))),
-        None => Ok(Some(Apply::Reload)),
+impl Apply {
+    /// Чем доедет разница между работающим конфигом и собранным. Пусто — доезжать нечему.
+    pub fn needed(launched: &str, assembled: &str) -> Result<Option<Apply>> {
+        let (was, now) = (Yaml::top_mapping(launched)?, Yaml::top_mapping(assembled)?);
+        if was == now {
+            return Ok(None);
+        }
+        let stale = ON_START
+            .iter()
+            .find(|(path, _)| at(&was, path) != at(&now, path));
+        match stale {
+            Some((_, why)) => Ok(Some(Apply::Restart(why))),
+            None => Ok(Some(Apply::Reload)),
+        }
     }
 }
 
@@ -87,7 +89,7 @@ rules:
 ";
 
     fn asked(changed: &str) -> Option<Apply> {
-        needed(RUNNING, changed).unwrap()
+        Apply::needed(RUNNING, changed).unwrap()
     }
 
     #[test]

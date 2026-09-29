@@ -19,7 +19,13 @@ use std::time::{Duration, Instant};
 
 use tokio::net::UdpSocket;
 
-use crate::diag::report::{millis, Report, Row, Tone, Verdict};
+use crate::diag::report::Report;
+
+use crate::diag::report::Row;
+
+use crate::diag::report::Tone;
+
+use crate::diag::report::Verdict;
 use crate::error::{AppError, Result};
 
 /// Куда стучимся. Три разных хозяина и три разных порта: если ответит только один,
@@ -127,59 +133,68 @@ async fn ask(server: &str) -> Result<(SocketAddr, u64)> {
     Ok((address, ms))
 }
 
-/// `udp-out`: выпускают ли UDP и каким мы выглядим снаружи по нему.
-pub async fn measure() -> Result<Report> {
-    let started = Instant::now();
-    let mut report = Report::new("udp-out");
-    report.say(
-        Tone::Info,
-        format!("udp-out: {} серверов STUN", SERVERS.len()),
-    );
-    report.columns = ["Сервер", "Ответ за", "Каким видят снаружи"]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+pub struct UdpProbe;
 
-    let mut answered = 0;
-    let mut seen: Option<IpAddr> = None;
-    for server in SERVERS {
-        let got = tokio::time::timeout(TIMEOUT, ask(server)).await;
-        let (verdict, tone, what, took) = match got {
-            Ok(Ok((address, ms))) => {
-                answered += 1;
-                seen.get_or_insert(address.ip());
-                (Verdict::Ok, Tone::Ok, address.to_string(), millis(ms))
-            }
-            Ok(Err(error)) => (Verdict::Bad, Tone::Bad, error.to_string(), "—".to_string()),
-            Err(_) => (
+impl UdpProbe {
+    /// `udp-out`: выпускают ли UDP и каким мы выглядим снаружи по нему.
+    pub async fn measure() -> Result<Report> {
+        let started = Instant::now();
+        let mut report = Report::new("udp-out");
+        report.say(
+            Tone::Info,
+            format!("udp-out: {} серверов STUN", SERVERS.len()),
+        );
+        report.columns = ["Сервер", "Ответ за", "Каким видят снаружи"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+
+        let mut answered = 0;
+        let mut seen: Option<IpAddr> = None;
+        for server in SERVERS {
+            let got = tokio::time::timeout(TIMEOUT, ask(server)).await;
+            let (verdict, tone, what, took) = match got {
+                Ok(Ok((address, ms))) => {
+                    answered += 1;
+                    seen.get_or_insert(address.ip());
+                    (
+                        Verdict::Ok,
+                        Tone::Ok,
+                        address.to_string(),
+                        Report::millis(ms),
+                    )
+                }
+                Ok(Err(error)) => (Verdict::Bad, Tone::Bad, error.to_string(), "—".to_string()),
+                Err(_) => (
+                    Verdict::Bad,
+                    Tone::Bad,
+                    format!("таймаут {} мс", TIMEOUT.as_millis()),
+                    "—".to_string(),
+                ),
+            };
+            report.say(tone, format!("{server:<28} {took:>8}  {what}"));
+            report.rows.push(Row {
+                cells: vec![server.to_string(), took, what],
+                verdict,
+                mark: false,
+            });
+        }
+
+        let ms = started.elapsed().as_millis() as u64;
+        let (verdict, headline) = match (answered, seen) {
+            (0, _) => (
                 Verdict::Bad,
-                Tone::Bad,
-                format!("таймаут {} мс", TIMEOUT.as_millis()),
-                "—".to_string(),
+                "UDP наружу не выходит — hysteria2 и wireguard не встанут".to_string(),
             ),
+            (n, Some(address)) if n < SERVERS.len() => (
+                Verdict::Warn,
+                format!("{address}, но ответили {n} из {}", SERVERS.len()),
+            ),
+            (_, Some(address)) => (Verdict::Ok, format!("ходит, снаружи {address}")),
+            (_, None) => (Verdict::Warn, "ответ пришёл, но без адреса".to_string()),
         };
-        report.say(tone, format!("{server:<28} {took:>8}  {what}"));
-        report.rows.push(Row {
-            cells: vec![server.to_string(), took, what],
-            verdict,
-            mark: false,
-        });
+        Ok(report.finish(verdict, headline, ms))
     }
-
-    let ms = started.elapsed().as_millis() as u64;
-    let (verdict, headline) = match (answered, seen) {
-        (0, _) => (
-            Verdict::Bad,
-            "UDP наружу не выходит — hysteria2 и wireguard не встанут".to_string(),
-        ),
-        (n, Some(address)) if n < SERVERS.len() => (
-            Verdict::Warn,
-            format!("{address}, но ответили {n} из {}", SERVERS.len()),
-        ),
-        (_, Some(address)) => (Verdict::Ok, format!("ходит, снаружи {address}")),
-        (_, None) => (Verdict::Warn, "ответ пришёл, но без адреса".to_string()),
-    };
-    Ok(report.finish(verdict, headline, ms))
 }
 
 #[cfg(test)]

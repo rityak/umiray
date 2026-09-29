@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_yaml::{Mapping, Value};
 
 use crate::error::{AppError, Result};
-use crate::yaml::{set, top_mapping};
+use crate::yaml::Yaml;
 
 /// Ключ, за который отвечает раздел «Группы».
 const KEY: &str = "proxy-groups";
@@ -69,26 +69,52 @@ pub struct Group {
     pub origin: Option<usize>,
 }
 
-/// Группы документа. Пустой документ и документ без `proxy-groups` — это ноль групп,
-/// а не ошибка.
-///
-/// Запись, которую форма не собрала бы обратно **без потерь**, — ошибка: показать половину
-/// документа и записать поверх второй половины хуже, чем честно отправить в код.
-pub fn parse(text: &str) -> Result<Vec<Group>> {
-    let map = top_mapping(text)?;
-    let Some(value) = map.get(Value::from(KEY)) else {
-        return Ok(Vec::new());
-    };
-    if value.is_null() {
-        return Ok(Vec::new());
+pub struct GroupsCodec;
+
+impl GroupsCodec {
+    /// Группы документа. Пустой документ и документ без `proxy-groups` — это ноль групп,
+    /// а не ошибка.
+    ///
+    /// Запись, которую форма не собрала бы обратно **без потерь**, — ошибка: показать половину
+    /// документа и записать поверх второй половины хуже, чем честно отправить в код.
+    pub fn parse(text: &str) -> Result<Vec<Group>> {
+        let map = Yaml::top_mapping(text)?;
+        let Some(value) = map.get(Value::from(KEY)) else {
+            return Ok(Vec::new());
+        };
+        if value.is_null() {
+            return Ok(Vec::new());
+        }
+        let list = value
+            .as_sequence()
+            .ok_or_else(|| AppError::invalid("proxy-groups должен быть списком групп"))?;
+        list.iter()
+            .enumerate()
+            .map(|(at, item)| one(item, at))
+            .collect()
     }
-    let list = value
-        .as_sequence()
-        .ok_or_else(|| AppError::invalid("proxy-groups должен быть списком групп"))?;
-    list.iter()
-        .enumerate()
-        .map(|(at, item)| one(item, at))
-        .collect()
+
+    /// Собрать документ заново с этими группами. Всё, что лежит в документе помимо
+    /// `proxy-groups`, остаётся нетронутым.
+    pub fn render(text: &str, groups: &[Group]) -> Result<String> {
+        let mut map = Yaml::top_mapping(text)?;
+        let was: Vec<Value> = map
+            .get(Value::from(KEY))
+            .and_then(Value::as_sequence)
+            .cloned()
+            .unwrap_or_default();
+        let list: Vec<Value> = groups
+            .iter()
+            .map(|group| Value::Mapping(entry(group, &was)))
+            .collect();
+        // Пустой список ядро отвергает, поэтому ноль групп — это отсутствие ключа, а не `[]`.
+        if list.is_empty() {
+            without(&mut map, KEY);
+        } else {
+            Yaml::set(&mut map, KEY, Value::Sequence(list));
+        }
+        serde_yaml::to_string(&Value::Mapping(map)).map_err(|e| AppError::invalid(e.to_string()))
+    }
 }
 
 fn one(value: &Value, at: usize) -> Result<Group> {
@@ -117,28 +143,6 @@ fn one(value: &Value, at: usize) -> Result<Group> {
     })
 }
 
-/// Собрать документ заново с этими группами. Всё, что лежит в документе помимо
-/// `proxy-groups`, остаётся нетронутым.
-pub fn render(text: &str, groups: &[Group]) -> Result<String> {
-    let mut map = top_mapping(text)?;
-    let was: Vec<Value> = map
-        .get(Value::from(KEY))
-        .and_then(Value::as_sequence)
-        .cloned()
-        .unwrap_or_default();
-    let list: Vec<Value> = groups
-        .iter()
-        .map(|group| Value::Mapping(entry(group, &was)))
-        .collect();
-    // Пустой список ядро отвергает, поэтому ноль групп — это отсутствие ключа, а не `[]`.
-    if list.is_empty() {
-        without(&mut map, KEY);
-    } else {
-        set(&mut map, KEY, Value::Sequence(list));
-    }
-    serde_yaml::to_string(&Value::Mapping(map)).map_err(|e| AppError::invalid(e.to_string()))
-}
-
 /// Запись группы: то, что лежало, плюс поля формы поверх. Пустое поле формы означает
 /// «этого поля быть не должно», а не «оставить как было», — иначе снятый фильтр
 /// продолжал бы резать группу.
@@ -149,7 +153,7 @@ fn entry(group: &Group, was: &[Value]) -> Mapping {
         .and_then(Value::as_mapping)
         .cloned()
         .unwrap_or_default();
-    set(&mut map, "name", Value::from(group.name.clone()));
+    Yaml::set(&mut map, "name", Value::from(group.name.clone()));
     put(&mut map, "type", some_text(&group.kind));
     put(&mut map, "use", some_list(&group.sources));
     put(&mut map, "proxies", some_list(&group.proxies));
@@ -182,7 +186,7 @@ fn some_list(items: &[String]) -> Option<Value> {
 /// Поставить или убрать поле.
 fn put(map: &mut Mapping, key: &str, value: Option<Value>) {
     match value {
-        Some(value) => set(map, key, value),
+        Some(value) => Yaml::set(map, key, value),
         None => without(map, key),
     }
 }
@@ -242,7 +246,7 @@ mod tests {
 
     #[test]
     fn a_group_reads_back_in_the_words_of_the_window() {
-        let groups = parse(MINE).unwrap();
+        let groups = GroupsCodec::parse(MINE).unwrap();
         assert_eq!(groups.len(), 2);
         assert_eq!(groups[0].name, "Европа");
         assert_eq!(groups[0].kind, "url-test");
@@ -263,15 +267,15 @@ mod tests {
     /// когда её переименовали и переставили.
     #[test]
     fn what_the_form_does_not_know_survives_a_rename_and_a_move() {
-        let mut groups = parse(MINE).unwrap();
+        let mut groups = GroupsCodec::parse(MINE).unwrap();
         groups[0].name = "Европа-2".into();
         groups.swap(0, 1);
-        let out = render(MINE, &groups).unwrap();
-        let after = parse(&out).unwrap();
+        let out = GroupsCodec::render(MINE, &groups).unwrap();
+        let after = GroupsCodec::parse(&out).unwrap();
         assert_eq!(after[0].name, "Дом");
         assert_eq!(after[1].name, "Европа-2");
         assert_eq!(after[1].extra, vec!["lazy"]);
-        let map = top_mapping(&out).unwrap();
+        let map = Yaml::top_mapping(&out).unwrap();
         assert_eq!(map["proxy-groups"][1]["lazy"], Value::from(true));
     }
 
@@ -279,10 +283,10 @@ mod tests {
     /// иначе снятый фильтр продолжал бы резать группу.
     #[test]
     fn an_emptied_field_leaves_the_document() {
-        let mut groups = parse(MINE).unwrap();
+        let mut groups = GroupsCodec::parse(MINE).unwrap();
         groups[0].filter = None;
         groups[0].tolerance = None;
-        let map = top_mapping(&render(MINE, &groups).unwrap()).unwrap();
+        let map = Yaml::top_mapping(&GroupsCodec::render(MINE, &groups).unwrap()).unwrap();
         let group = map["proxy-groups"][0].as_mapping().unwrap();
         assert!(!group.contains_key(Value::from("filter")));
         assert!(!group.contains_key(Value::from("tolerance")));
@@ -300,15 +304,20 @@ mod tests {
     #[test]
     fn the_rest_of_the_document_is_none_of_our_business() {
         let text = "mixed-port: 7777\nproxy-groups:\n  - name: Дом\n    type: select\n";
-        let out = render(text, &parse(text).unwrap()).unwrap();
-        assert_eq!(top_mapping(&out).unwrap()["mixed-port"], Value::from(7777));
+        let out = GroupsCodec::render(text, &GroupsCodec::parse(text).unwrap()).unwrap();
+        assert_eq!(
+            Yaml::top_mapping(&out).unwrap()["mixed-port"],
+            Value::from(7777)
+        );
     }
 
     #[test]
     fn the_last_group_removed_takes_the_key_with_it() {
-        let out = render(MINE, &[]).unwrap();
+        let out = GroupsCodec::render(MINE, &[]).unwrap();
         assert!(
-            !top_mapping(&out).unwrap().contains_key(Value::from(KEY)),
+            !Yaml::top_mapping(&out)
+                .unwrap()
+                .contains_key(Value::from(KEY)),
             "пустой список ядро отвергает — ключа быть не должно"
         );
     }
@@ -330,7 +339,7 @@ mod tests {
             extra: Vec::new(),
             origin: None,
         };
-        let map = top_mapping(&render(MINE, &[fresh]).unwrap()).unwrap();
+        let map = Yaml::top_mapping(&GroupsCodec::render(MINE, &[fresh]).unwrap()).unwrap();
         let group = map["proxy-groups"][0].as_mapping().unwrap();
         assert_eq!(group["name"], Value::from("Своя"));
         assert!(!group.contains_key(Value::from("lazy")));
@@ -340,13 +349,13 @@ mod tests {
     /// Документ, который форма не соберёт обратно без потерь, она не открывает вовсе.
     #[test]
     fn a_document_the_form_cannot_rebuild_is_refused() {
-        assert!(parse("proxy-groups:\n  - просто строка\n").is_err());
+        assert!(GroupsCodec::parse("proxy-groups:\n  - просто строка\n").is_err());
         assert!(
-            parse("proxy-groups:\n  - type: select\n").is_err(),
+            GroupsCodec::parse("proxy-groups:\n  - type: select\n").is_err(),
             "без имени"
         );
-        assert!(parse("proxy-groups: 5\n").is_err());
-        assert!(parse("").unwrap().is_empty());
-        assert!(parse("proxy-groups:\n").unwrap().is_empty());
+        assert!(GroupsCodec::parse("proxy-groups: 5\n").is_err());
+        assert!(GroupsCodec::parse("").unwrap().is_empty());
+        assert!(GroupsCodec::parse("proxy-groups:\n").unwrap().is_empty());
     }
 }

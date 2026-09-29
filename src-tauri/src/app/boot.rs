@@ -14,26 +14,64 @@ use std::time::Instant;
 
 use tauri::{AppHandle, Manager};
 
-use crate::app::lifecycle::line;
+use crate::app::connect::Connection;
+use crate::app::data::DataDir;
+use crate::app::lifecycle::Lifecycle;
+use crate::app::migrate::Migration;
+use crate::app::settings;
 use crate::app::state::AppState;
-use crate::app::{connect, data, migrate, settings, status, tick, tray};
+use crate::app::tick::Clock;
+use crate::app::tray::Tray;
 use crate::paths;
 
-/// У debug отдельны mutex одиночного запуска, хранилище WebView и имя окна (D-150).
-pub fn context() -> tauri::Context<tauri::Wry> {
-    let mut context = tauri::generate_context!();
-    if cfg!(debug_assertions) {
-        let config = context.config_mut();
-        config.identifier = "com.umiray.client.dev".into();
-        config.product_name = Some(paths::APP_NAME.into());
-        for window in &mut config.app.windows {
-            window.title = paths::APP_NAME.into();
+pub struct Boot;
+
+impl Boot {
+    /// У debug отдельны mutex одиночного запуска, хранилище WebView и имя окна (D-150).
+    pub fn context() -> tauri::Context<tauri::Wry> {
+        let mut context = tauri::generate_context!();
+        if cfg!(debug_assertions) {
+            let config = context.config_mut();
+            config.identifier = "com.umiray.client.dev".into();
+            config.product_name = Some(paths::APP_NAME.into());
+            for window in &mut config.app.windows {
+                window.title = paths::APP_NAME.into();
+            }
+            if let Some(updater) = config.plugins.0.get_mut("updater") {
+                updater["pubkey"] = "".into();
+            }
         }
-        if let Some(updater) = config.plugins.0.get_mut("updater") {
-            updater["pubkey"] = "".into();
-        }
+        context
     }
-    context
+
+    /// Пройти запуск. Отказ никого не отменяет — только уезжает в лог.
+    pub fn run(app: &AppHandle) -> crate::error::Result<()> {
+        // После single-instance и до чтения настроек. Ошибка копирования отменяет запуск:
+        // пустой клиент поверх недокопированной подписки выглядел бы потерей данных.
+        DataDir::migrate()?;
+        if let Err(why) = Migration::run() {
+            eprintln!("миграция не удалась: {why}");
+        }
+        app.manage(AppState::new());
+        // Первая строка журнала — номер версии. Без него разбор чужого лога начинается
+        // с вопроса «а какая это сборка»; строка стоит ровно один `println!`.
+        eprintln!(
+            "{}: запуск · версия {}",
+            paths::APP_NAME,
+            env!("CARGO_PKG_VERSION")
+        );
+        for step in STEPS {
+            let began = Instant::now();
+            let outcome = (step.run)(app);
+            let (level, text) =
+                Lifecycle::line("app", step.id, step.label, began.elapsed(), &outcome);
+            eprintln!("{text}");
+            if outcome.is_err() {
+                app.state::<AppState>().note(level, &text);
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Неудача шага — строка для человека. Своего варианта `AppError` тут не заводим:
@@ -107,50 +145,22 @@ const STEPS: &[Step] = &[
     },
 ];
 
-/// Пройти запуск. Отказ никого не отменяет — только уезжает в лог.
-pub fn run(app: &AppHandle) -> crate::error::Result<()> {
-    // После single-instance и до чтения настроек. Ошибка копирования отменяет запуск:
-    // пустой клиент поверх недокопированной подписки выглядел бы потерей данных.
-    data::migrate()?;
-    if let Err(why) = migrate::run() {
-        eprintln!("миграция не удалась: {why}");
-    }
-    app.manage(AppState::new());
-    // Первая строка журнала — номер версии. Без него разбор чужого лога начинается
-    // с вопроса «а какая это сборка»; строка стоит ровно один `println!`.
-    eprintln!(
-        "{}: запуск · версия {}",
-        paths::APP_NAME,
-        env!("CARGO_PKG_VERSION")
-    );
-    for step in STEPS {
-        let began = Instant::now();
-        let outcome = (step.run)(app);
-        let (level, text) = line("app", step.id, step.label, began.elapsed(), &outcome);
-        eprintln!("{text}");
-        if outcome.is_err() {
-            app.state::<AppState>().supervisor.note(level, &text);
-        }
-    }
-    Ok(())
-}
-
 /// Окно показываем сами и первым делом: в конфиге оно объявлено скрытым, чтобы «тихий
 /// запуск» не мигал им по дороге в трей (D-088). Раньше всего остального: шаг, упавший
 /// до этого, оставил бы пользователя вообще без окна.
 fn window(app: &AppHandle) -> Done {
-    let shown = match app.state::<AppState>().settings().launch {
+    let shown = match app.state::<AppState>().settings.get().launch {
         settings::Launch::Window => true,
         settings::Launch::Tray => false,
         // Ярлык — окном, вход в систему — в трей (D-129).
-        settings::Launch::Smart => !crate::system::autostart::by_system(),
+        settings::Launch::Smart => !crate::system::autostart::Autostart::by_system(),
     };
     let Some(window) = app.get_webview_window("main") else {
         return Err("окна main нет в конфиге приложения".into());
     };
     // Запуск в трей — страница тоже невидима: иначе она опрашивала бы бэкенд до первого
     // показа окна (`system::webview`).
-    crate::system::webview::set_visible(&window, shown);
+    crate::system::webview::Webview::set_visible(&window, shown);
     if !shown {
         return Ok(());
     }
@@ -160,45 +170,48 @@ fn window(app: &AppHandle) -> Done {
 /// Прибираемся после падения, и ядро — первым: осиротевшее держит порт, а в TUN ещё
 /// и весь трафик машины (D-059). Место обязано быть именно здесь: вторую копию приложения
 /// плагин одиночного запуска гасит раньше `setup`, иначе она убила бы ядро первой.
-fn sweep(_app: &AppHandle) -> Done {
-    crate::core::supervisor::sweep();
+fn sweep(app: &AppHandle) -> Done {
+    let state = app.state::<AppState>();
+    for id in crate::core::EngineId::ALL {
+        crate::core::process::CoreProcess::sweep(&state.engine(id).binary());
+    }
     Ok(())
 }
 
 fn clock(app: &AppHandle) -> Done {
-    tick::spawn(app.clone());
+    Clock::spawn(app.clone());
     Ok(())
 }
 
 /// Ядро, умершее не по нашей команде, поднимается заново (D-057).
 fn watch(app: &AppHandle) -> Done {
-    connect::watch(app.clone());
+    Connection::watch(app.clone());
     Ok(())
 }
 
 /// Сеть сменилась под ногами — узлы перепроверяются сами (D-112). Рядом с надзором
 /// за ядром: оба про то, что случилось без нашего ведома.
 fn netwatch(app: &AppHandle) -> Done {
-    crate::app::wake::watch(app.clone());
+    crate::app::wake::Wake::watch(app.clone());
     Ok(())
 }
 
 /// Что делает пункт питания, трей не знает: действие приходит отсюда, из места сборки
 /// приложения.
 fn icon(app: &AppHandle) -> Done {
-    tray::build(app, connect::toggle).map_err(|why| why.to_string())
+    Tray::build(app, Connection::toggle).map_err(|why| why.to_string())
 }
 
 /// Запись в `Run` из прошлой сборки получает флаг, по которому `smart` узнаёт вход
 /// в систему (D-129). Без этого у включивших автозапуск раньше окно всплывало бы при входе.
 fn autostart_flag(_app: &AppHandle) -> Done {
-    crate::system::autostart::refresh().map_err(|why| why.to_string())
+    crate::system::autostart::Autostart::refresh().map_err(|why| why.to_string())
 }
 
 /// Подключаемся сами, если так велят настройки (D-088). После трея: значок должен уже
 /// существовать, чтобы догнать состояние.
 fn autoconnect(app: &AppHandle) -> Done {
-    connect::autoconnect(app.clone());
+    Connection::autoconnect(app.clone());
     Ok(())
 }
 
@@ -206,18 +219,23 @@ fn autoconnect(app: &AppHandle) -> Done {
 /// и не успели его вернуть. Это и есть лекарство от «прокси залип», которого боялся D-008;
 /// снимка нет — шаг ничего не делает.
 fn proxy(app: &AppHandle) -> Done {
-    status::release_system_proxy(&app.state::<AppState>()).map_err(|why| why.to_string())
+    let state = app.state::<AppState>();
+    state.proxy.release(&state).map_err(|why| why.to_string())
 }
 
 /// То же лекарство для брандмауэра, и оно важнее: с залипшим запретом машина остаётся
 /// без интернета вовсе, и «починить» для пользователя означает просто открыть umiray
 /// ещё раз (D-073).
 fn unlock(app: &AppHandle) -> Done {
-    status::release_kill_switch(&app.state::<AppState>()).map_err(|why| why.to_string())
+    let state = app.state::<AppState>();
+    state
+        .kill_switch
+        .release(&state)
+        .map_err(|why| why.to_string())
 }
 
 fn sources(_app: &AppHandle) -> Done {
-    crate::nodes::sources::repair_all().map_err(|why| why.to_string())
+    crate::nodes::sources::SourceStore::repair_all().map_err(|why| why.to_string())
 }
 
 #[cfg(test)]
@@ -252,7 +270,7 @@ mod tests {
     }
     #[test]
     fn debug_has_its_own_instance_and_cannot_install_stable_updates() {
-        let context = context();
+        let context = Boot::context();
         let config = context.config();
         if cfg!(debug_assertions) {
             assert_eq!(config.identifier, "com.umiray.client.dev");

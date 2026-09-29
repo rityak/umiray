@@ -15,28 +15,33 @@
 
 use serde_yaml::Value;
 
-use crate::config::files::{self, CLIENT};
+use crate::config::files::Documents;
+use crate::config::files::CLIENT;
 use crate::error::{AppError, Result};
-use crate::yaml::{set, top_mapping};
+use crate::yaml::Yaml;
 
 const KEY: &str = "udp-group";
 
-/// Включён ли тумблер. Мусор в поле — это «выключено», а не отказ собрать конфиг:
-/// из-за галки не поднять VPN было бы хуже, чем не собрать группу.
-pub fn on() -> bool {
-    files::read(CLIENT)
-        .ok()
-        .and_then(|text| top_mapping(&text).ok())
-        .and_then(|map| map.get(Value::from(KEY)).and_then(Value::as_bool))
-        .unwrap_or(false)
-}
+pub struct UdpGroup;
 
-pub fn write(on: bool) -> Result<()> {
-    let mut map = top_mapping(&files::read(CLIENT)?)?;
-    set(&mut map, KEY, Value::from(on));
-    let text = serde_yaml::to_string(&Value::Mapping(map))
-        .map_err(|e| AppError::invalid(e.to_string()))?;
-    files::write(CLIENT, &text)
+impl UdpGroup {
+    /// Включён ли тумблер. Мусор в поле — это «выключено», а не отказ собрать конфиг:
+    /// из-за галки не поднять VPN было бы хуже, чем не собрать группу.
+    pub fn on() -> bool {
+        Documents::read(CLIENT)
+            .ok()
+            .and_then(|text| Yaml::top_mapping(&text).ok())
+            .and_then(|map| map.get(Value::from(KEY)).and_then(Value::as_bool))
+            .unwrap_or(false)
+    }
+
+    pub fn write(on: bool) -> Result<()> {
+        let mut map = Yaml::top_mapping(&Documents::read(CLIENT)?)?;
+        Yaml::set(&mut map, KEY, Value::from(on));
+        let text = serde_yaml::to_string(&Value::Mapping(map))
+            .map_err(|e| AppError::invalid(e.to_string()))?;
+        Documents::write(CLIENT, &text)
+    }
 }
 
 #[cfg(test)]
@@ -45,7 +50,7 @@ mod tests {
 
     /// Разбор отделён от диска — правило проверяется обычным `cargo test`.
     fn of(text: &str) -> bool {
-        top_mapping(text)
+        Yaml::top_mapping(text)
             .ok()
             .and_then(|map| map.get(Value::from(KEY)).and_then(Value::as_bool))
             .unwrap_or(false)

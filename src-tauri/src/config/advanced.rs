@@ -14,9 +14,10 @@
 use serde::{Deserialize, Serialize};
 use serde_yaml::{Mapping, Value};
 
+use crate::config::files::Documents;
 use crate::config::files::{self, LOCAL_PROXY_PORT};
 use crate::error::{AppError, Result};
-use crate::yaml::{fill, set, sub, top_mapping};
+use crate::yaml::Yaml;
 
 /// Чем TUN разбирает пакеты. `mixed` — умолчание ядра и наше: `system` быстрее, но
 /// на части машин не поднимается, `gvisor` работает везде и медленнее.
@@ -118,8 +119,20 @@ fn nested<'a>(map: &'a Mapping, key: &str) -> Option<&'a Mapping> {
     map.get(Value::from(key)).and_then(Value::as_mapping)
 }
 
-pub fn read() -> Result<Options> {
-    of(&top_mapping(&files::read(files::ADVANCED)?)?)
+pub struct Advanced;
+
+impl Advanced {
+    pub fn read() -> Result<Options> {
+        of(&Yaml::top_mapping(&Documents::read(files::ADVANCED)?)?)
+    }
+
+    pub fn write(options: &Options) -> Result<()> {
+        let mut map = Yaml::top_mapping(&Documents::read(files::ADVANCED)?)?;
+        apply(&mut map, options)?;
+        let text = serde_yaml::to_string(&Value::Mapping(map))
+            .map_err(|e| AppError::invalid(e.to_string()))?;
+        Documents::write(files::ADVANCED, &text)
+    }
 }
 
 /// Поля документа. Отделено от диска, чтобы правила проверялись обычным `cargo test`,
@@ -143,14 +156,6 @@ fn of(map: &Mapping) -> Result<Options> {
         enhanced_mode: field(dns, ENHANCED_MODE)?,
         nameserver: field(dns, NAMESERVER)?,
     })
-}
-
-pub fn write(options: &Options) -> Result<()> {
-    let mut map = top_mapping(&files::read(files::ADVANCED)?)?;
-    apply(&mut map, options)?;
-    let text = serde_yaml::to_string(&Value::Mapping(map))
-        .map_err(|e| AppError::invalid(e.to_string()))?;
-    files::write(files::ADVANCED, &text)
 }
 
 /// Пустые строки в списке — не значение, а недописанная строка формы.
@@ -202,34 +207,34 @@ fn apply(map: &mut Mapping, options: &Options) -> Result<()> {
         ));
     }
 
-    set(map, LOG_LEVEL, tag(options.log_level)?);
-    set(map, MIXED_PORT, Value::from(options.mixed_port));
+    Yaml::set(map, LOG_LEVEL, tag(options.log_level)?);
+    Yaml::set(map, MIXED_PORT, Value::from(options.mixed_port));
 
-    let tun = sub(map, TUN);
-    set(tun, STACK, tag(options.stack)?);
-    set(tun, STRICT_ROUTE, Value::from(options.strict_route));
-    set(tun, DNS_HIJACK, seq(cleaned(&options.dns_hijack)));
+    let tun = Yaml::sub(map, TUN);
+    Yaml::set(tun, STACK, tag(options.stack)?);
+    Yaml::set(tun, STRICT_ROUTE, Value::from(options.strict_route));
+    Yaml::set(tun, DNS_HIJACK, seq(cleaned(&options.dns_hijack)));
     match options.device.trim() {
         "" => clear(tun, DEVICE),
-        name => set(tun, DEVICE, Value::from(name)),
+        name => Yaml::set(tun, DEVICE, Value::from(name)),
     }
     match options.mtu {
         0 => clear(tun, MTU),
-        mtu => set(tun, MTU, Value::from(mtu)),
+        mtu => Yaml::set(tun, MTU, Value::from(mtu)),
     }
 
-    let dns = sub(map, DNS);
-    set(dns, ENABLE, Value::from(options.dns_enable));
-    set(dns, ENHANCED_MODE, tag(options.enhanced_mode)?);
-    set(dns, NAMESERVER, seq(nameserver));
+    let dns = Yaml::sub(map, DNS);
+    Yaml::set(dns, ENABLE, Value::from(options.dns_enable));
+    Yaml::set(dns, ENHANCED_MODE, tag(options.enhanced_mode)?);
+    Yaml::set(dns, NAMESERVER, seq(nameserver));
 
     // Тумблер ставит только `enable`; что именно нюхать — `fill`, то есть один раз.
     // Правило то же, что у всей сборки (D-029): что задаёт способность — форсируем,
     // остальное только дописываем, и написанное человеком не трогаем.
-    let sniffer = sub(map, SNIFFER);
-    set(sniffer, ENABLE, Value::from(options.sniffer));
-    fill(sniffer, "sniff", default_sniff());
-    fill(sniffer, "skip-domain", seq(vec!["Mijia Cloud".into()]));
+    let sniffer = Yaml::sub(map, SNIFFER);
+    Yaml::set(sniffer, ENABLE, Value::from(options.sniffer));
+    Yaml::fill(sniffer, "sniff", default_sniff());
+    Yaml::fill(sniffer, "skip-domain", seq(vec!["Mijia Cloud".into()]));
     Ok(())
 }
 
@@ -263,7 +268,7 @@ mod tests {
     }
 
     fn written(document: &str, options: &Options) -> Mapping {
-        let mut map = top_mapping(document).unwrap();
+        let mut map = Yaml::top_mapping(document).unwrap();
         apply(&mut map, options).unwrap();
         map
     }
@@ -294,7 +299,7 @@ mod tests {
             "mixed-port: не число",
             "tun: {mtu: []}",
         ] {
-            let map = top_mapping(bad).unwrap();
+            let map = Yaml::top_mapping(bad).unwrap();
             assert!(of(&map).is_err(), "{bad} должно быть ошибкой");
         }
     }
@@ -302,7 +307,7 @@ mod tests {
     /// Шаблон — это документация: всё, что в нём написано, обязано читаться формой.
     #[test]
     fn the_template_reads_back_through_the_form() {
-        let map = top_mapping(files::template(files::ADVANCED).unwrap()).unwrap();
+        let map = Yaml::top_mapping(Documents::template(files::ADVANCED).unwrap()).unwrap();
         let options = of(&map).unwrap();
         assert_eq!(options.stack, Stack::Mixed);
         assert_eq!(options.mixed_port, LOCAL_PROXY_PORT);

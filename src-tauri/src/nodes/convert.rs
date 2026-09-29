@@ -13,42 +13,46 @@
 
 use serde_yaml::{Mapping, Value};
 
-use crate::nodes::link;
-use crate::yaml::set;
+use crate::nodes::link::LinkParser;
+use crate::yaml::Yaml;
 
 fn scheme_of(line: &str) -> Option<String> {
     line.split("://").next().map(str::to_lowercase)
 }
 
-/// Разложить ссылку в запись узла. `None` — схему не знаем: выдумывать нельзя.
-pub fn to_entry(line: &str) -> Option<Mapping> {
-    let scheme = scheme_of(line)?;
-    let name = link::name_of(line).unwrap_or_else(|| "Узел".into());
-    let (server, port) = endpoint(line)?;
-    let params = link::params(line);
+pub struct Converter;
 
-    let mut entry = Mapping::new();
-    set(&mut entry, "name", Value::from(name));
-    set(&mut entry, "server", Value::from(server));
-    set(&mut entry, "port", Value::from(port));
+impl Converter {
+    /// Разложить ссылку в запись узла. `None` — схему не знаем: выдумывать нельзя.
+    pub fn to_entry(line: &str) -> Option<Mapping> {
+        let scheme = scheme_of(line)?;
+        let name = LinkParser::name_of(line).unwrap_or_else(|| "Узел".into());
+        let (server, port) = endpoint(line)?;
+        let params = LinkParser::params(line);
 
-    match scheme.as_str() {
-        "vless" => vless(&mut entry, line, &params)?,
-        "vmess" => vmess(&mut entry, line)?,
-        "trojan" => trojan(&mut entry, line, &params)?,
-        "ss" | "shadowsocks" => shadowsocks(&mut entry, line)?,
-        "hysteria2" | "hy2" => hysteria2(&mut entry, line, &params)?,
-        "socks" | "socks5" => socks(&mut entry, line),
-        "http" | "https" => http(&mut entry, line, &scheme),
-        "wireguard" | "wg" => wireguard(&mut entry, line, &params)?,
-        _ => return None,
+        let mut entry = Mapping::new();
+        Yaml::set(&mut entry, "name", Value::from(name));
+        Yaml::set(&mut entry, "server", Value::from(server));
+        Yaml::set(&mut entry, "port", Value::from(port));
+
+        match scheme.as_str() {
+            "vless" => vless(&mut entry, line, &params)?,
+            "vmess" => vmess(&mut entry, line)?,
+            "trojan" => trojan(&mut entry, line, &params)?,
+            "ss" | "shadowsocks" => shadowsocks(&mut entry, line)?,
+            "hysteria2" | "hy2" => hysteria2(&mut entry, line, &params)?,
+            "socks" | "socks5" => socks(&mut entry, line),
+            "http" | "https" => http(&mut entry, line, &scheme),
+            "wireguard" | "wg" => wireguard(&mut entry, line, &params)?,
+            _ => return None,
+        }
+        Some(crate::nodes::sources::SourceStore::ordered(entry))
     }
-    Some(crate::nodes::sources::ordered(entry))
 }
 
 /// Адрес и порт из `@host:port`. Без порта записи не бывает — ядро её не примет.
 fn endpoint(line: &str) -> Option<(String, u16)> {
-    let endpoint = link::endpoint_of(line)?;
+    let endpoint = LinkParser::endpoint_of(line)?;
     // IPv6 в ссылке пишется в скобках: `[::1]:443`.
     let (host, port) = match endpoint.strip_prefix('[') {
         Some(rest) => {
@@ -100,31 +104,31 @@ fn security(entry: &mut Mapping, params: &Params, sni: &str) {
     let kind = text(params, "security").unwrap_or_default();
     let reality = kind == "reality" || params.contains_key("pbk");
     if reality || kind == "tls" || kind == "xtls" {
-        set(entry, "tls", Value::from(true));
+        Yaml::set(entry, "tls", Value::from(true));
     }
     if let Some(value) = text(params, "sni").or_else(|| text(params, "peer")) {
-        set(entry, sni, Value::from(value));
+        Yaml::set(entry, sni, Value::from(value));
     }
     if let Some(value) = text(params, "alpn") {
-        set(entry, "alpn", list(&value));
+        Yaml::set(entry, "alpn", list(&value));
     }
     if let Some(value) = text(params, "fp") {
-        set(entry, "client-fingerprint", Value::from(value));
+        Yaml::set(entry, "client-fingerprint", Value::from(value));
     }
     if flag(params, "allowInsecure") || flag(params, "insecure") || flag(params, "skip-cert-verify")
     {
-        set(entry, "skip-cert-verify", Value::from(true));
+        Yaml::set(entry, "skip-cert-verify", Value::from(true));
     }
     if reality {
         let mut opts = Mapping::new();
         if let Some(value) = text(params, "pbk") {
-            set(&mut opts, "public-key", Value::from(value));
+            Yaml::set(&mut opts, "public-key", Value::from(value));
         }
         if let Some(value) = text(params, "sid") {
-            set(&mut opts, "short-id", Value::from(value));
+            Yaml::set(&mut opts, "short-id", Value::from(value));
         }
         if !opts.is_empty() {
-            set(entry, "reality-opts", Value::Mapping(opts));
+            Yaml::set(entry, "reality-opts", Value::Mapping(opts));
         }
     }
 }
@@ -135,69 +139,69 @@ fn transport(entry: &mut Mapping, params: &Params) {
     let Some(kind) = text(params, "type").filter(|kind| kind != "tcp") else {
         return;
     };
-    set(entry, "network", Value::from(kind.clone()));
+    Yaml::set(entry, "network", Value::from(kind.clone()));
     let host = text(params, "host");
     let path = text(params, "path");
     match kind.as_str() {
         "ws" => {
             let mut opts = Mapping::new();
             if let Some(path) = path {
-                set(&mut opts, "path", Value::from(path));
+                Yaml::set(&mut opts, "path", Value::from(path));
             }
             if let Some(host) = host {
                 let mut headers = Mapping::new();
-                set(&mut headers, "Host", Value::from(host));
-                set(&mut opts, "headers", Value::Mapping(headers));
+                Yaml::set(&mut headers, "Host", Value::from(host));
+                Yaml::set(&mut opts, "headers", Value::Mapping(headers));
             }
             if !opts.is_empty() {
-                set(entry, "ws-opts", Value::Mapping(opts));
+                Yaml::set(entry, "ws-opts", Value::Mapping(opts));
             }
         }
         "grpc" => {
             if let Some(name) = text(params, "serviceName").or_else(|| text(params, "servicename"))
             {
                 let mut opts = Mapping::new();
-                set(&mut opts, "grpc-service-name", Value::from(name));
-                set(entry, "grpc-opts", Value::Mapping(opts));
+                Yaml::set(&mut opts, "grpc-service-name", Value::from(name));
+                Yaml::set(entry, "grpc-opts", Value::Mapping(opts));
             }
         }
         "h2" => {
             let mut opts = Mapping::new();
             if let Some(path) = path {
-                set(&mut opts, "path", Value::from(path));
+                Yaml::set(&mut opts, "path", Value::from(path));
             }
             if let Some(host) = host {
-                set(&mut opts, "host", list(&host));
+                Yaml::set(&mut opts, "host", list(&host));
             }
             if !opts.is_empty() {
-                set(entry, "h2-opts", Value::Mapping(opts));
+                Yaml::set(entry, "h2-opts", Value::Mapping(opts));
             }
         }
         "http" => {
             let mut opts = Mapping::new();
             if let Some(path) = path {
-                set(&mut opts, "path", list(&path));
+                Yaml::set(&mut opts, "path", list(&path));
             }
             if !opts.is_empty() {
-                set(entry, "http-opts", Value::Mapping(opts));
+                Yaml::set(entry, "http-opts", Value::Mapping(opts));
             }
         }
         "xhttp" => {
             let mut opts = Mapping::new();
             if let Some(mode) = text(params, "mode") {
-                set(&mut opts, "mode", Value::from(mode));
+                Yaml::set(&mut opts, "mode", Value::from(mode));
             }
             if let Some(path) = path {
-                set(&mut opts, "path", Value::from(path));
+                Yaml::set(&mut opts, "path", Value::from(path));
             }
             if let Some(host) = host {
-                set(&mut opts, "host", Value::from(host));
+                Yaml::set(&mut opts, "host", Value::from(host));
             }
             if let Some(padding) = text(params, "x_padding_bytes") {
-                set(&mut opts, "x-padding-bytes", Value::from(padding));
+                Yaml::set(&mut opts, "x-padding-bytes", Value::from(padding));
             }
             if !opts.is_empty() {
-                set(entry, "xhttp-opts", Value::Mapping(opts));
+                Yaml::set(entry, "xhttp-opts", Value::Mapping(opts));
             }
         }
         _ => {}
@@ -205,15 +209,15 @@ fn transport(entry: &mut Mapping, params: &Params) {
 }
 
 fn vless(entry: &mut Mapping, line: &str, params: &Params) -> Option<()> {
-    let uuid = link::userinfo_of(line).filter(|uuid| !uuid.is_empty())?;
-    set(entry, "type", Value::from("vless"));
-    set(entry, "uuid", Value::from(uuid));
-    set(entry, "udp", Value::from(true));
+    let uuid = LinkParser::userinfo_of(line).filter(|uuid| !uuid.is_empty())?;
+    Yaml::set(entry, "type", Value::from("vless"));
+    Yaml::set(entry, "uuid", Value::from(uuid));
+    Yaml::set(entry, "udp", Value::from(true));
     if let Some(flow) = text(params, "flow") {
-        set(entry, "flow", Value::from(flow.to_lowercase()));
+        Yaml::set(entry, "flow", Value::from(flow.to_lowercase()));
     }
     if let Some(value) = text(params, "encryption").filter(|value| value != "none") {
-        set(entry, "encryption", Value::from(value));
+        Yaml::set(entry, "encryption", Value::from(value));
     }
     security(entry, params, "servername");
     transport(entry, params);
@@ -226,7 +230,7 @@ fn vmess(entry: &mut Mapping, line: &str) -> Option<()> {
     let body = line.split_once("://")?.1;
     let body = body.split(['#', '?']).next()?;
     let json: serde_json::Value =
-        serde_json::from_str(&crate::nodes::codec::decode_text(body)?).ok()?;
+        serde_json::from_str(&crate::nodes::codec::Base64::decode_text(body)?).ok()?;
     let get = |key: &str| -> Option<String> {
         let value = json.get(key)?;
         let text = match value {
@@ -236,18 +240,18 @@ fn vmess(entry: &mut Mapping, line: &str) -> Option<()> {
         (!text.is_empty() && text != "null").then_some(text)
     };
 
-    set(entry, "type", Value::from("vmess"));
-    set(entry, "server", Value::from(get("add")?));
-    set(
+    Yaml::set(entry, "type", Value::from("vmess"));
+    Yaml::set(entry, "server", Value::from(get("add")?));
+    Yaml::set(
         entry,
         "port",
         Value::from(get("port")?.parse::<u16>().ok()?),
     );
     if let Some(name) = get("ps") {
-        set(entry, "name", Value::from(link::normalize(&name)));
+        Yaml::set(entry, "name", Value::from(LinkParser::normalize(&name)));
     }
-    set(entry, "uuid", Value::from(get("id")?));
-    set(
+    Yaml::set(entry, "uuid", Value::from(get("id")?));
+    Yaml::set(
         entry,
         "alterId",
         Value::from(
@@ -256,12 +260,12 @@ fn vmess(entry: &mut Mapping, line: &str) -> Option<()> {
                 .unwrap_or(0),
         ),
     );
-    set(
+    Yaml::set(
         entry,
         "cipher",
         Value::from(get("scy").unwrap_or_else(|| "auto".into())),
     );
-    set(entry, "udp", Value::from(true));
+    Yaml::set(entry, "udp", Value::from(true));
 
     let mut params: Params = Params::new();
     for (from, to) in [
@@ -283,10 +287,10 @@ fn vmess(entry: &mut Mapping, line: &str) -> Option<()> {
 }
 
 fn trojan(entry: &mut Mapping, line: &str, params: &Params) -> Option<()> {
-    let password = link::userinfo_of(line).filter(|value| !value.is_empty())?;
-    set(entry, "type", Value::from("trojan"));
-    set(entry, "password", Value::from(password));
-    set(entry, "udp", Value::from(true));
+    let password = LinkParser::userinfo_of(line).filter(|value| !value.is_empty())?;
+    Yaml::set(entry, "type", Value::from("trojan"));
+    Yaml::set(entry, "password", Value::from(password));
+    Yaml::set(entry, "udp", Value::from(true));
     // Поля `tls` у trojan в ядре **нет**: шифрование там всегда, и ключ был бы молча
     // проигнорирован. Поэтому `security(..)` зовём после того, как он уже выставлен,
     // и тут же его снимаем — общая часть про SNI и ALPN нужна, а флаг нет.
@@ -298,29 +302,29 @@ fn trojan(entry: &mut Mapping, line: &str, params: &Params) -> Option<()> {
 
 /// `ss://` — метод и пароль либо открытым текстом, либо base64 до `@`.
 fn shadowsocks(entry: &mut Mapping, line: &str) -> Option<()> {
-    let userinfo = link::userinfo_of(line)?;
+    let userinfo = LinkParser::userinfo_of(line)?;
     let plain = if userinfo.contains(':') {
         userinfo.clone()
     } else {
-        crate::nodes::codec::decode_text(&userinfo)?
+        crate::nodes::codec::Base64::decode_text(&userinfo)?
     };
     let (cipher, password) = plain.split_once(':')?;
-    set(entry, "type", Value::from("ss"));
-    set(entry, "cipher", Value::from(cipher));
-    set(entry, "password", Value::from(password));
-    set(entry, "udp", Value::from(true));
+    Yaml::set(entry, "type", Value::from("ss"));
+    Yaml::set(entry, "cipher", Value::from(cipher));
+    Yaml::set(entry, "password", Value::from(password));
+    Yaml::set(entry, "udp", Value::from(true));
     Some(())
 }
 
 fn hysteria2(entry: &mut Mapping, line: &str, params: &Params) -> Option<()> {
-    let password = link::userinfo_of(line).filter(|value| !value.is_empty())?;
-    set(entry, "type", Value::from("hysteria2"));
-    set(entry, "password", Value::from(password));
+    let password = LinkParser::userinfo_of(line).filter(|value| !value.is_empty())?;
+    Yaml::set(entry, "type", Value::from("hysteria2"));
+    Yaml::set(entry, "password", Value::from(password));
     if let Some(obfs) = text(params, "obfs").filter(|obfs| obfs != "none") {
-        set(entry, "obfs", Value::from(obfs));
+        Yaml::set(entry, "obfs", Value::from(obfs));
         if let Some(value) = text(params, "obfs-password").or_else(|| text(params, "obfs_password"))
         {
-            set(entry, "obfs-password", Value::from(value));
+            Yaml::set(entry, "obfs-password", Value::from(value));
         }
     }
     // У hysteria2 то же самое: шифрование всегда, поля `tls` в его опциях нет.
@@ -330,32 +334,32 @@ fn hysteria2(entry: &mut Mapping, line: &str, params: &Params) -> Option<()> {
 }
 
 fn socks(entry: &mut Mapping, line: &str) {
-    set(entry, "type", Value::from("socks5"));
-    set(entry, "udp", Value::from(true));
+    Yaml::set(entry, "type", Value::from("socks5"));
+    Yaml::set(entry, "udp", Value::from(true));
     credentials(entry, line);
 }
 
 fn http(entry: &mut Mapping, line: &str, scheme: &str) {
-    set(entry, "type", Value::from("http"));
+    Yaml::set(entry, "type", Value::from("http"));
     if scheme == "https" {
-        set(entry, "tls", Value::from(true));
+        Yaml::set(entry, "tls", Value::from(true));
     }
     credentials(entry, line);
 }
 
 /// Логин и пароль до `@` — открытым текстом или base64, как их пишут обе стороны.
 fn credentials(entry: &mut Mapping, line: &str) {
-    let Some(userinfo) = link::userinfo_of(line).filter(|value| !value.is_empty()) else {
+    let Some(userinfo) = LinkParser::userinfo_of(line).filter(|value| !value.is_empty()) else {
         return;
     };
     let plain = if userinfo.contains(':') {
         userinfo.clone()
     } else {
-        crate::nodes::codec::decode_text(&userinfo).unwrap_or_else(|| userinfo.clone())
+        crate::nodes::codec::Base64::decode_text(&userinfo).unwrap_or_else(|| userinfo.clone())
     };
     if let Some((user, password)) = plain.split_once(':') {
-        set(entry, "username", Value::from(user));
-        set(entry, "password", Value::from(password));
+        Yaml::set(entry, "username", Value::from(user));
+        Yaml::set(entry, "password", Value::from(password));
     }
 }
 
@@ -366,13 +370,13 @@ fn credentials(entry: &mut Mapping, line: &str) {
 /// `remote-dns-resolve`, а именами занимается свой раздел — половина механизма хуже,
 /// чем его отсутствие.
 fn wireguard(entry: &mut Mapping, line: &str, params: &Params) -> Option<()> {
-    let private = link::userinfo_of(line).filter(|value| !value.is_empty())?;
+    let private = LinkParser::userinfo_of(line).filter(|value| !value.is_empty())?;
     let public = text(params, "publickey").or_else(|| text(params, "publicKey"))?;
-    set(entry, "type", Value::from("wireguard"));
-    set(entry, "private-key", Value::from(private));
-    set(entry, "public-key", Value::from(public));
+    Yaml::set(entry, "type", Value::from("wireguard"));
+    Yaml::set(entry, "private-key", Value::from(private));
+    Yaml::set(entry, "public-key", Value::from(public));
     if let Some(psk) = text(params, "presharedkey").or_else(|| text(params, "presharedKey")) {
-        set(entry, "pre-shared-key", Value::from(psk));
+        Yaml::set(entry, "pre-shared-key", Value::from(psk));
     }
 
     let mut outward = vec![Value::from("0.0.0.0/0")];
@@ -384,23 +388,23 @@ fn wireguard(entry: &mut Mapping, line: &str, params: &Params) -> Option<()> {
     {
         let bare = address.split('/').next().unwrap_or(address);
         if bare.contains(':') {
-            set(entry, "ipv6", Value::from(bare));
+            Yaml::set(entry, "ipv6", Value::from(bare));
             outward.push(Value::from("::/0"));
         } else {
-            set(entry, "ip", Value::from(bare));
+            Yaml::set(entry, "ip", Value::from(bare));
         }
     }
     if let Some(mtu) = text(params, "mtu").and_then(|mtu| mtu.parse::<u32>().ok()) {
-        set(entry, "mtu", Value::from(mtu));
+        Yaml::set(entry, "mtu", Value::from(mtu));
     }
     if let Some(keepalive) = text(params, "keepalive")
         .or_else(|| text(params, "persistentkeepalive"))
         .and_then(|value| value.parse::<u32>().ok())
     {
-        set(entry, "persistent-keepalive", Value::from(keepalive));
+        Yaml::set(entry, "persistent-keepalive", Value::from(keepalive));
     }
-    set(entry, "allowed-ips", Value::Sequence(outward));
-    set(entry, "udp", Value::from(true));
+    Yaml::set(entry, "allowed-ips", Value::Sequence(outward));
+    Yaml::set(entry, "udp", Value::from(true));
     Some(())
 }
 
@@ -416,7 +420,7 @@ mod tests {
     #[test]
     fn a_reality_link_becomes_the_entry_the_core_reads() {
         let line = "vless://11111111-2222-3333-4444-555555555555@a.example:443?type=tcp&security=reality&pbk=PBK&sid=SID&fp=chrome&sni=www.microsoft.com&flow=xtls-rprx-vision&encryption=none&spx=%2F#Швеция";
-        let entry = to_entry(line).expect("разобрали");
+        let entry = Converter::to_entry(line).expect("разобрали");
         assert_eq!(field(&entry, "type").unwrap(), "vless");
         assert_eq!(field(&entry, "name").unwrap(), "Швеция");
         assert_eq!(field(&entry, "server").unwrap(), "a.example");
@@ -439,7 +443,7 @@ mod tests {
     /// Транспорт пишется только свой: путь ws при gRPC ядро не прочитает.
     #[test]
     fn only_the_chosen_transport_travels() {
-        let ws = to_entry("vless://u@a.example:443?type=ws&path=%2Fray&host=b.example&security=tls&sni=b.example&allowInsecure=1#N").unwrap();
+        let ws = Converter::to_entry("vless://u@a.example:443?type=ws&path=%2Fray&host=b.example&security=tls&sni=b.example&allowInsecure=1#N").unwrap();
         let opts = field(&ws, "ws-opts").unwrap().as_mapping().unwrap();
         assert_eq!(opts.get(Value::from("path")).unwrap(), "/ray");
         assert_eq!(
@@ -456,8 +460,10 @@ mod tests {
             Some(true)
         );
 
-        let grpc = to_entry("vless://u@a.example:443?type=grpc&serviceName=gun&path=%2Fнеправда#N")
-            .unwrap();
+        let grpc = Converter::to_entry(
+            "vless://u@a.example:443?type=grpc&serviceName=gun&path=%2Fнеправда#N",
+        )
+        .unwrap();
         assert!(field(&grpc, "ws-opts").is_none(), "{grpc:?}");
         assert_eq!(
             field(&grpc, "grpc-opts")
@@ -479,7 +485,7 @@ mod tests {
             "vmess://{}",
             base64::engine::general_purpose::STANDARD.encode(json)
         );
-        let entry = to_entry(&line).expect("разобрали");
+        let entry = Converter::to_entry(&line).expect("разобрали");
         assert_eq!(field(&entry, "type").unwrap(), "vmess");
         assert_eq!(field(&entry, "name").unwrap(), "Токио");
         assert_eq!(field(&entry, "port").unwrap(), 8443);
@@ -491,9 +497,10 @@ mod tests {
 
     #[test]
     fn trojan_hysteria2_and_shadowsocks_carry_their_secret() {
-        let trojan =
-            to_entry("trojan://pa%40ss@a.example:443?sni=a.example&alpn=h2%2Chttp%2F1.1#T")
-                .unwrap();
+        let trojan = Converter::to_entry(
+            "trojan://pa%40ss@a.example:443?sni=a.example&alpn=h2%2Chttp%2F1.1#T",
+        )
+        .unwrap();
         assert_eq!(field(&trojan, "password").unwrap(), "pa@ss");
         assert!(
             field(&trojan, "tls").is_none(),
@@ -505,7 +512,7 @@ mod tests {
             2
         );
 
-        let hy2 = to_entry("hysteria2://pw@a.example:8443?obfs=salamander&obfs-password=op&sni=a.example&insecure=1#H").unwrap();
+        let hy2 = Converter::to_entry("hysteria2://pw@a.example:8443?obfs=salamander&obfs-password=op&sni=a.example&insecure=1#H").unwrap();
         assert_eq!(field(&hy2, "type").unwrap(), "hysteria2");
         assert_eq!(field(&hy2, "obfs").unwrap(), "salamander");
         assert_eq!(field(&hy2, "obfs-password").unwrap(), "op");
@@ -516,7 +523,7 @@ mod tests {
 
         use base64::Engine;
         let userinfo = base64::engine::general_purpose::STANDARD.encode("aes-256-gcm:secret");
-        let ss = to_entry(&format!("ss://{userinfo}@a.example:8388#S")).unwrap();
+        let ss = Converter::to_entry(&format!("ss://{userinfo}@a.example:8388#S")).unwrap();
         assert_eq!(field(&ss, "cipher").unwrap(), "aes-256-gcm");
         assert_eq!(field(&ss, "password").unwrap(), "secret");
     }
@@ -526,7 +533,7 @@ mod tests {
     #[test]
     fn a_wireguard_link_gets_the_whole_route() {
         let line = "wireguard://cHJpdmF0ZQ%3D%3D@a.example:51820?publickey=cHVibGlj&address=10.0.0.2%2F32,fd00::2%2F128&mtu=1420#W";
-        let entry = to_entry(line).unwrap();
+        let entry = Converter::to_entry(line).unwrap();
         assert_eq!(field(&entry, "ip").unwrap(), "10.0.0.2");
         assert_eq!(field(&entry, "ipv6").unwrap(), "fd00::2");
         assert_eq!(field(&entry, "mtu").unwrap(), 1420);
@@ -545,14 +552,17 @@ mod tests {
             "vless://uuid@a.example#без-порта",
             "не ссылка вовсе",
         ] {
-            assert!(to_entry(line).is_none(), "выдумали запись из «{line}»");
+            assert!(
+                Converter::to_entry(line).is_none(),
+                "выдумали запись из «{line}»"
+            );
         }
     }
 
     /// Имя узла из фрагмента, а порядок ключей — человеческий: по нему запись и читают.
     #[test]
     fn the_entry_reads_in_the_order_a_person_expects() {
-        let entry = to_entry("vless://u@a.example:443?security=tls&sni=s#Имя").unwrap();
+        let entry = Converter::to_entry("vless://u@a.example:443?security=tls&sni=s#Имя").unwrap();
         let keys: Vec<String> = entry
             .keys()
             .filter_map(|key| key.as_str().map(str::to_string))

@@ -1,9 +1,10 @@
 //! Каталог узлов, прочитанный из опубликованных источников.
 
-use crate::nodes::entries;
-use crate::nodes::link;
-use crate::nodes::source_build::identity_of;
-use crate::nodes::sources::{built_proxies, content, list};
+use crate::nodes::entries::EntryPatch;
+use crate::nodes::link::LinkParser;
+use crate::nodes::source_build::SourceBuilder;
+use crate::nodes::sources::built_proxies;
+use crate::nodes::sources::SourceStore;
 
 /// Узел так, как он виден **из файла**. Это и есть состав списка (D-061): полный,
 /// в порядке файла и доступный до подключения.
@@ -72,62 +73,69 @@ fn kind_of(raw: &str) -> String {
     }
 }
 
-/// Узлы всех источников, прочитанные прямо с диска. **Это и есть список** (D-061).
-///
-/// Порядок — источники, как их отдаёт `list()`, и внутри каждого порядок строк файла:
-/// он не меняется от опроса к опросу и не зависит от того, работает ли ядро. Задержки
-/// здесь нет: её приносит отдельный замер (D-062).
-pub fn nodes() -> Vec<crate::nodes::Node> {
-    list()
-        .into_iter()
-        .flat_map(|source| {
-            let id = source.id;
-            // Правки читаем **раз на источник**, а не на узел: список опрашивается
-            // каждую секунду, а узлов в подписке бывает две сотни.
-            let written = entries::load(&id);
-            let keys: Vec<Option<String>> = built_proxies(&id).iter().map(identity_of).collect();
-            let mine = id.clone();
-            let known = parse(&content(&id))
-                .into_iter()
-                .enumerate()
-                .map(move |(at, parsed)| {
-                    let identity = keys.get(at).cloned().flatten();
-                    let recoded = identity
-                        .as_ref()
-                        .is_some_and(|key| written.get(key).is_some_and(|patch| !patch.is_empty()));
-                    crate::nodes::Node {
-                        name: parsed.name,
-                        kind: parsed.kind,
-                        source: mine.clone(),
-                        supported: parsed.supported,
+pub struct SourceCatalog;
+
+impl SourceCatalog {
+    /// Узлы всех источников, прочитанные прямо с диска. **Это и есть список** (D-061).
+    ///
+    /// Порядок — источники, как их отдаёт `list()`, и внутри каждого порядок строк файла:
+    /// он не меняется от опроса к опросу и не зависит от того, работает ли ядро. Задержки
+    /// здесь нет: её приносит отдельный замер (D-062).
+    pub fn nodes() -> Vec<crate::nodes::Node> {
+        SourceStore::list()
+            .into_iter()
+            .flat_map(|source| {
+                let id = source.id;
+                // Правки читаем **раз на источник**, а не на узел: список опрашивается
+                // каждую секунду, а узлов в подписке бывает две сотни.
+                let written = EntryPatch::load(&id);
+                let keys: Vec<Option<String>> = built_proxies(&id)
+                    .iter()
+                    .map(SourceBuilder::identity_of)
+                    .collect();
+                let mine = id.clone();
+                let known = parse(&SourceStore::content(&id))
+                    .into_iter()
+                    .enumerate()
+                    .map(move |(at, parsed)| {
+                        let identity = keys.get(at).cloned().flatten();
+                        let recoded = identity.as_ref().is_some_and(|key| {
+                            written.get(key).is_some_and(|patch| !patch.is_empty())
+                        });
+                        crate::nodes::Node {
+                            name: parsed.name,
+                            kind: parsed.kind,
+                            source: mine.clone(),
+                            supported: parsed.supported,
+                            delay: None,
+                            method: None,
+                            fallback: false,
+                            address: parsed.address,
+                            // Страну дописывает `enrich`: её знает кэш, а не файл источника.
+                            country: None,
+                            edited: recoded,
+                        }
+                    });
+                // Чего разбор не осилил — видно, но не работает (D-122). Не показать вовсе
+                // значило бы, что узел пропал молча.
+                let left = id.clone();
+                let missed = source
+                    .skipped
+                    .into_iter()
+                    .map(move |line| crate::nodes::Node {
+                        name: LinkParser::name_of(&line).unwrap_or_else(|| "без имени".into()),
+                        kind: kind_of(line.split("://").next().unwrap_or_default()),
+                        source: left.clone(),
+                        supported: false,
                         delay: None,
                         method: None,
                         fallback: false,
-                        address: parsed.address,
-                        // Страну дописывает `enrich`: её знает кэш, а не файл источника.
+                        address: LinkParser::endpoint_of(&line),
                         country: None,
-                        edited: recoded,
-                    }
-                });
-            // Чего разбор не осилил — видно, но не работает (D-122). Не показать вовсе
-            // значило бы, что узел пропал молча.
-            let left = id.clone();
-            let missed = source
-                .skipped
-                .into_iter()
-                .map(move |line| crate::nodes::Node {
-                    name: link::name_of(&line).unwrap_or_else(|| "без имени".into()),
-                    kind: kind_of(line.split("://").next().unwrap_or_default()),
-                    source: left.clone(),
-                    supported: false,
-                    delay: None,
-                    method: None,
-                    fallback: false,
-                    address: link::endpoint_of(&line),
-                    country: None,
-                    edited: false,
-                });
-            known.chain(missed)
-        })
-        .collect()
+                        edited: false,
+                    });
+                known.chain(missed)
+            })
+            .collect()
+    }
 }

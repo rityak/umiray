@@ -9,40 +9,45 @@
 
 use serde_yaml::Value;
 
-use crate::config::files::{self, CLIENT};
+use crate::config::files::Documents;
+use crate::config::files::CLIENT;
 use crate::error::{AppError, Result};
 use crate::nodes::ping::Method;
-use crate::yaml::{set, top_mapping};
+use crate::yaml::Yaml;
 
 /// Ключ поля. Нужен обеим сторонам — и чтению, и записи.
 const PING: &str = "ping";
 
-/// Чем мерить, сколько до сервера (D-069).
-///
-/// Файл правится руками, поэтому это **граница с недоверенными данными**: непонятное
-/// значение — ошибка с внятным текстом, а не молчаливое умолчание. Отсутствие поля —
-/// другое дело: его просто ещё не написали.
-pub fn ping() -> Result<Method> {
-    let map = top_mapping(&files::read(CLIENT)?)?;
-    let Some(value) = map.get(Value::from(PING)) else {
-        return Ok(Method::default());
-    };
-    serde_yaml::from_value(value.clone()).map_err(|_| {
+pub struct ClientConfig;
+
+impl ClientConfig {
+    /// Чем мерить, сколько до сервера (D-069).
+    ///
+    /// Файл правится руками, поэтому это **граница с недоверенными данными**: непонятное
+    /// значение — ошибка с внятным текстом, а не молчаливое умолчание. Отсутствие поля —
+    /// другое дело: его просто ещё не написали.
+    pub fn ping() -> Result<Method> {
+        let map = Yaml::top_mapping(&Documents::read(CLIENT)?)?;
+        let Some(value) = map.get(Value::from(PING)) else {
+            return Ok(Method::default());
+        };
+        serde_yaml::from_value(value.clone()).map_err(|_| {
         AppError::invalid(format!(
             "В client.yaml непонятное значение ping: {}. Ожидается icmp, tcp, proxy или proxy-keepalive.",
             serde_yaml::to_string(value).unwrap_or_default().trim()
         ))
     })
-}
+    }
 
-/// Записать способ, не тронув ничего лишнего.
-pub fn set_ping(method: Method) -> Result<()> {
-    let mut map = top_mapping(&files::read(CLIENT)?)?;
-    let value = serde_yaml::to_value(method).map_err(|e| AppError::invalid(e.to_string()))?;
-    set(&mut map, PING, value);
-    let text = serde_yaml::to_string(&Value::Mapping(map))
-        .map_err(|e| AppError::invalid(e.to_string()))?;
-    files::write(CLIENT, &text)
+    /// Записать способ, не тронув ничего лишнего.
+    pub fn set_ping(method: Method) -> Result<()> {
+        let mut map = Yaml::top_mapping(&Documents::read(CLIENT)?)?;
+        let value = serde_yaml::to_value(method).map_err(|e| AppError::invalid(e.to_string()))?;
+        Yaml::set(&mut map, PING, value);
+        let text = serde_yaml::to_string(&Value::Mapping(map))
+            .map_err(|e| AppError::invalid(e.to_string()))?;
+        Documents::write(CLIENT, &text)
+    }
 }
 
 #[cfg(test)]
@@ -52,7 +57,7 @@ mod tests {
     /// Разбор отделён от диска: правило проверяется обычным `cargo test`, не трогая
     /// настоящий `%LOCALAPPDATA%` пользователя.
     fn of(text: &str) -> Result<Method> {
-        let map = top_mapping(text).unwrap();
+        let map = Yaml::top_mapping(text).unwrap();
         match map.get(Value::from(PING)) {
             None => Ok(Method::default()),
             Some(value) => serde_yaml::from_value(value.clone())
@@ -82,7 +87,7 @@ mod tests {
     /// Шаблон — это документация: значение в нём обязано читаться тем же кодом.
     #[test]
     fn the_template_says_a_value_the_client_understands() {
-        let template = files::template(CLIENT).unwrap();
+        let template = Documents::template(CLIENT).unwrap();
         assert_eq!(of(template).unwrap(), Method::Tcp);
     }
 }

@@ -3,9 +3,9 @@
 use serde::Serialize;
 use tauri::State;
 
-use crate::app::connect;
 use crate::app::state::AppState;
 use crate::config::presets;
+use crate::config::presets::PresetStore;
 use crate::error::Result;
 
 /// Наборы вместе с тем, какой из них сейчас применён: список без этого ответа
@@ -20,8 +20,8 @@ pub struct PresetList {
 #[tauri::command]
 pub fn presets_list(state: State<AppState>) -> PresetList {
     PresetList {
-        presets: presets::list(),
-        active: state.applied_preset(),
+        presets: PresetStore::list(),
+        active: state.routing.applied_preset(&state),
     }
 }
 
@@ -29,7 +29,7 @@ pub fn presets_list(state: State<AppState>) -> PresetList {
 /// Применённым он не становится: применение рвёт связь, и решает его человек.
 #[tauri::command]
 pub fn presets_create(state: State<AppState>) -> Result<presets::Preset> {
-    state.new_preset()
+    state.presets.create()
 }
 
 /// Применить набор. Его документы ядро читает на старте (D-010), поэтому работающее
@@ -40,19 +40,15 @@ pub async fn presets_select(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<()> {
-    state.select_preset(&id)?;
-    if state.supervisor.status().running {
-        connect::restart(&app, &state).await?;
-    }
-    Ok(())
+    state.presets.select(&app, &state, &id).await
 }
 
 #[tauri::command]
 pub fn presets_rename(id: String, name: String) -> Result<presets::Preset> {
-    presets::rename(&id, &name)
+    PresetStore::rename(&id, &name)
 }
 
 #[tauri::command]
 pub fn presets_delete(id: String, state: State<AppState>) -> Result<()> {
-    state.delete_preset(&id)
+    state.presets.delete(&state, &id)
 }

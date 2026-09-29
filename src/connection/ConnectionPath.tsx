@@ -1,12 +1,13 @@
 import { Server } from "lucide-react";
 import { memo } from "react";
-import { Badge, Card, CopyButton, Field, Item, PowerButton, SegmentedControl, Text } from "rootik";
+import { Badge, Card, CopyButton, Field, Item, SegmentedControl } from "rootik";
 import * as api from "../api";
 import { t, tk } from "../i18n";
 import Flag from "../shell/Flag";
 import { hide } from "../shell/secret";
 import Uptime from "../shell/Uptime";
 import { delayTone } from "./NodeDelay";
+import PowerRow from "./PowerRow";
 
 type Props = {
   status: api.Status;
@@ -115,31 +116,24 @@ export default memo(function ConnectionPath({
     // The state already serves as a heading; keep room for the chart below.
     <Card padding="sm" aria-label={t("Connection")}>
       <div className="flex flex-col gap-3">
-        {/* Keep controls compact to leave height for Traffic. */}
-        <div className="flex items-center gap-4">
-          <PowerButton
-            label="VPN"
-            size="sm"
-            on={status.running}
-            pending={powering}
-            tone={view.tone === "error" ? "danger" : "accent"}
-            disabled={busy && !powering}
-            onChange={onPower}
-          />
-          <div className="flex min-w-0 flex-col gap-1">
-            <span className="um-headline">{headline(status, powering)}</span>
-            <Text tone="muted" size="xs" className="block">
-              {running !== null ? (
-                <>
-                  {api.MODE_LABEL[running]} ·{" "}
-                  <Uptime started={status.started} fallback={t("just now")} />
-                </>
-              ) : (
-                what(status)
-              )}
-            </Text>
-          </div>
-        </div>
+        <PowerRow
+          on={status.running}
+          powering={powering}
+          failed={view.tone === "error"}
+          disabled={busy && !powering}
+          headline={headline(status, powering)}
+          detail={
+            running !== null ? (
+              <>
+                {api.MODE_LABEL[running]} ·{" "}
+                <Uptime started={status.started} fallback={t("just now")} />
+              </>
+            ) : (
+              what(status)
+            )
+          }
+          onPower={onPower}
+        />
 
         <Item
           className="w-full"

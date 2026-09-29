@@ -25,7 +25,9 @@ use std::sync::Mutex;
 
 use crate::error::{AppError, Result};
 use crate::paths;
-use crate::system::elevation;
+use crate::paths::Paths;
+use crate::system::elevation::Elevation;
+use crate::system::install::Installation;
 
 /// Имя задачи. Совпадает с названием приложения — по нему её и узнают в планировщике.
 pub const NAME: &str = paths::APP_NAME;
@@ -177,139 +179,164 @@ fn unescaped(text: &str) -> String {
         .replace("&amp;", "&")
 }
 
-/// Заведена ли задача. Именно заведена — работает она или нет, отвечает `usable`.
-pub fn exists() -> bool {
-    known().exists
+pub struct SchedulerTask;
+
+impl SchedulerTask {
+    /// Заведена ли задача. Именно заведена — работает она или нет, отвечает `usable`.
+    pub fn exists() -> bool {
+        known().exists
+    }
+
+    /// Поднимет ли задача клиента на самом деле (B-015).
+    ///
+    /// `schtasks /Run` докладывает об успехе и тогда, когда файла по `<Command>` больше нет:
+    /// планировщик берётся запустить, не находит и молча сдаётся. Клиент к этому моменту уже
+    /// вышел — окна нет, значка нет, сообщения нет. Поэтому «есть задача» и «задача работает»
+    /// с этого момента разные вопросы, и `handoff` спрашивает второй.
+    ///
+    /// Путь **не вычитался** — считаем задачу рабочей: описание приходит в кодировке, которую
+    /// `schtasks` про себя же и путает (GOTCHAS), и ошибка разбора не повод выключить человеку
+    /// «всегда от администратора». Протухла — только когда путь есть и файла по нему нет.
+    pub fn usable() -> bool {
+        let known = known();
+        known.exists
+            && !known
+                .command
+                .as_deref()
+                .is_some_and(|exe| !Path::new(exe).exists())
+    }
+
+    /// Поднимает ли задача клиента при входе в систему.
+    pub fn at_logon() -> bool {
+        known().at_logon
+    }
+
+    /// Привести задачу к желаемому виду.
+    ///
+    /// `at_logon` — поднимать ли клиента при входе в систему. Без него задача остаётся,
+    /// но триггеров не имеет: запустить её можно только по требованию, чем и пользуется
+    /// `handoff`.
+    pub fn apply(at_logon: bool) -> Result<()> {
+        let exe = std::env::current_exe()?;
+        let path = Paths::root().join("task.xml");
+        Paths::ensure_root()?;
+        std::fs::write(&path, utf16(&document(&exe, at_logon)))?;
+
+        let file = path.to_string_lossy().to_string();
+        let out = schtasks(&["/Create", "/TN", NAME, "/XML", &file, "/F"])?;
+        forget();
+        // Файл — только переносчик: оставлять описание задачи рядом с конфигами незачем,
+        // а на ошибке оно ещё и вводило бы в заблуждение.
+        let _ = std::fs::remove_file(&path);
+
+        if !out.status.success() {
+            return Err(AppError::NeedsElevation {
+                message: format!(
+                    "Не удалось завести задачу в планировщике: {}",
+                    reason(&out).unwrap_or_else(|| "нужны права администратора".into())
+                ),
+            });
+        }
+        Ok(())
+    }
+
+    /// Убрать задачу. Отсутствие — это успех: мы добивались именно того, чтобы её не было.
+    pub fn remove() -> Result<()> {
+        if !SchedulerTask::exists() {
+            return Ok(());
+        }
+        let out = schtasks(&["/Delete", "/TN", NAME, "/F"])?;
+        forget();
+        if !out.status.success() {
+            return Err(AppError::NeedsElevation {
+                message: format!(
+                    "Не удалось убрать задачу из планировщика: {}",
+                    reason(&out).unwrap_or_else(|| "нужны права администратора".into())
+                ),
+            });
+        }
+        Ok(())
+    }
+
+    /// Запустить задачу и тем самым поднять вторую копию — уже с правами.
+    ///
+    /// UAC при этом не спрашивается: права даёт сама задача. Зовётся из `main`, до того
+    /// как поднимется окно, и вызывающий обязан после этого выйти.
+    pub fn run() -> Result<()> {
+        let out = schtasks(&["/Run", "/TN", NAME])?;
+        if out.status.success() {
+            return Ok(());
+        }
+        Err(AppError::io(format!(
+            "Задача в планировщике есть, но не запустилась: {}",
+            reason(&out).unwrap_or_else(|| "причина неизвестна".into())
+        )))
+    }
+
+    /// Отдать запуск задаче: клиент должен работать с правами, а работает без них.
+    ///
+    /// Отвечает `true`, когда вторая копия поднята, — тогда этой пора выйти. Место вызова
+    /// обязано быть самым первым в `main`: вторая копия поднимется через мгновение, и если
+    /// эта успеет объявиться плагином одиночного запуска, новая просто покажет ей окно
+    /// и умрёт — то есть повышения так и не случится.
+    pub fn handoff() -> bool {
+        // Предохранитель от петли. Запущенного задачей не перезапускаем **никогда** —
+        // даже если прав почему-то не досталось: иначе клиент поднимал бы сам себя,
+        // пока не кончится терпение у машины.
+        if std::env::args().any(|arg| arg == LAUNCHED) {
+            return false;
+        }
+        if !SchedulerTask::usable() {
+            return false;
+        }
+        let task = known();
+        if let (Some(command), Ok(current)) = (task.command.as_deref(), std::env::current_exe()) {
+            if !same_exe(Path::new(command), &current) {
+                // Only the installed release (or a debug build) may retarget its own task.
+                if !cfg!(debug_assertions) && !Installation::is_installed(&current) {
+                    return false;
+                }
+                if Elevation::is_elevated() {
+                    let _ = SchedulerTask::apply(task.at_logon);
+                    return false;
+                }
+                return Elevation::relaunch_as_admin().is_ok();
+            }
+        }
+        if Elevation::is_elevated() {
+            return false;
+        }
+        // Метка — до запуска: повышенная копия может прочитать её раньше, чем `schtasks`
+        // вернёт ответ. Не записалась — окно при `smart` не покажется, но клиент поднимется.
+        let _ = Paths::ensure_root().and_then(|()| std::fs::write(handed_mark(), b""));
+        SchedulerTask::run().is_ok()
+    }
+
+    /// Передан ли этот запуск руками. Метку снимает в любом случае: оставленная, она выдала бы
+    /// следующий вход в систему за ручной запуск.
+    pub fn handed_over() -> bool {
+        let mark = handed_mark();
+        let fresh = std::fs::metadata(&mark)
+            .and_then(|meta| meta.modified())
+            .is_ok_and(|at| at.elapsed().is_ok_and(|age| age < HANDED_FRESH));
+        let _ = std::fs::remove_file(mark);
+        fresh
+    }
 }
 
-/// Поднимет ли задача клиента на самом деле (B-015).
-///
-/// `schtasks /Run` докладывает об успехе и тогда, когда файла по `<Command>` больше нет:
-/// планировщик берётся запустить, не находит и молча сдаётся. Клиент к этому моменту уже
-/// вышел — окна нет, значка нет, сообщения нет. Поэтому «есть задача» и «задача работает»
-/// с этого момента разные вопросы, и `handoff` спрашивает второй.
-///
-/// Путь **не вычитался** — считаем задачу рабочей: описание приходит в кодировке, которую
-/// `schtasks` про себя же и путает (GOTCHAS), и ошибка разбора не повод выключить человеку
-/// «всегда от администратора». Протухла — только когда путь есть и файла по нему нет.
-pub fn usable() -> bool {
-    let known = known();
-    known.exists
-        && !known
-            .command
-            .as_deref()
-            .is_some_and(|exe| !Path::new(exe).exists())
-}
-
-/// Поднимает ли задача клиента при входе в систему.
-pub fn at_logon() -> bool {
-    known().at_logon
-}
-
-/// Привести задачу к желаемому виду.
-///
-/// `at_logon` — поднимать ли клиента при входе в систему. Без него задача остаётся,
-/// но триггеров не имеет: запустить её можно только по требованию, чем и пользуется
-/// `handoff`.
-pub fn apply(at_logon: bool) -> Result<()> {
-    let exe = std::env::current_exe()?;
-    let path = paths::root().join("task.xml");
-    paths::ensure_root()?;
-    std::fs::write(&path, utf16(&document(&exe, at_logon)))?;
-
-    let file = path.to_string_lossy().to_string();
-    let out = schtasks(&["/Create", "/TN", NAME, "/XML", &file, "/F"])?;
-    forget();
-    // Файл — только переносчик: оставлять описание задачи рядом с конфигами незачем,
-    // а на ошибке оно ещё и вводило бы в заблуждение.
-    let _ = std::fs::remove_file(&path);
-
-    if !out.status.success() {
-        return Err(AppError::NeedsElevation {
-            message: format!(
-                "Не удалось завести задачу в планировщике: {}",
-                reason(&out).unwrap_or_else(|| "нужны права администратора".into())
-            ),
-        });
-    }
-    Ok(())
-}
-
-/// Убрать задачу. Отсутствие — это успех: мы добивались именно того, чтобы её не было.
-pub fn remove() -> Result<()> {
-    if !exists() {
-        return Ok(());
-    }
-    let out = schtasks(&["/Delete", "/TN", NAME, "/F"])?;
-    forget();
-    if !out.status.success() {
-        return Err(AppError::NeedsElevation {
-            message: format!(
-                "Не удалось убрать задачу из планировщика: {}",
-                reason(&out).unwrap_or_else(|| "нужны права администратора".into())
-            ),
-        });
-    }
-    Ok(())
-}
-
-/// Запустить задачу и тем самым поднять вторую копию — уже с правами.
-///
-/// UAC при этом не спрашивается: права даёт сама задача. Зовётся из `main`, до того
-/// как поднимется окно, и вызывающий обязан после этого выйти.
-pub fn run() -> Result<()> {
-    let out = schtasks(&["/Run", "/TN", NAME])?;
-    if out.status.success() {
-        return Ok(());
-    }
-    Err(AppError::io(format!(
-        "Задача в планировщике есть, но не запустилась: {}",
-        reason(&out).unwrap_or_else(|| "причина неизвестна".into())
-    )))
-}
-
-/// Отдать запуск задаче: клиент должен работать с правами, а работает без них.
-///
-/// Отвечает `true`, когда вторая копия поднята, — тогда этой пора выйти. Место вызова
-/// обязано быть самым первым в `main`: вторая копия поднимется через мгновение, и если
-/// эта успеет объявиться плагином одиночного запуска, новая просто покажет ей окно
-/// и умрёт — то есть повышения так и не случится.
-pub fn handoff() -> bool {
-    // Предохранитель от петли. Запущенного задачей не перезапускаем **никогда** —
-    // даже если прав почему-то не досталось: иначе клиент поднимал бы сам себя,
-    // пока не кончится терпение у машины.
-    if std::env::args().any(|arg| arg == LAUNCHED) {
-        return false;
-    }
-    if elevation::is_elevated() || !usable() {
-        return false;
-    }
-    // Метка — до запуска: повышенная копия может прочитать её раньше, чем `schtasks`
-    // вернёт ответ. Не записалась — окно при `smart` не покажется, но клиент поднимется.
-    let _ = paths::ensure_root().and_then(|()| std::fs::write(handed_mark(), b""));
-    run().is_ok()
+fn same_exe(left: &Path, right: &Path) -> bool {
+    std::fs::canonicalize(left).ok() == std::fs::canonicalize(right).ok()
 }
 
 /// Метка «запуск передан руками» (D-129). Вход в систему и передача прав поднимают задачу
 /// одной и той же командой, и повышенной копии больше не по чему их различить.
 fn handed_mark() -> std::path::PathBuf {
-    paths::root().join("handoff")
+    Paths::root().join("handoff")
 }
 
 /// Сколько метка свежая. Повышенная копия встаёт за секунды; метка старше — от передачи,
 /// которая не дошла или ушла в уже работающую копию.
 const HANDED_FRESH: std::time::Duration = std::time::Duration::from_secs(30);
-
-/// Передан ли этот запуск руками. Метку снимает в любом случае: оставленная, она выдала бы
-/// следующий вход в систему за ручной запуск.
-pub fn handed_over() -> bool {
-    let mark = handed_mark();
-    let fresh = std::fs::metadata(&mark)
-        .and_then(|meta| meta.modified())
-        .is_ok_and(|at| at.elapsed().is_ok_and(|age| age < HANDED_FRESH));
-    let _ = std::fs::remove_file(mark);
-    fresh
-}
 
 /// Первая внятная строка ответа `schtasks`. Он пишет по-разному в stdout и stderr,
 /// поэтому смотрим туда, где что-то есть.

@@ -1,23 +1,12 @@
-import { CornerDownRight, Plus, SearchCheck } from "lucide-react";
+import { CornerDownRight, Plus } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  Badge,
-  Button,
-  Card,
-  ChipGroup,
-  Divider,
-  EmptyState,
-  SearchInput,
-  Stat,
-  Text,
-} from "rootik";
+import { Button, Card, ChipGroup, Divider, EmptyState, Stat, Text } from "rootik";
 import * as api from "../api";
 import { useCached } from "../hooks/useCached";
 import { t } from "../i18n";
 import { failure, type Message } from "../shell/Banner";
 import BuiltinRules from "./BuiltinRules";
 import { targetLook } from "./kinds";
-import { hits } from "./probe";
 import RuleRow from "./RuleRow";
 import TargetPicker from "./TargetPicker";
 
@@ -73,7 +62,6 @@ export default function RulesForm({ text, onDraft, onMessage, onPending }: Props
   /// состав узлов знает каталог источников, а не документ.
   const [nodes, setNodes] = useCached<string[]>("rules.nodes", []);
   const [filter, setFilter] = useState("all");
-  const [probe, setProbe] = useState("");
   const [refused, setRefused] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
   const revision = useRef(0);
@@ -178,7 +166,6 @@ export default function RulesForm({ text, onDraft, onMessage, onPending }: Props
   ]).filter((target) => !nodes.includes(target));
   const kinds = unique([...KINDS, ...routing.rules.map((rule) => rule.kind)]);
   const lines = routing.rules.reduce((sum, rule) => sum + rule.values.length, 0);
-  const answer = hits(routing.rules, probe);
   const seen = unique(routing.rules.map((rule) => rule.target));
   const shown = routing.rules
     .map((rule, index) => ({ rule, index }))
@@ -201,7 +188,6 @@ export default function RulesForm({ text, onDraft, onMessage, onPending }: Props
   const past = routing.rules.filter((rule) => rule.target === "DIRECT").length;
   const blocked = routing.rules.filter((rule) => rule.target === "REJECT").length;
   const fallback = targetLook(routing.fallback, nodes);
-  const hit = answer.index === -1 ? null : routing.rules[answer.index];
 
   return (
     <div className="flex flex-col gap-3">
@@ -262,7 +248,6 @@ export default function RulesForm({ text, onDraft, onMessage, onPending }: Props
           nodes={nodes}
           first={row.index === 0}
           last={row.index === routing.rules.length - 1}
-          hit={row.index === answer.index}
           open={expanded === row.index}
           onToggle={() => setExpanded((was) => (was === row.index ? null : row.index))}
           onChange={(rule) =>
@@ -325,54 +310,6 @@ export default function RulesForm({ text, onDraft, onMessage, onPending }: Props
           </div>
         }
       />
-
-      {/* Проверка: какое правило сработает на домене. По IP, стране и процессу здесь
-          не проверить — это знает только ядро. */}
-      <Card
-        icon={<SearchCheck />}
-        title={t("Domain route lookup")}
-        description={t("domain rules only; IP, country and process matching require the core")}
-      >
-        <div className="flex flex-col gap-2">
-          <SearchInput
-            className="max-w-[360px]"
-            aria-label={t("Domain to check")}
-            value={probe}
-            placeholder="github.com"
-            onChange={(event) => setProbe(event.target.value)}
-            onClear={() => setProbe("")}
-          />
-          {probe.trim() !== "" && (
-            <div className="flex flex-wrap items-center gap-2">
-              {hit ? (
-                <>
-                  <Badge tone="success">{t("rule {n}", { n: answer.index + 1 })}</Badge>
-                  <Text tone="muted" size="xs" className="block">
-                    {answer.value}
-                  </Text>
-                </>
-              ) : (
-                <Badge tone="neutral">{t("no match → MATCH")}</Badge>
-              )}
-              <CornerDownRight size={14} aria-hidden="true" />
-              {(() => {
-                const target = hit ? hit.target : routing.fallback;
-                const look = targetLook(target, nodes);
-                return (
-                  <Badge tone={look.tone} icon={<look.Icon />}>
-                    {target} · {look.word}
-                  </Badge>
-                );
-              })()}
-              {answer.skipped > 0 && (
-                <Text tone="muted" size="xs" className="block">
-                  {t("IP, country and process rules skipped: {n}", { n: answer.skipped })}
-                </Text>
-              )}
-            </div>
-          )}
-        </div>
-      </Card>
     </div>
   );
 }

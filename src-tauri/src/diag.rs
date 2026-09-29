@@ -5,14 +5,25 @@
 //! вывод. Разница только в том, что читают из `Report`.
 //!
 //! **Это база, а не витрина.** Умный выбор DNS, автоподбор MTU, «починить за меня» —
-//! всё это берёт готовые результаты отсюда (`dns::race`, `dns::spoof_report`) и
+//! всё это берёт готовые результаты отсюда (`DnsProbe::race`, `DnsProbe::spoof_report`) и
 //! добавляет к ним одно действие. Поэтому у утилит два слоя: типизированный замер
-//! (`dns::race` возвращает `Vec<Shot>`) и отчёт для окна (`race_report`). Функция,
+//! (`DnsProbe::race` возвращает `Vec<Shot>`) и отчёт для окна (`race_report`). Функция,
 //! которой нужно решение, а не картинка, берёт первый.
 //!
 //! Добавить утилиту — это запись в `TOOLS` и ветка в `run`. Реестра с указателями
 //! на функции нет намеренно: утилиты асинхронные, и указатель на `async fn` пришлось бы
 //! заворачивать в коробку ради единственного места вызова.
+
+use crate::diag::clock::ClockProbe;
+use crate::diag::config::DryRun;
+use crate::diag::dns::DnsProbe;
+use crate::diag::matrix::Matrix;
+use crate::diag::pmtu::PmtuProbe;
+use crate::diag::speed::SpeedProbe;
+use crate::diag::system::SystemProbe;
+use crate::diag::tun::TunProbe;
+use crate::diag::udp::UdpProbe;
+use crate::diag::web::WebProbe;
 
 mod bench;
 pub mod clock;
@@ -274,7 +285,7 @@ impl Args {
                 return named;
             }
         }
-        crate::collections::sites()
+        crate::collections::Collections::sites()
             .map(|sites| {
                 sites
                     .sites
@@ -305,8 +316,53 @@ fn host_of(url: &str) -> Option<String> {
     (!host.is_empty()).then(|| host.to_string())
 }
 
-pub fn tools() -> Vec<Tool> {
-    TOOLS.to_vec()
+pub struct Toolbox;
+
+impl Toolbox {
+    pub fn tools() -> Vec<Tool> {
+        TOOLS.to_vec()
+    }
+
+    /// Запустить одну утилиту.
+    pub async fn run(id: &str, args: Args) -> Result<Report> {
+        // Незнакомое имя отбиваем здесь, а не веткой разбора: так список из `DISPATCH`
+        // работает на самом деле, а не только в тесте.
+        if !DISPATCH.contains(&id) {
+            return Err(AppError::invalid(format!("Утилиты «{id}» нет")));
+        }
+        match id {
+            "dns-race" => {
+                DnsProbe::race_report(
+                    &args.domain(),
+                    args.timeout(),
+                    args.all,
+                    args.core.unwrap_or(true),
+                )
+                .await
+            }
+            "dns-spoof" => DnsProbe::spoof_report(&args.domains(), args.timeout()).await,
+            "dns-leak" => DnsProbe::leak_report(args.mode.as_deref(), args.timeout()).await,
+            "external-ip" => WebProbe::external(args.proxy).await,
+            "udp-out" => UdpProbe::measure().await,
+            "tls-sni" => WebProbe::tls(&args.hosts()).await,
+            "pmtu" => PmtuProbe::measure(&args.host()),
+            "speed" => SpeedProbe::measure(args.proxy).await,
+            "sites" => WebProbe::sites(None).await,
+            "resolvers" => SystemProbe::resolvers(),
+            "firewall" => SystemProbe::firewall(),
+            "sysproxy" => SystemProbe::proxy(),
+            "routes" => SystemProbe::routes(args.mode.as_deref()),
+            "clock" => ClockProbe::check().await,
+            "matrix" => Matrix::measure().await,
+            "tun-stack" => TunProbe::stacks(args.mode.as_deref()).await,
+            "config-test" => DryRun::test(args.rules.as_deref()),
+            // Сюда попадает только имя из `DISPATCH` без своей ветки — то есть наша ошибка,
+            // а не пользовательская. Тест `the_list_and_the_dispatch_agree` её и ловит.
+            other => Err(AppError::invalid(format!(
+                "Утилита «{other}» объявлена, но не разбирается"
+            ))),
+        }
+    }
 }
 
 /// Что разбирает `run`. Список рядом с самим разбором и сверяется тестом с `TOOLS`:
@@ -332,47 +388,6 @@ const DISPATCH: [&str; 17] = [
     "tun-stack",
     "config-test",
 ];
-
-/// Запустить одну утилиту.
-pub async fn run(id: &str, args: Args) -> Result<Report> {
-    // Незнакомое имя отбиваем здесь, а не веткой разбора: так список из `DISPATCH`
-    // работает на самом деле, а не только в тесте.
-    if !DISPATCH.contains(&id) {
-        return Err(AppError::invalid(format!("Утилиты «{id}» нет")));
-    }
-    match id {
-        "dns-race" => {
-            dns::race_report(
-                &args.domain(),
-                args.timeout(),
-                args.all,
-                args.core.unwrap_or(true),
-            )
-            .await
-        }
-        "dns-spoof" => dns::spoof_report(&args.domains(), args.timeout()).await,
-        "dns-leak" => dns::leak_report(args.mode.as_deref(), args.timeout()).await,
-        "external-ip" => web::external(args.proxy).await,
-        "udp-out" => udp::measure().await,
-        "tls-sni" => web::tls(&args.hosts()).await,
-        "pmtu" => pmtu::measure(&args.host()),
-        "speed" => speed::measure(args.proxy).await,
-        "sites" => web::sites(None).await,
-        "resolvers" => system::resolvers(),
-        "firewall" => system::firewall(),
-        "sysproxy" => system::proxy(),
-        "routes" => system::routes(args.mode.as_deref()),
-        "clock" => clock::check().await,
-        "matrix" => matrix::measure().await,
-        "tun-stack" => tun::stacks(args.mode.as_deref()).await,
-        "config-test" => config::test(args.rules.as_deref()),
-        // Сюда попадает только имя из `DISPATCH` без своей ветки — то есть наша ошибка,
-        // а не пользовательская. Тест `the_list_and_the_dispatch_agree` её и ловит.
-        other => Err(AppError::invalid(format!(
-            "Утилита «{other}» объявлена, но не разбирается"
-        ))),
-    }
-}
 
 /// Стенд наружу — замерам жизненного цикла (S-020): им нужно живое ядро на своих
 /// портах. Ниже по файлу намеренно: `#[cfg(test)]` в начале обрезал бы счётчик
@@ -410,7 +425,7 @@ mod tests {
     /// Незнакомое имя — ошибка, а не тишина.
     #[tokio::test]
     async fn an_unknown_tool_is_refused() {
-        assert!(run("нет-такой", Args::default()).await.is_err());
+        assert!(Toolbox::run("нет-такой", Args::default()).await.is_err());
     }
 
     #[test]

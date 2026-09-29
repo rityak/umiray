@@ -138,7 +138,7 @@ impl Controller {
     /// Порт свободный ищем сами (D-007) — тем же способом, что и служебный вход замера.
     pub fn new() -> Result<Self> {
         Ok(Self {
-            address: format!("127.0.0.1:{}", crate::core::free_port()?),
+            address: format!("127.0.0.1:{}", crate::core::Ports::free_port()?),
             secret: secret()?,
             ledger: Arc::new(Mutex::new(Ledger::default())),
         })
@@ -279,7 +279,7 @@ impl Controller {
 
     /// Перечитать источник без перезапуска ядра (проверено, S-012).
     pub async fn reload(&self, source: &str) -> Result<()> {
-        let response = crate::http::direct()?
+        let response = crate::http::Http::direct()?
             .put(format!(
                 "{}/providers/proxies/{}",
                 self.base(),
@@ -306,7 +306,7 @@ impl Controller {
     /// `POST /restart` здесь не годится и не годится вообще: он меняет PID, надзор сочтёт
     /// это падением и поднимет второе ядро (D-057, S-019).
     pub async fn apply(&self, path: &std::path::Path) -> Result<()> {
-        let response = crate::http::direct()?
+        let response = crate::http::Http::direct()?
             .put(format!("{}/configs", self.base()))
             .bearer_auth(&self.secret)
             .json(&serde_json::json!({ "path": path.display().to_string() }))
@@ -357,7 +357,7 @@ impl Controller {
     /// возвращает ровно ту подмену, от которой `store-fake-ip` и защищает, — делать его
     /// самим значило бы лечить болезнь её же симптомом.
     pub async fn flush_fake_ip(&self) -> Result<()> {
-        let response = crate::http::direct()?
+        let response = crate::http::Http::direct()?
             .post(format!("{}/cache/fakeip/flush", self.base()))
             .bearer_auth(&self.secret)
             .send()
@@ -375,7 +375,7 @@ impl Controller {
     /// Закрыть все открытые соединения (D-143). Приложения переподключатся сами — уже
     /// по новому маршруту.
     pub async fn close_all(&self) -> Result<()> {
-        let response = crate::http::direct()?
+        let response = crate::http::Http::direct()?
             .delete(format!("{}/connections", self.base()))
             .bearer_auth(&self.secret)
             .send()
@@ -399,7 +399,7 @@ impl Controller {
     }
 
     pub async fn select(&self, group: &str, name: &str) -> Result<()> {
-        let response = crate::http::direct()?
+        let response = crate::http::Http::direct()?
             .put(format!("{}/proxies/{}", self.base(), encode(group)))
             .bearer_auth(&self.secret)
             .json(&serde_json::json!({ "name": name }))
@@ -436,7 +436,7 @@ impl Controller {
     }
 
     async fn get(&self, path: &str) -> Result<String> {
-        let response = crate::http::direct()?
+        let response = crate::http::Http::direct()?
             .get(format!("{}{path}", self.base()))
             .bearer_auth(&self.secret)
             .send()

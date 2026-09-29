@@ -17,16 +17,17 @@ pub mod udp;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::files::Documents;
 
     #[test]
     fn each_section_gets_its_own_part_and_advanced_gets_the_rest() {
         let full =
             "proxy-groups:\n  - name: AUTO\nrules:\n  - MATCH,umiray\ntun:\n  enable: false\n";
-        let map = crate::yaml::top_mapping(full).unwrap();
+        let map = crate::yaml::Yaml::top_mapping(full).unwrap();
 
         let only = |mine: &[&str]| -> Vec<String> {
             if mine.is_empty() {
-                let others = files::keys_of_others(files::ADVANCED);
+                let others = Documents::keys_of_others(files::ADVANCED);
                 map.keys()
                     .filter(|key| !key.as_str().is_some_and(|key| others.contains(&key)))
                     .filter_map(|key| key.as_str().map(String::from))

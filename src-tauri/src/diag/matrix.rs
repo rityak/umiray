@@ -15,7 +15,10 @@
 use std::time::{Duration, Instant};
 
 use crate::diag::bench::Bench;
-use crate::diag::report::{millis, Report, Row, Tone, Verdict};
+use crate::diag::report::Report;
+use crate::diag::report::Row;
+use crate::diag::report::Tone;
+use crate::diag::report::Verdict;
 use crate::error::Result;
 
 /// Что перебираем. Пара «имя — как это выглядит в конфиге»: набор нарочно маленький,
@@ -64,103 +67,111 @@ const PROBE: &str = "www.google.com";
 /// Сколько ждём ответа от стенда.
 const TIMEOUT: Duration = Duration::from_millis(2500);
 
-/// `matrix`: прогнать сочетания и сказать, какое брать.
-pub async fn measure() -> Result<Report> {
-    let started = Instant::now();
-    let mut report = Report::new("matrix");
-    report.say(
-        Tone::Info,
-        format!("matrix: {} сочетаний на стенде, имя {PROBE}", COMBOS.len()),
-    );
-    report.say(
-        Tone::Dim,
-        "стек TUN так не померить: адаптер один на систему, и стенд оборвал бы связь",
-    );
-    report.columns = ["Сочетание", "Ядро встало", "Имя за", "Ответ", "Вывод"]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+pub struct Matrix;
 
-    let system = crate::system::net::first_resolver();
-    let mut best: Option<(u64, usize)> = None;
-    let mut results: Vec<(String, Option<u64>, String)> = Vec::new();
-
-    for combo in COMBOS.iter() {
-        let nameserver = if combo.nameserver.is_empty() {
-            match &system {
-                Some(addr) => addr.clone(),
-                None => {
-                    report.say(
-                        Tone::Dim,
-                        format!("{}: системный резолвер не найден — пропускаем", combo.name),
-                    );
-                    results.push((combo.name.to_string(), None, "нет системного DNS".into()));
-                    continue;
-                }
-            }
-        } else {
-            combo.nameserver.to_string()
-        };
-
-        let at = Instant::now();
-        let answered = tokio::time::timeout(TIMEOUT, async {
-            let bench = Bench::with(&document(combo, &nameserver)).await?;
-            bench.resolve(PROBE).await
-        })
-        .await;
-        let ms = at.elapsed().as_millis() as u64;
-
-        let (ok, what) = match answered {
-            Err(_) => (false, format!("таймаут {} мс", TIMEOUT.as_millis())),
-            Ok(Err(error)) => (false, error.to_string()),
-            Ok(Ok(addresses)) => (true, addresses.join(", ")),
-        };
+impl Matrix {
+    /// `matrix`: прогнать сочетания и сказать, какое брать.
+    pub async fn measure() -> Result<Report> {
+        let started = Instant::now();
+        let mut report = Report::new("matrix");
         report.say(
-            if ok { Tone::Ok } else { Tone::Bad },
-            format!("{:<26} {:>8}  {what}", combo.name, millis(ms)),
+            Tone::Info,
+            format!("matrix: {} сочетаний на стенде, имя {PROBE}", COMBOS.len()),
         );
-        if ok {
-            match best {
-                Some((was, _)) if was <= ms => {}
-                _ => best = Some((ms, results.len())),
-            }
-        }
-        results.push((combo.name.to_string(), ok.then_some(ms), what));
-    }
+        report.say(
+            Tone::Dim,
+            "стек TUN так не померить: адаптер один на систему, и стенд оборвал бы связь",
+        );
+        report.columns = ["Сочетание", "Ядро встало", "Имя за", "Ответ", "Вывод"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
 
-    for (place, (name, ms, what)) in results.iter().enumerate() {
-        let winner = matches!(best, Some((_, at)) if at == place);
-        report.rows.push(Row {
-            cells: vec![
-                name.clone(),
-                if ms.is_some() { "да" } else { "нет" }.to_string(),
-                ms.map(millis).unwrap_or_else(|| "—".to_string()),
-                what.clone(),
-                match (winner, ms.is_some()) {
-                    (true, _) => "берём",
-                    (false, true) => "мимо",
-                    (false, false) => "не встало",
+        let system = crate::system::net::NetInfo::first_resolver();
+        let mut best: Option<(u64, usize)> = None;
+        let mut results: Vec<(String, Option<u64>, String)> = Vec::new();
+
+        for combo in COMBOS.iter() {
+            let nameserver = if combo.nameserver.is_empty() {
+                match &system {
+                    Some(addr) => addr.clone(),
+                    None => {
+                        report.say(
+                            Tone::Dim,
+                            format!("{}: системный резолвер не найден — пропускаем", combo.name),
+                        );
+                        results.push((combo.name.to_string(), None, "нет системного DNS".into()));
+                        continue;
+                    }
                 }
-                .to_string(),
-            ],
-            verdict: match (winner, ms.is_some()) {
-                (true, _) => Verdict::Ok,
-                (false, true) => Verdict::Idle,
-                (false, false) => Verdict::Bad,
-            },
-            mark: winner,
-        });
-    }
+            } else {
+                combo.nameserver.to_string()
+            };
 
-    let ms = started.elapsed().as_millis() as u64;
-    let (verdict, headline) = match best {
-        Some((took, at)) => (
-            Verdict::Ok,
-            format!("быстрее всех «{}» — {}", results[at].0, millis(took)),
-        ),
-        None => (Verdict::Bad, "ни одно сочетание не заработало".to_string()),
-    };
-    Ok(report.finish(verdict, headline, ms))
+            let at = Instant::now();
+            let answered = tokio::time::timeout(TIMEOUT, async {
+                let bench = Bench::with(&document(combo, &nameserver)).await?;
+                bench.resolve(PROBE).await
+            })
+            .await;
+            let ms = at.elapsed().as_millis() as u64;
+
+            let (ok, what) = match answered {
+                Err(_) => (false, format!("таймаут {} мс", TIMEOUT.as_millis())),
+                Ok(Err(error)) => (false, error.to_string()),
+                Ok(Ok(addresses)) => (true, addresses.join(", ")),
+            };
+            report.say(
+                if ok { Tone::Ok } else { Tone::Bad },
+                format!("{:<26} {:>8}  {what}", combo.name, Report::millis(ms)),
+            );
+            if ok {
+                match best {
+                    Some((was, _)) if was <= ms => {}
+                    _ => best = Some((ms, results.len())),
+                }
+            }
+            results.push((combo.name.to_string(), ok.then_some(ms), what));
+        }
+
+        for (place, (name, ms, what)) in results.iter().enumerate() {
+            let winner = matches!(best, Some((_, at)) if at == place);
+            report.rows.push(Row {
+                cells: vec![
+                    name.clone(),
+                    if ms.is_some() { "да" } else { "нет" }.to_string(),
+                    ms.map(Report::millis).unwrap_or_else(|| "—".to_string()),
+                    what.clone(),
+                    match (winner, ms.is_some()) {
+                        (true, _) => "берём",
+                        (false, true) => "мимо",
+                        (false, false) => "не встало",
+                    }
+                    .to_string(),
+                ],
+                verdict: match (winner, ms.is_some()) {
+                    (true, _) => Verdict::Ok,
+                    (false, true) => Verdict::Idle,
+                    (false, false) => Verdict::Bad,
+                },
+                mark: winner,
+            });
+        }
+
+        let ms = started.elapsed().as_millis() as u64;
+        let (verdict, headline) = match best {
+            Some((took, at)) => (
+                Verdict::Ok,
+                format!(
+                    "быстрее всех «{}» — {}",
+                    results[at].0,
+                    Report::millis(took)
+                ),
+            ),
+            None => (Verdict::Bad, "ни одно сочетание не заработало".to_string()),
+        };
+        Ok(report.finish(verdict, headline, ms))
+    }
 }
 
 /// Конфиг одного сочетания. Отличается от стендового только тремя полями — и это
