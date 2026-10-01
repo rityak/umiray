@@ -5,4 +5,5 @@
 
 pub mod effective;
 pub mod mihomo;
+pub mod mihomo_lists;
 pub mod plan;

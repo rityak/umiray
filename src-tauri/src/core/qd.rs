@@ -11,6 +11,7 @@ use sha2::{Digest, Sha256};
 
 use crate::core::process::CoreProcess;
 use crate::core::process::LogRing;
+use crate::db::{Db, Table};
 use crate::error::{AppError, Result};
 use crate::http::Http;
 use crate::paths::Paths;
@@ -20,7 +21,10 @@ const READY_TIMEOUT: Duration = Duration::from_secs(15);
 const STOP_GRACE: Duration = Duration::from_secs(5);
 const HELLO: &str = "{\"qdEmbedded\"";
 
-const RELEASES: &str = "https://api.github.com/repos/jaywehosl/qd/releases?per_page=1";
+/// Лента релизов, а не API (D-161): `api.github.com` режут по DNS, а `/releases/latest`
+/// у qd пуст — все релизы pre-release. Лента знает их и идёт от нового к старому.
+const FEED: &str = "https://github.com/jaywehosl/qd/releases.atom";
+const DOWNLOAD: &str = "https://github.com/jaywehosl/qd/releases/download";
 const ASSET: &str = "qd-core-windows-amd64.exe";
 const SUMS: &str = "checksums.txt";
 const MAX_BINARY: usize = 128 * 1024 * 1024;
@@ -43,6 +47,9 @@ pub struct Status {
     /// Туннель **должен** быть поднят: ставит `connect`, снимает `disconnect` (D-057).
     pub wanted: bool,
     pub started: Option<u64>,
+    /// Процесс жив, а туннеля нет: потерянный туннель qd возвращает сам, пока его
+    /// не опустили (с 0.1.5), — это не падение (D-057).
+    pub recovering: bool,
 }
 
 pub struct Qd {
@@ -97,6 +104,7 @@ impl Qd {
             on,
             wanted: self.wanted.load(Ordering::Relaxed),
             started,
+            recovering: alive && !on,
         }
     }
 
@@ -140,42 +148,30 @@ impl Qd {
             )));
         }
         let (api, token) = self.ensure().await?;
-        // Мимо системного прокси: в System там может стоять mihomo (GOTCHAS).
-        let client = Http::direct()?;
-        let url = format!("{api}{path}");
-        let request = match method {
-            "GET" => client.get(&url),
-            "POST" => client.post(&url),
-            _ => {
-                return Err(AppError::invalid(format!(
-                    "qd: метод {method} не поддержан"
-                )))
-            }
-        };
-        let mut request = request.header("X-QD-Token", token);
-        if let Some(body) = body {
-            request = request.json(&body);
+        let obj = request(&api, &token, method, path, body).await?;
+        if let Some(up) = obj.get("connected").and_then(Value::as_bool) {
+            self.heard(up);
         }
-        let reply: Value = request
-            .send()
-            .await
-            .map_err(|e| AppError::network(format!("qd не ответил: {e}")))?
-            .json()
-            .await
-            .map_err(|e| AppError::network(format!("qd ответил не JSON: {e}")))?;
-        if reply.get("success").and_then(Value::as_bool) == Some(true) {
-            let obj = reply.get("obj").cloned().unwrap_or(Value::Null);
-            if let Some(up) = obj.get("connected").and_then(Value::as_bool) {
-                self.heard(up);
+        Ok(obj)
+    }
+
+    /// Ссылка, которую сейчас некому принять: qd встаёт только с правами (D-161). Ждёт
+    /// в базе и уходит в qd при первом его подъёме.
+    pub fn hold(&self, link: &str) -> Result<()> {
+        Db::put(Table::State, PENDING, "", link)
+    }
+
+    /// Удалить бинарь (D-161). Процесс гасим: без этого файл занят. Каталог `qd/` остаётся —
+    /// в нём настройки qd. Работает ли туннель, проверяет вызывающий под замком
+    /// перехода.
+    pub async fn remove(&self) -> Result<()> {
+        self.shutdown().await;
+        match std::fs::remove_file(Self::binary()) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                Err(AppError::io(format!("Не удалось удалить qd: {e}")))
             }
-            return Ok(obj);
+            _ => Ok(()),
         }
-        let message = reply
-            .get("msg")
-            .and_then(Value::as_str)
-            .filter(|text| !text.is_empty())
-            .unwrap_or("qd отказал без объяснения");
-        Err(AppError::invalid(message.to_string()))
     }
 
     /// qd сказал, поднят ли туннель. Время работы — с первого «да».
@@ -221,6 +217,7 @@ impl Qd {
         let started = self.spawn().await?;
         let found = (started.api.clone(), started.token.clone());
         *self.live.lock().unwrap() = Some(started);
+        adopt_pending(&found.0, &found.1).await;
         Ok(found)
     }
 
@@ -290,44 +287,18 @@ impl Qd {
 
     pub async fn install(&self) -> Result<String> {
         let client = Http::client()?;
-        let releases: Value = client
-            .get(RELEASES)
-            .header("Accept", "application/vnd.github+json")
-            .send()
+        let feed = Http::fetch(&client, FEED, 1024 * 1024)
             .await
-            .map_err(|e| AppError::network(format!("Не удалось узнать версию qd: {e}")))?
-            .json()
-            .await
-            .map_err(|e| AppError::network(format!("GitHub ответил не JSON: {e}")))?;
-        let release = releases
-            .as_array()
-            .and_then(|all| all.first())
+            .map_err(|e| AppError::network(format!("Не удалось узнать версию qd: {e}")))?;
+        let tag = newest_tag(&String::from_utf8_lossy(&feed))
             .ok_or_else(|| AppError::network("У qd нет ни одного релиза"))?;
-        let tag = release
-            .get("tag_name")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
-        let link = |name: &str| {
-            release
-                .get("assets")
-                .and_then(Value::as_array)
-                .and_then(|assets| {
-                    assets
-                        .iter()
-                        .find(|asset| asset.get("name").and_then(Value::as_str) == Some(name))
-                })
-                .and_then(|asset| asset.get("browser_download_url"))
-                .and_then(Value::as_str)
-                .map(str::to_string)
-                .ok_or_else(|| AppError::network(format!("В релизе {tag} нет {name}")))
-        };
+        let link = |name: &str| format!("{DOWNLOAD}/{tag}/{name}");
 
-        let sums = Http::fetch(&client, &link(SUMS)?, 64 * 1024).await?;
+        let sums = Http::fetch(&client, &link(SUMS), 64 * 1024).await?;
         let want = checksum(&String::from_utf8_lossy(&sums), ASSET)
             .ok_or_else(|| AppError::invalid(format!("В {SUMS} нет строки для {ASSET}")))?;
 
-        let binary = Http::fetch(&client, &link(ASSET)?, MAX_BINARY).await?;
+        let binary = Http::fetch(&client, &link(ASSET), MAX_BINARY).await?;
         let got: String = Sha256::digest(&binary)
             .iter()
             .map(|byte| format!("{byte:02x}"))
@@ -349,6 +320,76 @@ impl Qd {
             .map_err(|e| AppError::io(format!("Не удалось записать qd: {e}")))?;
         Ok(tag)
     }
+}
+
+/// Один запрос к API живого qd. Ответ `{success, obj, msg}` → `obj` или отказ словами qd.
+async fn request(
+    api: &str,
+    token: &str,
+    method: &str,
+    path: &str,
+    body: Option<Value>,
+) -> Result<Value> {
+    // Мимо системного прокси: в System там может стоять mihomo (GOTCHAS).
+    let client = Http::direct()?;
+    let url = format!("{api}{path}");
+    let request = match method {
+        "GET" => client.get(&url),
+        "POST" => client.post(&url),
+        _ => {
+            return Err(AppError::invalid(format!(
+                "qd: метод {method} не поддержан"
+            )))
+        }
+    };
+    let mut request = request.header("X-QD-Token", token);
+    if let Some(body) = body {
+        request = request.json(&body);
+    }
+    let reply: Value = request
+        .send()
+        .await
+        .map_err(|e| AppError::network(format!("qd не ответил: {e}")))?
+        .json()
+        .await
+        .map_err(|e| AppError::network(format!("qd ответил не JSON: {e}")))?;
+    if reply.get("success").and_then(Value::as_bool) == Some(true) {
+        return Ok(reply.get("obj").cloned().unwrap_or(Value::Null));
+    }
+    let message = reply
+        .get("msg")
+        .and_then(Value::as_str)
+        .filter(|text| !text.is_empty())
+        .unwrap_or("qd отказал без объяснения");
+    Err(AppError::invalid(message.to_string()))
+}
+
+/// Ссылка qd, ждущая его подъёма (D-161): строка в таблице состояния (D-170).
+const PENDING: &str = "qd-pending";
+
+/// Отдать qd ссылку, которая ждала его подъёма. Неудача подъём не отменяет: ссылка ждёт
+/// следующего, а причину скажет сам qd, когда её вставят снова.
+async fn adopt_pending(api: &str, token: &str) {
+    let Ok(Some(link)) = Db::get(Table::State, PENDING, "") else {
+        return;
+    };
+    let body = serde_json::json!({ "uri": link.trim() });
+    if request(api, token, "POST", "/client/api/import", Some(body))
+        .await
+        .is_ok()
+    {
+        let _ = Db::remove(Table::State, PENDING, "");
+    }
+}
+
+/// Лента релизов → самый новый тег: первая ссылка `…/releases/tag/<тег>`.
+fn newest_tag(feed: &str) -> Option<String> {
+    let (_, rest) = feed.split_once("/releases/tag/")?;
+    let tag: String = rest
+        .chars()
+        .take_while(|c| !matches!(c, '"' | '\'' | '<' | '>') && !c.is_whitespace())
+        .collect();
+    (!tag.is_empty()).then_some(tag)
 }
 
 /// Строка `checksums.txt` для файла → его SHA-256 строчными. Формат `sha256sum`:
@@ -409,6 +450,53 @@ mod tests {
         );
         assert!(handshake(r#"{"qdEmbedded":{"api":"http://x"}}"#).is_err());
         assert!(handshake("garbage").is_err());
+    }
+
+    /// Туннель упал, процесс жив — qd поднимает его сам. Надзор, принимавший это за падение,
+    /// после трёх своих попыток гасил VPN насовсем (D-057). Умер процесс — вот это падение.
+    #[cfg(windows)]
+    #[test]
+    fn a_live_qd_without_a_tunnel_is_recovering_and_a_dead_one_is_not() {
+        let qd = Qd::new();
+        qd.wanted.store(true, Ordering::Relaxed);
+        let child = Command::new(r"C:\Windows\System32\PING.EXE")
+            .args(["-n", "30", "127.0.0.1"])
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        *qd.live.lock().unwrap() = Some(Live {
+            child,
+            stdin: None,
+            api: String::new(),
+            token: String::new(),
+            connected: false,
+            started: None,
+        });
+        let lost = qd.status();
+        assert!(
+            !lost.on && lost.recovering,
+            "процесс жив — туннель вернёт сам qd"
+        );
+
+        let mut held = qd.live.lock().unwrap().take().unwrap();
+        held.child.kill().unwrap();
+        held.child.wait().unwrap();
+        *qd.live.lock().unwrap() = Some(held);
+        let dead = qd.status();
+        assert!(
+            dead.wanted && !dead.on && !dead.recovering,
+            "процесс умер — это падение"
+        );
+    }
+
+    /// Лента идёт от нового к старому; тег — до кавычки, как в настоящей ленте GitHub.
+    #[test]
+    fn the_newest_tag_is_the_first_one_in_the_feed() {
+        let feed = r#"<feed><entry><link rel="alternate" type="text/html" href="https://github.com/jaywehosl/qd/releases/tag/v0.1.7-alpha"/></entry>
+<entry><link href="https://github.com/jaywehosl/qd/releases/tag/v0.1.6-alpha"/></entry></feed>"#;
+        assert_eq!(newest_tag(feed).as_deref(), Some("v0.1.7-alpha"));
+        assert_eq!(newest_tag("<feed></feed>"), None);
+        assert_eq!(newest_tag(r#"href=".../releases/tag/""#), None);
     }
 
     #[test]

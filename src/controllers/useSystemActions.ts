@@ -42,7 +42,7 @@ export function useSystemActions({ setStatus, setSettings, setJob, report, after
           report(
             notice(
               t(
-                "The client will launch as administrator without a UAC prompt. The task is named umiray in Task Scheduler.",
+                "The client will start as administrator with no UAC prompt. The task is called umiray in Task Scheduler.",
               ),
             ),
           );
@@ -79,7 +79,7 @@ export function useSystemActions({ setStatus, setSettings, setJob, report, after
       setStatus(await api.systemReset());
       setSettings(await api.settingsGet());
       await afterReset();
-      report(notice(t("Defaults restored. The core and device identifier were kept.")));
+      report(notice(t("Settings reset. The core and device ID were kept.")));
     } catch (e) {
       report(failure(e));
     } finally {
@@ -96,5 +96,16 @@ export function useSystemActions({ setStatus, setSettings, setJob, report, after
     }
   }, [report]);
 
-  return { autostart, alwaysAdmin, killSwitch, reset, elevate };
+  /// Настройки архивом (D-163). Закрыли окно сохранения — сказать нечего.
+  const exportSettings = useCallback(async () => {
+    report(null);
+    try {
+      const path = await api.systemExport();
+      if (path) report(notice(t("Settings saved to {path}", { path })));
+    } catch (e) {
+      report(failure(e));
+    }
+  }, [report]);
+
+  return { autostart, alwaysAdmin, killSwitch, reset, elevate, exportSettings };
 }

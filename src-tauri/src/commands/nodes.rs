@@ -5,6 +5,7 @@
 
 use tauri::State;
 
+use crate::app::node_check::NodeCheck;
 use crate::app::state::AppState;
 use crate::error::Result;
 use crate::nodes::source_editor;
@@ -31,6 +32,7 @@ pub async fn nodes_code_set(
     state
         .sources
         .edit(&state, &source, || {
+            NodeCheck::text(&text)?;
             SourceEditor::edit_node_code(&source, &node, &text)
         })
         .await
@@ -48,6 +50,7 @@ pub async fn nodes_entry_set(
     state
         .sources
         .edit(&state, &source, || {
+            NodeCheck::object(&entry)?;
             SourceEditor::set_node_entry(&source, &node, entry)
         })
         .await

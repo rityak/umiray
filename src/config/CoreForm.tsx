@@ -1,10 +1,21 @@
 import { Cable, Globe, ScrollText } from "lucide-react";
 import { useEffect, useState } from "react";
-import { ChoiceCards, Code, Input, NumberInput, Select, Spinner, Switch, Textarea } from "rootik";
+import {
+  Button,
+  ChoiceCards,
+  Code,
+  Input,
+  NumberInput,
+  Select,
+  Spinner,
+  Switch,
+  Textarea,
+} from "rootik";
 import * as api from "../api";
 import { useCached } from "../hooks/useCached";
 import { t, tk } from "../i18n";
 import { failure, type Message, notice } from "../shell/Banner";
+import DnsFilterPicker from "../shell/DnsFilterPicker";
 import SaveActions from "../shell/SaveActions";
 import SectionBar from "../shell/SectionBar";
 import Page, { type Group } from "./Page";
@@ -33,7 +44,7 @@ const STACKS: { id: api.Stack; label: string; hint: string }[] = [
   {
     id: "gvisor",
     label: "gvisor",
-    hint: tk("core stack: broadly compatible, but slightly slower"),
+    hint: tk("core stack: works almost everywhere, a bit slower"),
   },
 ];
 
@@ -70,6 +81,8 @@ export default function CoreForm({ onMessage, onSaved, start, hint, onUnsavedCha
   const [disk, setDisk] = useCached<api.Advanced | null>("core.disk", null);
   const [draft, setDraft] = useCached<api.Advanced | null>("core.draft", null);
   const [busy, setBusy] = useState(false);
+  const [dnsFilter, setDnsFilter] = useState<api.DnsFilter>("clean");
+  const [picking, setPicking] = useState(false);
 
   useEffect(() => {
     api.advancedGet().then(
@@ -102,11 +115,30 @@ export default function CoreForm({ onMessage, onSaved, start, hint, onUnsavedCha
       setDisk(written);
       setDraft(written);
       onSaved();
-      onMessage(notice(t("Saved. Changes take effect on the next connection.")));
+      onMessage(notice(t("Saved. Applies on the next connection.")));
     } catch (e) {
       onMessage(failure(e));
     } finally {
       setBusy(false);
+    }
+  };
+
+  /// Подбор пишет `nameserver` сам (D-105) — в черновик переносим только его, чтобы
+  /// не потерять несохранённое в других полях.
+  const pick = async () => {
+    setPicking(true);
+    onMessage(null);
+    try {
+      const report = await api.diagApply("dns-race", dnsFilter);
+      const written = await api.advancedGet();
+      setDisk(written);
+      setDraft({ ...draft, nameserver: written.nameserver });
+      onSaved();
+      onMessage(report.verdict === "ok" ? notice(report.headline) : failure(report.headline));
+    } catch (e) {
+      onMessage(failure(e));
+    } finally {
+      setPicking(false);
     }
   };
 
@@ -124,7 +156,7 @@ export default function CoreForm({ onMessage, onSaved, start, hint, onUnsavedCha
             {
               id: "mixed-port",
               label: t("Port"),
-              hint: t("changing this requires reconnection"),
+              hint: t("takes effect after reconnecting"),
               control: (
                 <NumberInput
                   className="w-32"
@@ -198,7 +230,7 @@ export default function CoreForm({ onMessage, onSaved, start, hint, onUnsavedCha
               label: "strict-route",
               inline: true,
               hint: t(
-                "the core blocks routes outside the adapter. Similar purpose to kill-switch, different mechanism",
+                "the core blocks routes that skip the adapter — like kill-switch, but a different mechanism",
               ),
               control: (
                 <Switch
@@ -210,12 +242,28 @@ export default function CoreForm({ onMessage, onSaved, start, hint, onUnsavedCha
               ),
             },
             {
+              id: "open-nat",
+              label: "endpoint-independent-nat",
+              inline: true,
+              hint: t(
+                "games, calls and torrents connect directly more easily; the adapter does a little more work",
+              ),
+              control: (
+                <Switch
+                  aria-label="endpoint-independent-nat"
+                  checked={draft.openNat}
+                  disabled={busy}
+                  onChange={(event) => edit({ openNat: event.target.checked })}
+                />
+              ),
+            },
+            {
               id: "dns-hijack",
               label: "dns-hijack",
               hint: (
                 <>
                   {t(
-                    "capture other DNS requests so apps with their own resolvers do not bypass the tunnel. Empty disables interception",
+                    "catch other DNS queries so apps with their own resolver don't skip the tunnel. Empty — no interception",
                   )}
                 </>
               ),
@@ -243,13 +291,13 @@ export default function CoreForm({ onMessage, onSaved, start, hint, onUnsavedCha
         {
           id: "names-dns",
           label: t("Name resolution"),
-          hint: t("the core resolves names without relying on system DNS."),
+          hint: t("the core resolves names itself, without system DNS."),
           settings: [
             {
               id: "dns-enable",
               label: t("Core DNS resolver"),
               inline: true,
-              hint: t("always enabled in TUN mode regardless of this setting"),
+              hint: t("needed in every mode; TUN doesn't work without it"),
               control: (
                 <Switch
                   aria-label={t("Core DNS resolver")}
@@ -273,6 +321,22 @@ export default function CoreForm({ onMessage, onSaved, start, hint, onUnsavedCha
               ),
             },
             {
+              id: "prefer-h3",
+              label: "prefer-h3",
+              inline: true,
+              hint: t(
+                "faster where QUIC gets through; where it's blocked, the first lookup waits and falls back",
+              ),
+              control: (
+                <Switch
+                  aria-label="prefer-h3"
+                  checked={draft.preferH3}
+                  disabled={busy || !draft.dnsEnable}
+                  onChange={(event) => edit({ preferH3: event.target.checked })}
+                />
+              ),
+            },
+            {
               id: "nameserver",
               label: "nameserver",
               hint: (
@@ -285,11 +349,26 @@ export default function CoreForm({ onMessage, onSaved, start, hint, onUnsavedCha
                   mono
                   autoSize
                   value={lines(draft.nameserver)}
-                  disabled={busy}
+                  disabled={busy || picking}
                   rows={3}
                   aria-label={t("Name servers")}
                   onChange={(event) => edit({ nameserver: parse(event.target.value) })}
                 />
+              ),
+            },
+            {
+              id: "nameserver-pick",
+              label: t("Pick automatically"),
+              hint: t(
+                "measures public DNS servers and writes the four fastest; the core asks them all at once",
+              ),
+              control: (
+                <div className="flex flex-col gap-2">
+                  <DnsFilterPicker value={dnsFilter} onChange={setDnsFilter} disabled={picking} />
+                  <Button className="self-start" loading={picking} disabled={busy} onClick={pick}>
+                    {picking ? t("Measuring resolvers…") : t("Pick")}
+                  </Button>
+                </div>
               ),
             },
           ],
@@ -297,14 +376,14 @@ export default function CoreForm({ onMessage, onSaved, start, hint, onUnsavedCha
         {
           id: "names-sniff",
           label: t("Connection inspection"),
-          hint: t("extracts the domain from connections made directly to an IP address."),
+          hint: t("finds the site name in connections opened straight to an IP."),
           settings: [
             {
               id: "sniffer",
               label: "Sniffing",
               inline: true,
               hint: t(
-                "extract names from TLS and HTTP so domain rules can match externally resolved connections",
+                "reads names from TLS and HTTP so domain rules work even when a name was resolved outside the core",
               ),
               control: (
                 <Switch
@@ -332,7 +411,7 @@ export default function CoreForm({ onMessage, onSaved, start, hint, onUnsavedCha
             {
               id: "log",
               label: t("Level"),
-              hint: t("debug is for troubleshooting and produces many lines"),
+              hint: t("debug is for troubleshooting and writes a lot"),
               control: (
                 <Select
                   value={draft.logLevel}

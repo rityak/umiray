@@ -1,11 +1,5 @@
-//! Что отвечает на имена: кто из резолверов доходит и тот ли адрес возвращает.
-//!
-//! Две утилиты и один набор примитивов под ними (D-097):
-//!
-//! - **`dns-race`** — спросить одно имя у всех кандидатов сразу и посмотреть, кто ответил
-//!   и за сколько. Это ответ на «какой DNS вообще работает у моего провайдера».
-//! - **`dns-spoof`** — сверить обычный DNS с шифрованным. Разошлись адреса — значит
-//!   на пути кто-то отвечает вместо резолвера.
+//! Какой DNS работает у этого провайдера: спросить одно имя у всех кандидатов сразу
+//! и посмотреть, кто ответил и за сколько. Зовёт подбор резолверов мастера (D-105).
 //!
 //! Кандидаты берутся из коллекции (`collections/dns.yaml`), а не отсюда: список адресов —
 //! данные, и меняться он должен файлом.
@@ -26,7 +20,6 @@ use tokio::net::UdpSocket;
 use crate::collections::Collections;
 use crate::collections::Resolvers;
 use crate::diag::bench::Bench;
-use crate::diag::report::{Report, Row, Tone, Verdict};
 use crate::diag::wire;
 use crate::diag::wire::DnsWire;
 use crate::error::{AppError, Result};
@@ -39,26 +32,6 @@ const PLAIN_PORT: u16 = 53;
 /// его не блокируют, и подмена на нём видна сразу.
 pub const DEFAULT_DOMAIN: &str = "example.com";
 
-/// На чём ловим подмену. Первое — контрольное, остальные два в России подменяют чаще
-/// прочих, и именно на них видно, что отвечает не резолвер.
-pub const SPOOF_DOMAINS: [&str; 3] = ["example.com", "rutracker.org", "www.google.com"];
-
-/// Кто из провайдеров годится в контрольные для сверки: у них есть DoH и они отвечают
-/// из России. Порядок — порядок попыток.
-const CONTROLS: [&str; 4] = ["google", "cloudflare", "quad9", "adguard"];
-
-/// Чужой публичный резолвер: его в конфиге нет, и спрашиваем мы его нарочно. Ответ
-/// подменным адресом означает, что запрос перехватил туннель, а не долетел до Quad9.
-///
-/// Раньше здесь стоял заведомо мёртвый адрес из TEST-NET-1 — приём красивый, но живой
-/// прогон под TUN его опроверг: до перехвата такой пакет не доезжает вовсе, и проба
-/// объявляла утечку там, где её не было.
-const FOREIGN: &str = "9.9.9.9";
-
-/// Диапазон подменных адресов ядра по умолчанию (`fake-ip-range: 198.18.0.1/16`).
-/// Адрес отсюда — это ответ туннеля, а не настоящего резолвера.
-const FAKE_IP: [u8; 2] = [198, 18];
-
 /// Один адрес, у которого можно спросить.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Candidate {
@@ -69,11 +42,30 @@ pub struct Candidate {
     pub addr: String,
 }
 
-impl Candidate {
-    /// Строка для списка: провайдер и вариант. Адрес рядом отдельной колонкой — он же
-    /// уходит в `nameserver:` ядра как есть, без сборки из частей.
-    pub fn title(&self) -> String {
-        format!("{} · {}", self.provider, self.variant)
+/// Из каких резолверов выбирает подбор (D-168, S-033). Слова `filter` коллекции — данные;
+/// здесь только то, какие из них человек готов получить.
+///
+/// `family` и `bypass` не входят ни в одну: семейный фильтр режет взрослое, а обход
+/// отвечает на заблокированное адресами чужих серверов — такое ставят руками, не подбором.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DnsFilter {
+    /// Отвечают как есть.
+    #[default]
+    Clean,
+    /// Режут рекламу.
+    Ads,
+    /// Любой из чистых, режущих рекламу и режущих опасное.
+    Any,
+}
+
+impl DnsFilter {
+    fn admits(self, filter: &str) -> bool {
+        match self {
+            DnsFilter::Clean => filter == "none",
+            DnsFilter::Ads => filter == "ads",
+            DnsFilter::Any => matches!(filter, "none" | "ads" | "security"),
+        }
     }
 }
 
@@ -86,8 +78,6 @@ pub struct Shot {
     pub ips: Vec<IpAddr>,
     /// Почему не вышло. Пусто — вышло.
     pub error: Option<String>,
-    /// Мы этот протокол не умеем: это не отказ сети, а наш предел.
-    pub skipped: bool,
 }
 
 impl Shot {
@@ -97,7 +87,6 @@ impl Shot {
             ms: None,
             ips: Vec::new(),
             error: Some(error.into()),
-            skipped: false,
         }
     }
 
@@ -109,25 +98,34 @@ impl Shot {
 pub struct DnsProbe;
 
 impl DnsProbe {
-    /// Кандидаты из коллекции резолверов.
+    /// Кандидаты из коллекции резолверов — те, что подходят под выбранную категорию.
     ///
-    /// По умолчанию — по одному адресу на протокол у **первого** варианта каждого
-    /// провайдера: полный перебор это под шестьдесят запросов, а вопрос «какой DNS у меня
-    /// работает» решается двумя десятками. `all` включает всё, включая семейные варианты.
-    pub fn candidates(resolvers: &Resolvers, all: bool) -> Vec<Candidate> {
+    /// По одному адресу на протокол у **первого** варианта каждой подходящей категории
+    /// провайдера: полный перебор это под сотню запросов, а вопрос «какой DNS у меня
+    /// работает» решается несколькими десятками.
+    pub fn candidates(resolvers: &Resolvers, filter: DnsFilter) -> Vec<Candidate> {
         let mut out = Vec::new();
         for provider in &resolvers.providers {
-            for (index, variant) in provider.variants.iter().enumerate() {
-                if !all && index > 0 {
-                    break;
+            let mut seen: HashSet<&str> = HashSet::new();
+            for variant in &provider.variants {
+                if !filter.admits(&variant.filter) || !seen.insert(variant.filter.as_str()) {
+                    continue;
                 }
                 let mut taken: HashSet<&str> = HashSet::new();
+                let has_doh = variant.servers.iter().any(|server| server.proto == "doh");
                 for server in &variant.servers {
                     // Шестая версия молчит там, где её нет, и таблица наполняется мусором.
                     if server.ipv6 {
                         continue;
                     }
-                    if !all && !taken.insert(server.proto.as_str()) {
+                    // Через стенд — только у варианта без DoH: время стенда включает запуск
+                    // ядра и у DoH того же провайдера не выигрывает никогда, а стоит секунду.
+                    // ponytail: DoT, живой там, где DoH режут, так не найдётся — мерить
+                    // стендом вторым кругом, если DoH не ответил ни у кого.
+                    if has_doh && !ours(&server.proto) {
+                        continue;
+                    }
+                    if !taken.insert(server.proto.as_str()) {
                         continue;
                     }
                     out.push(Candidate {
@@ -162,7 +160,6 @@ impl DnsProbe {
                     ms: None,
                     ips: Vec::new(),
                     error: Some(format!("{other} клиент сам не умеет")),
-                    skipped: true,
                 };
             }
         };
@@ -193,7 +190,6 @@ impl DnsProbe {
                 ms: Some(ms),
                 ips: answer.ips,
                 error: None,
-                skipped: false,
             },
         }
     }
@@ -232,7 +228,6 @@ impl DnsProbe {
                     ms: Some(ms),
                     ips,
                     error: None,
-                    skipped: false,
                 }
             }
         }
@@ -242,9 +237,9 @@ impl DnsProbe {
     ///
     /// Свои протоколы идут разом — это просто пакеты, и ждать их по очереди значит сложить
     /// таймауты. Шифрованные — тройками: каждый поднимает своё ядро.
-    pub async fn race(domain: &str, timeout: Duration, all: bool, core: bool) -> Result<Vec<Shot>> {
+    pub async fn race(domain: &str, timeout: Duration, filter: DnsFilter) -> Result<Vec<Shot>> {
         let resolvers = Collections::dns()?;
-        let list = DnsProbe::candidates(&resolvers, all);
+        let list = DnsProbe::candidates(&resolvers, filter);
         let mut set = tokio::task::JoinSet::new();
         let mut queue: Vec<(usize, Candidate)> = Vec::new();
         for (index, candidate) in list.into_iter().enumerate() {
@@ -266,42 +261,27 @@ impl DnsProbe {
             }
         }
 
-        if core {
-            for chunk in queue.chunks(BENCHES) {
-                let mut benches = tokio::task::JoinSet::new();
-                for (index, candidate) in chunk.iter().cloned() {
-                    let domain = domain.to_string();
-                    benches.spawn(async move {
-                        (
-                            index,
-                            DnsProbe::shoot_via_core(&candidate, &domain, timeout).await,
-                        )
-                    });
-                }
-                while let Some(done) = benches.join_next().await {
-                    match done {
-                        Ok(pair) => shots.push(pair),
-                        Err(e) => return Err(AppError::network(format!("Стенд сорвался: {e}"))),
-                    }
-                }
+        for chunk in queue.chunks(BENCHES) {
+            let mut benches = tokio::task::JoinSet::new();
+            for (index, candidate) in chunk.iter().cloned() {
+                let domain = domain.to_string();
+                benches.spawn(async move {
+                    (
+                        index,
+                        DnsProbe::shoot_via_core(&candidate, &domain, timeout).await,
+                    )
+                });
             }
-        } else {
-            for (index, candidate) in queue {
-                shots.push((
-                    index,
-                    Shot {
-                        candidate,
-                        ms: None,
-                        ips: Vec::new(),
-                        error: Some("шифрованные не мерили — выключено".to_string()),
-                        skipped: true,
-                    },
-                ));
+            while let Some(done) = benches.join_next().await {
+                match done {
+                    Ok(pair) => shots.push(pair),
+                    Err(e) => return Err(AppError::network(format!("Стенд сорвался: {e}"))),
+                }
             }
         }
 
-        // Порядок коллекции, а не порядок ответов: таблицу читают глазами, и прыгающие
-        // строки в ней хуже, чем ожидание.
+        // Порядок коллекции, а не порядок ответов: при равном времени выигрывает тот,
+        // кто стоит в коллекции раньше, а не тот, чей поток проснулся первым.
         shots.sort_by_key(|(index, _)| *index);
         Ok(shots.into_iter().map(|(_, shot)| shot).collect())
     }
@@ -326,404 +306,14 @@ impl DnsProbe {
             })
             .collect();
         best.sort_unstable();
+        // Один провайдер — одно место: DoH, DoT и DoQ одного AdGuard — это одна точка
+        // отказа под тремя именами, а не три резолвера.
+        let mut providers: HashSet<&str> = HashSet::new();
         best.into_iter()
+            .filter(|(_, _, index)| providers.insert(shots[*index].candidate.provider.as_str()))
             .take(take)
             .map(|(_, _, index)| index)
             .collect()
-    }
-
-    pub async fn race_report(
-        domain: &str,
-        timeout: Duration,
-        all: bool,
-        core: bool,
-    ) -> Result<Report> {
-        let started = Instant::now();
-        let mut report = Report::new("dns-race");
-        report.say(
-            Tone::Info,
-            format!(
-                "dns-race domain={domain} timeout={} мс шифрованные={}",
-                timeout.as_millis(),
-                if core {
-                    "через ядро"
-                } else {
-                    "мимо"
-                }
-            ),
-        );
-
-        let shots = DnsProbe::race(domain, timeout, all, core).await?;
-        report.columns = [
-            "Резолвер",
-            "Что режет",
-            "Транспорт",
-            "Адрес",
-            "Ответ за",
-            "Что вернул",
-        ]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
-
-        let marked: HashSet<usize> = DnsProbe::fastest(&shots, BEST).into_iter().collect();
-
-        let mut answered = 0;
-        let mut measurable = 0;
-        for (index, shot) in shots.iter().enumerate() {
-            if !shot.skipped {
-                measurable += 1;
-            }
-            if shot.ok() {
-                answered += 1;
-            }
-            let (verdict, tone, what) = match (&shot.error, shot.skipped) {
-                (None, _) => (Verdict::Ok, Tone::Ok, addresses(&shot.ips)),
-                (Some(error), false) => (Verdict::Bad, Tone::Bad, error.clone()),
-                (Some(error), true) => (Verdict::Idle, Tone::Dim, error.clone()),
-            };
-            let took = shot
-                .ms
-                .map(crate::diag::report::Report::millis)
-                .unwrap_or_else(|| "—".to_string());
-            report.say(
-                tone,
-                format!(
-                    "{:<28} {:<4} {:>8}  {}",
-                    clip(&shot.candidate.addr, 28),
-                    shot.candidate.proto,
-                    took,
-                    what
-                ),
-            );
-            report.rows.push(Row {
-                cells: vec![
-                    shot.candidate.title(),
-                    shot.candidate.filter.clone(),
-                    shot.candidate.proto.clone(),
-                    shot.candidate.addr.clone(),
-                    took,
-                    what,
-                ],
-                verdict,
-                mark: marked.contains(&index),
-            });
-        }
-
-        let verdict = if answered == 0 {
-            Verdict::Bad
-        } else if answered < measurable {
-            Verdict::Warn
-        } else {
-            Verdict::Ok
-        };
-        Ok(report.finish(
-            verdict,
-            format!("{answered} из {measurable}"),
-            started.elapsed().as_millis() as u64,
-        ))
-    }
-
-    /// `dns-leak`: кто отвечает на имена — туннель или сеть за ним.
-    ///
-    /// Признак один и однозначный: **подменный адрес**. Диапазон `198.18.0.0/16` ядро выдаёт
-    /// само (`fake-ip`), и получить его от настоящего резолвера невозможно. Спрашиваем двоих:
-    ///
-    /// - **системного** — того, кого спрашивает вся машина. В TUN ядро прописывает на своём
-    ///   адаптере себя, и ответ обязан быть подменным. Это главный вопрос: настоящий адрес
-    ///   здесь означает, что имена уходят провайдеру.
-    /// - **чужого публичного**, которого в конфиге нет. Его ответ говорит про приложения
-    ///   со своим DNS: перехватывает ли туннель и их тоже.
-    ///
-    /// Заведомо мёртвый адрес на этом месте стоял и снят: живой прогон под TUN показал, что
-    /// до перехвата такой пакет не доезжает, и проба врала про утечку при работающем туннеле.
-    ///
-    /// В режиме Proxy перехвата нет по устройству режима, и «утечкой» это называть нельзя:
-    /// там имена и должны разрешаться системой. Проба это говорит, а не молчит.
-    pub async fn leak_report(mode: Option<&str>, timeout: Duration) -> Result<Report> {
-        DnsProbe::leak_report_with(mode, timeout, &[]).await
-    }
-
-    /// Живая проверка может передать resolver физического адаптера, снятый до старта TUN.
-    /// После старта системный список уже изменён ядром, и восстановить тот адрес из него нельзя.
-    pub async fn leak_report_with(
-        mode: Option<&str>,
-        timeout: Duration,
-        physical: &[String],
-    ) -> Result<Report> {
-        let started = Instant::now();
-        let mut report = Report::new("dns-leak");
-        report.columns = ["Кого спросили", "Ответ", "Что это значит"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-
-        let Some(mode) = mode else {
-            report.say(Tone::Dim, "ядро не запущено — перехватывать нечему");
-            return Ok(report.finish(Verdict::Idle, "ядро не запущено", 0));
-        };
-        let tun = mode.eq_ignore_ascii_case("tun");
-        report.say(
-            Tone::Info,
-            format!("dns-leak mode={mode} чужой резолвер={FOREIGN}"),
-        );
-
-        // Системный — первым: он и есть ответ на вопрос.
-        let system = crate::system::net::NetInfo::first_resolver();
-        let (system_faked, _, system_answer) = match &system {
-            Some(addr) => asked(addr, "Системный", DEFAULT_DOMAIN, timeout).await,
-            None => (false, false, "система не назвала резолвера".to_string()),
-        };
-        let system_name = system.clone().unwrap_or_else(|| "—".to_string());
-        let system_meaning = match (&system, system_faked) {
-            (None, _) => "спросить некого",
-            (Some(_), true) => "отвечает туннель",
-            (Some(_), false) => "отвечает не туннель",
-        };
-        report.say(
-            if system_faked { Tone::Ok } else { Tone::Bad },
-            format!("{system_name:<16} {system_answer:<24} {system_meaning}"),
-        );
-        report.rows.push(Row {
-            cells: vec![
-                format!("{system_name} (системный)"),
-                system_answer,
-                system_meaning.to_string(),
-            ],
-            verdict: if system_faked {
-                Verdict::Ok
-            } else {
-                Verdict::Bad
-            },
-            mark: true,
-        });
-
-        let mut physical_ok = true;
-        for address in physical
-            .iter()
-            .filter(|address| Some(address.as_str()) != system.as_deref() && *address != FOREIGN)
-        {
-            let (faked, answered, answer) =
-                asked(address, "Физический", DEFAULT_DOMAIN, timeout).await;
-            let ok = intercepted_or_blocked(faked, answered);
-            physical_ok &= ok;
-            let meaning = match (faked, answered) {
-                (true, _) => "перехвачен туннелем",
-                (false, false) => "заблокирован",
-                (false, true) => "ушёл через физический адаптер",
-            };
-            report.say(
-                if ok { Tone::Ok } else { Tone::Bad },
-                format!("{address:<16} {answer:<24} {meaning}"),
-            );
-            report.rows.push(Row {
-                cells: vec![format!("{address} (физический)"), answer, meaning.into()],
-                verdict: if ok { Verdict::Ok } else { Verdict::Bad },
-                mark: true,
-            });
-        }
-
-        let (foreign_faked, _, foreign_answer) =
-            asked(FOREIGN, "Чужой", DEFAULT_DOMAIN, timeout).await;
-        let foreign_meaning = if foreign_faked {
-            "перехвачен туннелем"
-        } else {
-            "ушёл к самому резолверу"
-        };
-        report.say(
-            if foreign_faked { Tone::Ok } else { Tone::Warn },
-            format!("{FOREIGN:<16} {foreign_answer:<24} {foreign_meaning}"),
-        );
-        report.rows.push(Row {
-            cells: vec![
-                format!("{FOREIGN} (чужой)"),
-                foreign_answer,
-                foreign_meaning.to_string(),
-            ],
-            verdict: if foreign_faked {
-                Verdict::Ok
-            } else {
-                Verdict::Warn
-            },
-            mark: false,
-        });
-
-        let ms = started.elapsed().as_millis() as u64;
-        let (verdict, headline) = match (tun, system_faked, foreign_faked, physical_ok) {
-            (true, true, true, true) => (Verdict::Ok, "имена идут через туннель".to_string()),
-            (true, _, _, false) => (
-                Verdict::Bad,
-                "утечка: DNS физического адаптера обошёл туннель".to_string(),
-            ),
-            (true, true, false, _) => (
-                Verdict::Warn,
-                "система через туннель, но приложение со своим DNS уйдёт мимо".to_string(),
-            ),
-            (true, false, _, _) => (
-                Verdict::Bad,
-                "утечка: система спрашивает не туннель".to_string(),
-            ),
-            (false, _, true, _) => (
-                Verdict::Warn,
-                "в режиме Proxy запросы кто-то перехватывает".to_string(),
-            ),
-            (false, _, false, _) => (
-                Verdict::Idle,
-                "режим Proxy: имена разрешает система, перехвата и не должно быть".to_string(),
-            ),
-        };
-        Ok(report.finish(verdict, headline, ms))
-    }
-
-    /// `dns-spoof`: обычный DNS против шифрованного.
-    ///
-    /// Логика простая и от этого надёжная: контрольный ответ берём по DoH — его на пути
-    /// не подменить, не сломав TLS. Всё, что разошлось с ним по обычному порту, — подмена.
-    pub async fn spoof_report(domains: &[String], timeout: Duration) -> Result<Report> {
-        let started = Instant::now();
-        let mut report = Report::new("dns-spoof");
-        let resolvers = Collections::dns()?;
-
-        // Контролей **два**, и это не запас прочности. Замерено: `example.com` отвечает
-        // одному резолверу адресами Akamai, другому — Cloudflare, и один контроль объявлял
-        // вторую половину подменой. Честный ответ — это то, что видят шифрованные точки
-        // **вместе**, а не то, что увидела одна.
-        let controls: Vec<Candidate> = CONTROLS
-            .iter()
-            .filter_map(|id| by_id(&resolvers, id, "doh"))
-            .take(2)
-            .collect();
-        if controls.is_empty() {
-            return Err(AppError::invalid(
-                "В коллекции нет ни одной точки DoH — сверять не с чем".to_string(),
-            ));
-        }
-        // Системный резолвер — первым: его подменяют чаще всех прочих, потому что именно
-        // его выдал провайдер и именно его спрашивает вся остальная машина.
-        let mut plain: Vec<Candidate> = crate::system::net::NetInfo::first_resolver()
-            .map(|addr| Candidate {
-                provider: "Системный".into(),
-                variant: "от провайдера".into(),
-                filter: String::new(),
-                proto: "udp".into(),
-                addr,
-            })
-            .into_iter()
-            .collect();
-        plain.extend(
-            CONTROLS
-                .iter()
-                .filter_map(|id| by_id(&resolvers, id, "udp"))
-                .take(2),
-        );
-        if plain.is_empty() {
-            return Err(AppError::invalid(
-                "В коллекции нет обычных резолверов — сверять нечего".to_string(),
-            ));
-        }
-        report.say(
-            Tone::Info,
-            format!(
-                "dns-spoof control={} plain={}",
-                controls
-                    .iter()
-                    .map(|c| c.addr.as_str())
-                    .collect::<Vec<_>>()
-                    .join(" + "),
-                plain.len()
-            ),
-        );
-
-        report.columns = ["Имя", "По DoH", "По обычному DNS", "Резолвер"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-
-        let mut hijacked = 0;
-        let mut checked = 0;
-        let mut blind = 0;
-        for domain in domains {
-            let mut truth: Vec<IpAddr> = Vec::new();
-            for control in &controls {
-                let shot = DnsProbe::shoot(control, domain, timeout).await;
-                for ip in shot.ips {
-                    if !truth.contains(&ip) {
-                        truth.push(ip);
-                    }
-                }
-            }
-            if truth.is_empty() {
-                blind += 1;
-                report.say(
-                    Tone::Warn,
-                    format!("{domain}: шифрованные точки не ответили — судить не о чем"),
-                );
-                report.rows.push(Row {
-                    cells: vec![domain.clone(), "—".into(), "—".into(), "контроль".into()],
-                    verdict: Verdict::Idle,
-                    mark: false,
-                });
-                continue;
-            }
-            let honest: HashSet<IpAddr> = truth.iter().copied().collect();
-            for candidate in &plain {
-                let shot = DnsProbe::shoot(candidate, domain, timeout).await;
-                checked += 1;
-                let verdict = match (&shot.error, same_place(&truth, &shot.ips)) {
-                    (Some(_), _) | (_, None) => Verdict::Idle,
-                    (None, Some(true)) => Verdict::Ok,
-                    (None, Some(false)) => Verdict::Bad,
-                };
-                if verdict == Verdict::Bad {
-                    hijacked += 1;
-                }
-                let exact = shot.ips.iter().any(|ip| honest.contains(ip));
-                let got = match (&shot.error, verdict) {
-                    (Some(error), _) => error.clone(),
-                    // Разошлись, но в одной сети — это соседний узел площадки, а не подмена.
-                    // Молчать об этом нельзя: человек видит разные числа и вправе спросить.
-                    (None, Verdict::Ok) if !exact => {
-                        format!("{} · тот же сегмент", addresses(&shot.ips))
-                    }
-                    (None, _) => addresses(&shot.ips),
-                };
-                report.say(
-                    match verdict {
-                        Verdict::Bad => Tone::Bad,
-                        Verdict::Ok => Tone::Ok,
-                        _ => Tone::Dim,
-                    },
-                    format!(
-                        "{:<20} doh={:<16} {}={}",
-                        domain,
-                        addresses(&truth),
-                        candidate.addr,
-                        got
-                    ),
-                );
-                report.rows.push(Row {
-                    cells: vec![domain.clone(), addresses(&truth), got, candidate.title()],
-                    verdict,
-                    mark: false,
-                });
-            }
-        }
-
-        let verdict = if checked == 0 {
-            Verdict::Idle
-        } else if hijacked > 0 {
-            Verdict::Bad
-        } else if blind > 0 {
-            Verdict::Warn
-        } else {
-            Verdict::Ok
-        };
-        let headline = match (checked, hijacked) {
-            (0, _) => "сверить не удалось".to_string(),
-            (_, 0) => "совпадает".to_string(),
-            (_, n) => format!("подменяют, {n} из {checked}"),
-        };
-        Ok(report.finish(verdict, headline, started.elapsed().as_millis() as u64))
     }
 }
 
@@ -819,120 +409,24 @@ fn request_id() -> u16 {
 /// Windows. Тройка держит прогон в пяти секундах и не превращается в нагрузку.
 const BENCHES: usize = 3;
 
-/// `dns-race` целиком: замер, таблица, вердикт.
-/// Сколько резолверов предлагается взять. Три: один — единственная точка отказа,
-/// а длинный список ядро опрашивает параллельно и берёт первый ответ, то есть смысла
-/// в нём немного.
-pub const BEST: usize = 3;
-
-/// Адрес в колонку консоли: у DoH это URL, и полный он растаскивает всю ленту.
-fn clip(text: &str, limit: usize) -> String {
-    if text.chars().count() <= limit {
-        return text.to_string();
-    }
-    text.chars().take(limit - 1).collect::<String>() + "…"
-}
-
-fn addresses(ips: &[IpAddr]) -> String {
-    ips.iter()
-        .map(|ip| ip.to_string())
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-/// Адрес из подменного диапазона ядра — то есть ответ туннеля.
-fn fake(ip: &IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v4) => v4.octets()[..2] == FAKE_IP,
-        IpAddr::V6(_) => false,
-    }
-}
-
-/// Спросить один адрес и сказать, туннель ли ответил.
-async fn asked(addr: &str, who: &str, domain: &str, timeout: Duration) -> (bool, bool, String) {
-    let candidate = Candidate {
-        provider: who.into(),
-        variant: addr.into(),
-        filter: String::new(),
-        proto: "udp".into(),
-        addr: addr.into(),
-    };
-    let shot = DnsProbe::shoot(&candidate, domain, timeout).await;
-    let faked = shot.ips.iter().any(fake);
-    let answered = shot.ok();
-    let answer = match (&shot.error, shot.ips.is_empty()) {
-        (Some(error), _) => error.clone(),
-        (None, true) => "нет ответа".to_string(),
-        (None, false) => addresses(&shot.ips),
-    };
-    (faked, answered, answer)
-}
-
-fn intercepted_or_blocked(faked: bool, answered: bool) -> bool {
-    faked || !answered
-}
-
-/// Тот же ли это адрес — с поправкой на то, что большие сайты живут на CDN.
-///
-/// Замерено на живом прогоне: `example.com` отдаёт `8.6.112.6` по DoH и `8.6.112.0`
-/// по обычному DNS — это **один и тот же кластер**, разные его узлы, и объявлять такое
-/// подменой значит кричать на каждый второй сайт. А `rutracker.org` отдаёт `104.21.32.39`
-/// по DoH и `188.186.146.207` по 53 — вот это подмена: адрес из чужой сети.
-///
-/// Граница — сегмент /24 у четвёртой версии и /64 у шестой: внутри него сидят соседние
-/// узлы одной площадки, за ним — уже другая.
-fn same_place(left: &[IpAddr], right: &[IpAddr]) -> Option<bool> {
-    if left.is_empty() || right.is_empty() {
-        return None;
-    }
-    if left.iter().any(|ip| right.contains(ip)) {
-        return Some(true);
-    }
-    Some(
-        left.iter()
-            .any(|a| right.iter().any(|b| same_segment(*a, *b))),
-    )
-}
-
-fn same_segment(a: IpAddr, b: IpAddr) -> bool {
-    match (a, b) {
-        (IpAddr::V4(a), IpAddr::V4(b)) => a.octets()[..3] == b.octets()[..3],
-        (IpAddr::V6(a), IpAddr::V6(b)) => a.octets()[..8] == b.octets()[..8],
-        _ => false,
-    }
-}
-
-fn by_id(resolvers: &Resolvers, id: &str, proto: &str) -> Option<Candidate> {
-    let provider = resolvers
-        .providers
-        .iter()
-        .find(|provider| provider.id == id)?;
-    let variant = provider.variants.first()?;
-    let server = variant
-        .servers
-        .iter()
-        .find(|server| server.proto == proto && !server.ipv6)?;
-    Some(Candidate {
-        provider: provider.name.clone(),
-        variant: variant.name.clone(),
-        filter: variant.filter.clone(),
-        proto: server.proto.clone(),
-        addr: server.addr.clone(),
-    })
-}
+/// Сколько резолверов предлагается взять. Ядро спрашивает весь список разом и берёт
+/// первый ответ (`batchExchange`), так что четвёртый — это ещё один шанс на быстрый ответ,
+/// а не очередь; дальше прибавка уже не окупает лишние запросы (D-169).
+pub const BEST: usize = 4;
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn resolvers() -> Resolvers {
-        Collections::dns().expect("коллекция обязана читаться")
+        Collections::shipped_dns()
     }
 
     fn shot(proto: &str, ms: Option<u64>) -> Shot {
         Shot {
             candidate: Candidate {
-                provider: proto.into(),
+                // У каждого свой провайдер: двух от одного подбор не берёт (`fastest`).
+                provider: format!("{proto}-{ms:?}"),
                 variant: "тест".into(),
                 filter: String::new(),
                 proto: proto.into(),
@@ -941,7 +435,6 @@ mod tests {
             ms,
             ips: vec![IpAddr::from([1, 1, 1, 1])],
             error: ms.is_none().then(|| "нет ответа".to_string()),
-            skipped: false,
         }
     }
 
@@ -961,8 +454,8 @@ mod tests {
         assert_eq!(picked, ["dot", "doh"], "быстрый `udp` обошёл шифрованных");
     }
 
-    /// Но не любой ценой: шифрованных могли не мерить вовсе (галка «через ядро»),
-    /// и тогда обычные — единственное, что есть.
+    /// Но не любой ценой: шифрованные могли не ответить, и тогда обычные — единственное,
+    /// что есть.
     #[test]
     fn plain_resolvers_fill_the_rest() {
         let shots = vec![
@@ -984,28 +477,75 @@ mod tests {
         assert_eq!(DnsProbe::fastest(&shots, 3).len(), 1);
     }
 
-    /// Умолчание — не вся коллекция: полный перебор это десятки запросов, а вопрос
-    /// решается двумя десятками.
+    /// Не вся коллекция: полный перебор это десятки запросов, а вопрос решается двумя
+    /// десятками.
     #[test]
-    fn the_default_set_is_narrower_than_the_whole_collection() {
-        let resolvers = resolvers();
-        let few = DnsProbe::candidates(&resolvers, false);
-        let every = DnsProbe::candidates(&resolvers, true);
+    fn the_candidates_are_a_short_list() {
+        let few = DnsProbe::candidates(&resolvers(), DnsFilter::Any);
         assert!(!few.is_empty());
-        assert!(
-            few.len() < every.len(),
-            "{} против {}",
-            few.len(),
-            every.len()
-        );
         assert!(few.len() <= 40, "кандидатов слишком много: {}", few.len());
+    }
+
+    /// Каждая категория выбирает, а не берёт всех подряд: хотя бы двое остаются за бортом,
+    /// иначе «четыре быстрых» значило бы «все, какие есть» (S-033). Рекламных провайдеров
+    /// с шифрованием шесть — запас ровно два.
+    #[test]
+    fn every_category_has_enough_providers() {
+        let resolvers = resolvers();
+        for filter in [DnsFilter::Clean, DnsFilter::Ads, DnsFilter::Any] {
+            let providers: HashSet<String> = DnsProbe::candidates(&resolvers, filter)
+                .into_iter()
+                .filter(|candidate| candidate.proto != "udp")
+                .map(|candidate| candidate.provider)
+                .collect();
+            assert!(providers.len() >= BEST + 2, "{filter:?}: {providers:?}");
+        }
+    }
+
+    /// Категория не протекает: в чистые не попадает режущий рекламу, а семейный
+    /// и обход не попадают никуда.
+    #[test]
+    fn a_category_keeps_to_itself() {
+        let resolvers = resolvers();
+        let filters = |filter| -> HashSet<String> {
+            DnsProbe::candidates(&resolvers, filter)
+                .into_iter()
+                .map(|candidate| candidate.filter)
+                .collect()
+        };
+        assert_eq!(
+            filters(DnsFilter::Clean),
+            HashSet::from(["none".to_string()])
+        );
+        assert_eq!(filters(DnsFilter::Ads), HashSet::from(["ads".to_string()]));
+        let any = filters(DnsFilter::Any);
+        assert!(
+            !any.contains("family") && !any.contains("bypass"),
+            "{any:?}"
+        );
+    }
+
+    /// Три точки одного провайдера — одна точка отказа: подбор берёт следующего.
+    #[test]
+    fn one_provider_takes_one_place() {
+        let mut shots = vec![
+            shot("doh", Some(10)),
+            shot("dot", Some(20)),
+            shot("doq", Some(30)),
+        ];
+        shots[1].candidate.provider = shots[0].candidate.provider.clone();
+        let picked: Vec<u64> = DnsProbe::fastest(&shots, 3)
+            .into_iter()
+            .map(|index| shots[index].ms.unwrap())
+            .collect();
+        assert_eq!(picked, [10, 30]);
     }
 
     /// Адреса шестой версии в замер не идут: на машине без IPv6 они дают ложные отказы.
     #[test]
     fn ipv6_stays_out() {
         let resolvers = resolvers();
-        for candidate in DnsProbe::candidates(&resolvers, true) {
+        for candidate in DnsProbe::candidates(&resolvers, DnsFilter::Any) {
             assert!(!candidate.addr.contains("::"), "{}", candidate.addr);
         }
     }
@@ -1014,39 +554,11 @@ mod tests {
     #[test]
     fn a_candidate_is_ready_for_the_core() {
         let resolvers = resolvers();
-        let doh = DnsProbe::candidates(&resolvers, true)
+        let doh = DnsProbe::candidates(&resolvers, DnsFilter::Any)
             .into_iter()
             .find(|candidate| candidate.proto == "doh")
             .expect("в коллекции нет DoH");
         assert!(doh.addr.starts_with("https://"));
-    }
-
-    /// Подменный адрес ядра узнаётся по первым двум байтам: диапазон `198.18.0.0/16`
-    /// заведён под тесты производительности (RFC 2544) и в настоящей сети не встречается.
-    #[test]
-    fn a_fake_address_is_recognised() {
-        assert!(fake(&"198.18.0.5".parse().unwrap()));
-        assert!(fake(&"198.18.255.255".parse().unwrap()));
-        assert!(!fake(&"198.19.0.1".parse().unwrap()));
-        assert!(!fake(&"8.8.8.8".parse().unwrap()));
-        assert!(!fake(&"2001:4860:4860::8888".parse().unwrap()));
-    }
-
-    #[test]
-    fn a_physical_resolver_may_be_intercepted_or_blocked_but_not_answer_directly() {
-        assert!(intercepted_or_blocked(true, true));
-        assert!(intercepted_or_blocked(false, false));
-        assert!(!intercepted_or_blocked(false, true));
-    }
-
-    /// Без ядра судить не о чем, и проба обязана сказать это, а не выдумать вердикт.
-    #[tokio::test]
-    async fn without_a_core_the_leak_probe_says_so() {
-        let report = DnsProbe::leak_report(None, Duration::from_millis(50))
-            .await
-            .unwrap();
-        assert_eq!(report.verdict, Verdict::Idle);
-        assert!(report.headline.contains("не запущено"));
     }
 
     #[test]
@@ -1054,52 +566,6 @@ mod tests {
         assert_eq!(socket_addr("8.8.8.8").unwrap().port(), 53);
         assert_eq!(socket_addr("8.8.8.8:5353").unwrap().port(), 5353);
         assert!(socket_addr("dns.google").is_err());
-    }
-
-    /// Контрольная точка для сверки обязана находиться: без неё `dns-spoof` не запустится.
-    #[test]
-    fn there_is_a_control_point_for_the_comparison() {
-        let resolvers = resolvers();
-        let control = by_id(&resolvers, "google", "doh").expect("нет контрольного DoH");
-        assert_eq!(control.proto, "doh");
-        let plain = by_id(&resolvers, "google", "udp").expect("нет обычного");
-        assert_eq!(plain.addr, "8.8.8.8");
-    }
-
-    /// Живой прогон 09.09.2026: `example.com` отдал `8.6.112.6` по DoH и `8.6.112.0`
-    /// по обычному DNS — это соседние узлы одной площадки, а не подмена. Правило /24
-    /// заведено ровно из-за этого случая.
-    #[test]
-    fn neighbours_in_one_segment_are_not_a_substitution() {
-        let doh = ["8.6.112.6".parse().unwrap(), "8.47.69.6".parse().unwrap()];
-        let plain = ["8.47.69.0".parse().unwrap(), "8.6.112.0".parse().unwrap()];
-        assert_eq!(same_place(&doh, &plain), Some(true));
-    }
-
-    /// Тот же прогон: `rutracker.org` по DoH живёт на Cloudflare, а по 53 приходит адрес
-    /// российского провайдера. Вот это подмена.
-    #[test]
-    fn an_address_from_another_network_is_a_substitution() {
-        let doh = [
-            "172.67.182.196".parse().unwrap(),
-            "104.21.32.39".parse().unwrap(),
-        ];
-        let plain = ["188.186.146.207".parse().unwrap()];
-        assert_eq!(same_place(&doh, &plain), Some(false));
-    }
-
-    #[test]
-    fn without_an_answer_there_is_nothing_to_compare() {
-        let doh: [IpAddr; 1] = ["1.2.3.4".parse().unwrap()];
-        assert_eq!(same_place(&doh, &[]), None);
-        assert_eq!(same_place(&[], &doh), None);
-    }
-
-    #[test]
-    fn versions_do_not_mix() {
-        let four: IpAddr = "8.8.8.8".parse().unwrap();
-        let six: IpAddr = "2001:4860:4860::8888".parse().unwrap();
-        assert!(!same_segment(four, six));
     }
 
     /// Кто идёт своей трубой, а кто через стенд. Ошибиться здесь значит либо не померить
@@ -1113,10 +579,10 @@ mod tests {
         }
     }
 
-    /// Незнакомый протокол, дошедший до нашей трубы, обязан попасть в таблицу
-    /// пропущенным — а не исчезнуть из неё.
+    /// Незнакомый протокол, дошедший до нашей трубы, — честный отказ с причиной,
+    /// а не тишина и не ответ.
     #[tokio::test]
-    async fn an_unknown_protocol_is_skipped_not_hidden() {
+    async fn an_unknown_protocol_is_refused_with_a_reason() {
         let candidate = Candidate {
             provider: "X".into(),
             variant: "d".into(),
@@ -1125,23 +591,7 @@ mod tests {
             addr: "sdns://example".into(),
         };
         let shot = DnsProbe::shoot(&candidate, "example.com", Duration::from_millis(50)).await;
-        assert!(shot.skipped);
         assert!(!shot.ok());
         assert!(shot.error.unwrap().contains("не умеет"));
-    }
-
-    /// Выключенный стенд не прячет строки: шифрованные точки остаются в таблице
-    /// с честной пометкой, а не исчезают.
-    #[tokio::test]
-    async fn without_the_bench_encrypted_points_stay_in_the_table() {
-        let shots = DnsProbe::race("example.com", Duration::from_millis(50), false, false)
-            .await
-            .expect("коллекция обязана читаться");
-        let encrypted: Vec<&Shot> = shots
-            .iter()
-            .filter(|shot| !ours(&shot.candidate.proto))
-            .collect();
-        assert!(!encrypted.is_empty(), "в коллекции нет шифрованных точек");
-        assert!(encrypted.iter().all(|shot| shot.skipped));
     }
 }

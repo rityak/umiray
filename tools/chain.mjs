@@ -116,11 +116,14 @@ check("подписка обновилась кликом", refreshed.updated >=
 const chosen = await session.eval(`
   [...document.querySelectorAll(".rk-dock-item")].find((t) => t.textContent.includes("Соединение"))?.click();
   await new Promise((r) => setTimeout(r, 500));
-  const view = [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "Таблица");
-  if (view) { view.click(); await new Promise((r) => setTimeout(r, 500)); }
+  // Вид списка — радиокнопка SegmentedControl набора, а не кнопка с текстом.
+  const view = document.querySelector('input[type="radio"][value="table"]');
+  if (view && !view.checked) { view.click(); await new Promise((r) => setTimeout(r, 500)); }
   const rows = [...document.querySelectorAll("tbody tr")];
   if (!rows.length) return null;
-  const row = rows[Math.min(1, rows.length - 1)];
+  // Первые строки — выходы клиента DIRECT и AUTO (D-166): выбираем настоящий узел.
+  const row = rows.find((r) => !['DIRECT', 'AUTO'].includes(r.querySelector('td')?.textContent.trim()));
+  if (!row) return null;
   const name = row.querySelector("td")?.textContent.trim() ?? null;
   row.click();
   await new Promise((r) => setTimeout(r, 800));

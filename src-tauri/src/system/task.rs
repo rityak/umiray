@@ -217,7 +217,8 @@ impl SchedulerTask {
     /// но триггеров не имеет: запустить её можно только по требованию, чем и пользуется
     /// `handoff`.
     pub fn apply(at_logon: bool) -> Result<()> {
-        let exe = std::env::current_exe()?;
+        // Задача указывает только на место клиента (D-171), а не на того, кто её заводит.
+        let exe = Installation::installed_exe();
         let path = Paths::root().join("task.xml");
         Paths::ensure_root()?;
         std::fs::write(&path, utf16(&document(&exe, at_logon)))?;
@@ -292,8 +293,8 @@ impl SchedulerTask {
         let task = known();
         if let (Some(command), Ok(current)) = (task.command.as_deref(), std::env::current_exe()) {
             if !same_exe(Path::new(command), &current) {
-                // Only the installed release (or a debug build) may retarget its own task.
-                if !cfg!(debug_assertions) && !Installation::is_installed(&current) {
+                // Перенаправить задачу вправе только клиент на своём месте (D-171).
+                if !Installation::is_installed(&current) {
                     return false;
                 }
                 if Elevation::is_elevated() {

@@ -13,8 +13,8 @@ use std::collections::BTreeMap;
 
 use serde_yaml::{Mapping, Value};
 
+use crate::db::{Db, Table};
 use crate::error::{AppError, Result};
-use crate::paths::Paths;
 
 /// Разница для одной записи: ключ → значение, `null` — убрать ключ.
 pub type Patch = Mapping;
@@ -22,27 +22,28 @@ pub type Patch = Mapping;
 /// Все правки записей одного источника, по тождеству узла (`link::identity_of`).
 pub type Entries = BTreeMap<String, Patch>;
 
+/// Часть источника с правками записей.
+const ENTRIES: &str = "entries";
+
 pub struct EntryPatch;
 
 impl EntryPatch {
     pub fn load(source: &str) -> Entries {
-        std::fs::read_to_string(Paths::source_entries(source))
+        Db::get(Table::Sources, source, ENTRIES)
             .ok()
+            .flatten()
             .and_then(|text| serde_yaml::from_str(&text).ok())
             .unwrap_or_default()
     }
 
     pub fn save(source: &str, entries: &Entries) -> Result<()> {
-        Paths::ensure_sources_dir()?;
-        let path = Paths::source_entries(source);
         if entries.is_empty() {
-            // Пустой файл не нужен: отсутствие правок и есть отсутствие файла.
-            let _ = std::fs::remove_file(&path);
-            return Ok(());
+            // Пустая строка не нужна: отсутствие правок и есть отсутствие строки.
+            return Db::remove(Table::Sources, source, ENTRIES);
         }
         let text = serde_yaml::to_string(entries)
             .map_err(|e| AppError::io(format!("Не удалось записать правки узла: {e}")))?;
-        Ok(crate::atomic::AtomicFile::write(path, text)?)
+        Db::put(Table::Sources, source, ENTRIES, &text)
     }
 
     /// Чем правленая запись отличается от собранной. Пустая разница означает «не правили».

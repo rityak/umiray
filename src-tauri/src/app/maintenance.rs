@@ -4,6 +4,7 @@
 
 use tauri::AppHandle;
 
+use crate::app::data::DataDir;
 use crate::app::settings;
 use crate::app::settings::SettingsStore;
 use crate::app::state::AppState;
@@ -11,7 +12,7 @@ use crate::app::status::Status;
 use crate::config::files::Documents;
 use crate::config::presets::PresetStore;
 use crate::core::EngineId;
-use crate::error::Result;
+use crate::error::{AppError, Result};
 
 pub struct Maintenance;
 
@@ -31,6 +32,25 @@ impl Maintenance {
         factory()?;
         state.settings.reload();
         Ok(state.connection.shown(app, state))
+    }
+
+    /// Настройки копией базы через окно сохранения (D-163). Пусто — человек передумал.
+    pub async fn export(&self) -> Result<Option<String>> {
+        let picked = tauri::async_runtime::spawn_blocking(|| {
+            crate::system::pick::FileDialog::save(
+                "Экспорт настроек umiray",
+                &[("Настройки umiray (*.db)", "*.db")],
+                "umiray-settings.db",
+                "db",
+            )
+        })
+        .await
+        .map_err(|e| AppError::io(format!("Окно сохранения не открылось: {e}")))?;
+        let Some(path) = picked else {
+            return Ok(None);
+        };
+        DataDir::export(&path)?;
+        Ok(Some(path.display().to_string()))
     }
 
     /// Перезапустить приложение с правами администратора: только так включается TUN.

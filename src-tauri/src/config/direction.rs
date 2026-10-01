@@ -1,8 +1,7 @@
-//! Куда идёт трафик — одно решение из четырёх (D-056).
+//! Куда идёт трафик — выход из списка узлов: `DIRECT`, `AUTO` или узел (D-056, D-166).
 //!
-//! Раньше это были две вещи сразу: выбранный узел и негласный режим. Пользователь при этом
-//! не мог ответить на вопрос «что будет с выбором, если я перепишу маршрутизацию». Теперь
-//! понятие одно, и от него зависит и цель псевдонима, и то, чьи конфиги лежат в разделах.
+//! Выход наводит псевдоним `umiray`, на который смотрит `MATCH`. Участвуют ли в сборке
+//! правила набора, решает не он, а тумблер маршрутизации (`Settings::routing`).
 //!
 //! Здесь только правила перехода — без диска и без ядра, поэтому всё проверяется
 //! обычным `cargo test`.
@@ -22,13 +21,12 @@ pub enum Direction {
     /// Из коробки. Источников ещё нет, и обещать «трафик идёт через VPN» нельзя.
     #[default]
     Direct,
-    /// Клиент сам выбирает сервер из всех источников.
+    /// Клиент сам выбирает сервер из всех источников. `rules` — направление прошлых версий:
+    /// псевдоним там вёл на `AUTO`, а свои правила теперь включает тумблер (D-166).
+    #[serde(alias = "rules")]
     Auto,
     /// Конкретный узел. Какой именно — в `Settings::selected`.
     Manual,
-    /// Решают правила пользователя. Псевдоним при этом ведёт на автовыбор, но в этом
-    /// режиме человек волен переписать и группы, и правила: контроль его.
-    Rules,
 }
 
 impl Direction {
@@ -57,7 +55,7 @@ impl Direction {
     pub fn target(direction: Direction, selected: Option<&str>, nodes: &[String]) -> String {
         match Direction::resolve(direction, selected, nodes) {
             Direction::Direct => DIRECT.to_string(),
-            Direction::Auto | Direction::Rules => AUTO.to_string(),
+            Direction::Auto => AUTO.to_string(),
             Direction::Manual => selected
                 .filter(|name| nodes.iter().any(|node| node == name))
                 .map(str::to_string)
@@ -107,7 +105,7 @@ mod tests {
             Direction::Direct,
             "источники уже были — значит DIRECT выбрал человек, и это его дело"
         );
-        for chosen in [Direction::Manual, Direction::Rules, Direction::Auto] {
+        for chosen in [Direction::Manual, Direction::Auto] {
             assert_eq!(
                 Direction::on_source_added(chosen, false),
                 chosen,
@@ -146,11 +144,6 @@ mod tests {
             );
             assert_eq!(Direction::target(direction, Some("Poland"), &[]), DIRECT);
         }
-        assert_eq!(
-            Direction::resolve(Direction::Rules, None, &[]),
-            Direction::Rules,
-            "свои правила работают и без источников: там может быть один DIRECT"
-        );
     }
 
     /// «При выборе manual берётся первый сервер, если не выбрали другой».
@@ -164,14 +157,13 @@ mod tests {
         );
     }
 
+    /// D-166: `rules` прошлых версий читается как `auto` — псевдоним там и вёл на `AUTO`,
+    /// а правила включает тумблер, который по умолчанию включён.
     #[test]
-    fn auto_and_rules_both_aim_at_the_auto_group() {
-        let live = nodes(&["Poland"]);
-        assert_eq!(Direction::target(Direction::Auto, None, &live), AUTO);
-        assert_eq!(
-            Direction::target(Direction::Rules, Some("Poland"), &live),
-            AUTO,
-            "в rules псевдоним ведёт на автовыбор, а дальше решают правила"
-        );
+    fn the_old_rules_direction_reads_as_auto() {
+        let old: Direction = serde_json::from_str(r#""rules""#).unwrap();
+        assert_eq!(old, Direction::Auto);
+        assert_eq!(serde_json::to_string(&old).unwrap(), r#""auto""#);
+        assert_eq!(Direction::target(old, None, &nodes(&["Poland"])), AUTO);
     }
 }

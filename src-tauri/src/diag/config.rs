@@ -1,19 +1,16 @@
 //! Примет ли ядро то, что мы собрали, — не запуская VPN.
 //!
 //! У mihomo для этого есть свой ключ (`-t`): он читает конфиг, ругается и выходит.
-//! Это самая дешёвая проверка во всём разделе — секунда без единого пакета в сеть,
-//! и она отвечает на добрую половину вопросов «почему не подключается».
+//! Секунда без единого пакета в сеть — и ответ на добрую половину вопросов «почему
+//! не подключается». Зовёт проверка перед подключением (D-106).
 //!
 //! Проверяем **отдельный файл**, а не `run/config.yaml`: тот принадлежит запущенному
 //! ядру, и переписывать его ради проверки значит трогать работающий VPN.
 
 use std::process::Command;
-use std::time::Instant;
 
 use crate::core::mihomo::Mihomo;
-use crate::diag::report::{Report, Tone, Verdict};
 use crate::error::{AppError, Result};
-use crate::nodes::sources::SourceStore;
 
 /// Имя временного файла. Лежит рядом с рабочим конфигом: у ядра там уже есть права
 /// и туда же смотрит `SAFE_PATHS`.
@@ -24,14 +21,12 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// Что сказало ядро о готовом конфиге. Пусто — принял.
 ///
-/// Типизированный слой под отчётом (D-097): им пользуется и утилита ниже, и проверка
-/// перед подключением (D-106) — у той конфиг уже собран, и собирать его второй раз
-/// значило бы проверить не то, что запустится.
+/// Конфиг приходит уже собранным: собрать его здесь второй раз значило бы проверить
+/// не то, что запустится.
 pub struct Said {
     pub ok: bool,
     /// Вывод ядра построчно, пустые строки убраны.
     pub lines: Vec<String>,
-    pub ms: u64,
 }
 
 impl Said {
@@ -49,6 +44,16 @@ impl Said {
             None => "ядро отказало без объяснения".to_string(),
         }
     }
+
+    /// Та же жалоба словами ядра — без времени и уровня строки лога. Для окна, где
+    /// `time="…" level=error msg="…"` читать некому.
+    pub fn reason(&self) -> String {
+        let complaint = self.complaint();
+        complaint
+            .split_once("msg=\"")
+            .map(|(_, rest)| rest.trim_end_matches(['"', '…']).to_string())
+            .unwrap_or(complaint)
+    }
 }
 
 pub struct DryRun;
@@ -59,7 +64,6 @@ impl DryRun {
     /// Проверяем **отдельный файл**, а не `run/config.yaml`: тот принадлежит запущенному ядру,
     /// и переписывать его ради проверки значит трогать работающий VPN.
     pub fn accepts(yaml: &str) -> Result<Said> {
-        let started = Instant::now();
         let core = Mihomo::binary();
         std::fs::create_dir_all(Mihomo::workdir())?;
         let path = Mihomo::workdir().join(PROBE);
@@ -71,10 +75,7 @@ impl DryRun {
             .arg("-d")
             .arg(Mihomo::workdir())
             .arg("-f")
-            .arg(&path)
-            // Тот же уговор, что у супервизора: без него ядро не читает файлы провайдеров
-            // из соседнего каталога и валит проверку не по делу (GOTCHAS).
-            .env("SAFE_PATHS", SourceStore::dir());
+            .arg(&path);
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -104,53 +105,11 @@ impl DryRun {
         Ok(Said {
             ok: output.status.success(),
             lines,
-            ms: started.elapsed().as_millis() as u64,
         })
-    }
-
-    /// `config-test`: собрать конфиг и показать его ядру.
-    ///
-    /// `rules` — маршрутизация применённого набора; её знает только `app`, поэтому она
-    /// приходит снаружи (тот же уговор, что у `crate::render::effective::ConfigRenderer::effective`, D-071).
-    pub fn test(rules: Option<&str>) -> Result<Report> {
-        let mut report = Report::new("config-test");
-        if !Mihomo::binary().exists() {
-            report.say(Tone::Dim, "ядра нет — проверять нечем");
-            return Ok(report.finish(Verdict::Idle, "ядро не установлено", 0));
-        }
-
-        let assembled = crate::render::effective::ConfigRenderer::effective(rules, None)?;
-        report.say(
-            Tone::Info,
-            format!(
-                "config-test file={PROBE} lines={}",
-                assembled.yaml.lines().count()
-            ),
-        );
-        report.say(
-            Tone::Dim,
-            format!("mihomo -t -d {} -f {PROBE}", Mihomo::workdir().display()),
-        );
-
-        let said = DryRun::accepts(&assembled.yaml)?;
-        if said.lines.is_empty() {
-            report.say(Tone::Dim, "ядро промолчало");
-        }
-        for line in &said.lines {
-            report.say(if said.ok { Tone::Dim } else { Tone::Bad }, line.clone());
-        }
-        let (verdict, headline) = if said.ok {
-            (Verdict::Ok, "конфиг принят".to_string())
-        } else {
-            (Verdict::Bad, said.complaint())
-        };
-        Ok(report.finish(verdict, headline, said.ms))
     }
 }
 
-/// На что именно ругнулось ядро. Первая строка с «error» — она и есть причина;
-/// если такой нет, берём первую непустую.
-/// Заголовок — одна строка в списке проб, и длинная реплика ядра его ломает.
+/// Жалоба — заголовок в одну строку, и длинная реплика ядра его ломает.
 fn trim_to(text: &str, limit: usize) -> String {
     if text.chars().count() <= limit {
         return text.to_string();
@@ -166,7 +125,6 @@ mod tests {
         Said {
             ok: false,
             lines: lines.iter().map(|line| line.to_string()).collect(),
-            ms: 0,
         }
     }
 
@@ -193,6 +151,15 @@ mod tests {
         let complaint = said(&[&long]).complaint();
         assert_eq!(complaint.chars().count(), 120);
         assert!(complaint.ends_with('…'));
+    }
+
+    #[test]
+    fn the_reason_drops_the_log_prefix() {
+        let out = said(&[
+            "time=\"2026-10-01T19:12:50+08:00\" level=error msg=\"proxy 0: unsupport proxy type: vlesss\"",
+        ]);
+        assert_eq!(out.reason(), "proxy 0: unsupport proxy type: vlesss");
+        assert_eq!(said(&["error: plain"]).reason(), "error: plain");
     }
 
     #[test]

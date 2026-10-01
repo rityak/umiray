@@ -49,6 +49,14 @@ const TICKS: &[Tick] = &[
         every: Duration::from_secs(60),
         run: sources,
     },
+    // Час, а не минута: у списка срок в сутки, а неудачу стоит повторить, но не
+    // каждую минуту — источник мог просто лечь (D-157).
+    Tick {
+        id: "lists",
+        label: "обновление rule sets",
+        every: Duration::from_secs(3600),
+        run: lists,
+    },
     Tick {
         id: "guard",
         label: "сторож соединения",
@@ -182,6 +190,10 @@ fn firewall(state: &AppState, _first: bool) -> Job<'_> {
         );
         Ok(())
     })
+}
+
+fn lists(state: &AppState, _first: bool) -> Job<'_> {
+    Box::pin(crate::app::lists::Lists::due(state))
 }
 
 /// Страны узлов (D-084): у записи свой срок в неделю, здесь только «не пора ли».

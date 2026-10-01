@@ -8,6 +8,7 @@ use serde_yaml::{Mapping, Value};
 
 use crate::config::direction::{AUTO, DIRECT, PROBE, SELECTOR, UDP};
 use crate::config::mode::Mode;
+use crate::config::rules::RulesCodec;
 use crate::error::{AppError, Result};
 use crate::nodes::health::EXPECTED;
 use crate::render::plan::{Client, NodeSource};
@@ -50,6 +51,8 @@ impl MihomoRenderer {
     ) -> Result<Effective> {
         let mut map = assemble(user, sources, client)?;
         builtin_rules(&mut map, builtin);
+        // После встроенных: их строки тоже вправе ссылаться на скачанный список.
+        crate::render::mihomo_lists::MihomoLists::apply(&mut map, &client.lists);
         providers(&mut map, sources, &client.health);
         let mode = crate::config::mode::Mode::of(&map);
         baseline(&mut map, mode);
@@ -62,6 +65,8 @@ impl MihomoRenderer {
         if let Some(port) = probe {
             probe_seam(&mut map, sources, port);
         }
+        // Последним: к этому месту заведены все группы, в которые правило может целиться.
+        missing_targets(&mut map);
 
         let port = match mode {
             Mode::Local => map
@@ -520,12 +525,7 @@ fn node_targets(map: &mut Mapping, sources: &[NodeSource]) {
         .cloned()
         .unwrap_or_default();
     let mut taken: Vec<String> = groups.iter().filter_map(name_of).collect();
-    taken.extend(
-        map.get(Value::from("proxies"))
-            .and_then(Value::as_sequence)
-            .map(|list| list.iter().filter_map(name_of).collect::<Vec<String>>())
-            .unwrap_or_default(),
-    );
+    taken.extend(names(map, "proxies"));
 
     let before = groups.len();
     for target in rule_targets(map) {
@@ -563,19 +563,66 @@ fn rule_targets(map: &Mapping) -> Vec<String> {
         .and_then(Value::as_sequence)
         .cloned()
         .unwrap_or_default();
-    for target in lines.iter().filter_map(Value::as_str).filter_map(target_of) {
-        if !targets.iter().any(|seen| seen == target) {
-            targets.push(target.to_string());
+    for line in lines.iter().filter_map(Value::as_str) {
+        let parts: Vec<&str> = line.split(',').map(str::trim).collect();
+        let Some(at) = RulesCodec::exit_at(&parts) else {
+            continue;
+        };
+        if !targets.iter().any(|seen| seen == parts[at]) {
+            targets.push(parts[at].to_string());
         }
     }
     targets
 }
 
-/// Третья часть строки правила — та, что отвечает «куда»; у `MATCH` вторая.
-fn target_of(line: &str) -> Option<&str> {
-    let mut parts = line.split(',').map(str::trim);
-    let at = if parts.next()? == "MATCH" { 0 } else { 1 };
-    parts.nth(at)
+/// Выходы, которые у ядра есть всегда.
+const EXITS: [&str; 6] = [
+    DIRECT,
+    "REJECT",
+    "REJECT-DROP",
+    "PASS",
+    "COMPATIBLE",
+    "GLOBAL",
+];
+
+/// Цель, которой нет, — на псевдоним (D-156).
+///
+/// Узел пропал из подписки — правило в него ядро отвергло бы вместе со всем конфигом, и VPN
+/// не поднялся бы из-за одной строки. Выкинуть правило нельзя: непойманное уйдёт по `MATCH`,
+/// а тот бывает `DIRECT` — мимо туннеля. Документ пользователя не трогаем: вернётся узел —
+/// правило снова ведёт в него.
+fn missing_targets(map: &mut Mapping) {
+    let mut known = names(map, "proxy-groups");
+    known.extend(names(map, "proxies"));
+    let Some(rules) = map
+        .get_mut(Value::from("rules"))
+        .and_then(Value::as_sequence_mut)
+    else {
+        return;
+    };
+    for line in rules.iter_mut() {
+        let Some(text) = line.as_str() else {
+            continue;
+        };
+        let mut parts: Vec<&str> = text.split(',').map(str::trim).collect();
+        let Some(at) = RulesCodec::exit_at(&parts) else {
+            continue;
+        };
+        if EXITS.contains(&parts[at]) || known.iter().any(|name| name == parts[at]) {
+            continue;
+        }
+        parts[at] = SELECTOR;
+        let rewritten = parts.join(",");
+        *line = Value::from(rewritten);
+    }
+}
+
+/// Имена записей списка `key`: групп или узлов.
+fn names(map: &Mapping, key: &str) -> Vec<String> {
+    map.get(Value::from(key))
+        .and_then(Value::as_sequence)
+        .map(|list| list.iter().filter_map(name_of).collect())
+        .unwrap_or_default()
 }
 
 /// Несколько имён одним фильтром: `^(одно|другое)$`. Каждое экранируется тем же
@@ -667,6 +714,7 @@ mod tests {
             health: crate::nodes::health::DEFAULT.to_string(),
             udp: false,
             mask: crate::config::awg::Mask::default(),
+            lists: Vec::new(),
         }
     }
 
@@ -840,6 +888,51 @@ mod tests {
         assert!(!names.contains(&"DIRECT"), "концы маршрута — не узлы");
     }
 
+    /// B-018, D-156: узел пропал из подписки — правило в него уходит в псевдоним, а не валит
+    /// конфиг целиком. Цель составного правила — последняя часть, и узел там живой.
+    #[test]
+    fn a_rule_aimed_at_a_vanished_node_goes_through_the_alias() {
+        let rules = "rules:
+  - DOMAIN-SUFFIX,aeza.net,vless-reality-gone
+  - AND,((DOMAIN,a.ru),(NETWORK,UDP)),Poland 1
+  - SUB-RULE,(NETWORK,tcp),inner
+  - DOMAIN,b.ru,REJECT
+  - MATCH,vless-reality-gone
+";
+        let built = config(
+            &[rules.to_string()],
+            &[],
+            &[source_of("aaaa1111bbbb2222", &["Poland 1"])],
+            None,
+        )
+        .unwrap();
+        let out = parsed(&built);
+        let lines: Vec<&str> = out["rules"]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        assert_eq!(
+            lines,
+            [
+                "DOMAIN-SUFFIX,aeza.net,umiray",
+                "AND,((DOMAIN,a.ru),(NETWORK,UDP)),Poland 1",
+                "SUB-RULE,(NETWORK,tcp),inner",
+                "DOMAIN,b.ru,REJECT",
+                "MATCH,umiray",
+            ]
+        );
+        assert!(
+            out["proxy-groups"]
+                .as_sequence()
+                .unwrap()
+                .iter()
+                .any(|group| group["name"] == "Poland 1"),
+            "составное правило в живой узел получает его группу"
+        );
+    }
+
     const WG: &str =
         "wireguard://a2V5@10.9.8.7:51820?address=10.0.0.5/32&publickey=cHVi&mtu=1420#wg";
 
@@ -997,6 +1090,7 @@ mod tests {
                     health: crate::nodes::health::DEFAULT.to_string(),
                     udp: true,
                     mask: crate::config::awg::Mask::default(),
+                    lists: Vec::new(),
                 },
             )
             .unwrap(),
@@ -1098,6 +1192,7 @@ mod tests {
                     health: mine.to_string(),
                     udp: false,
                     mask: crate::config::awg::Mask::default(),
+                    lists: Vec::new(),
                 },
             )
             .unwrap(),
@@ -1369,6 +1464,8 @@ mod tests {
                     options: Vec::new(),
                 }],
                 fallback: SELECTOR.into(),
+                rule_sets: Vec::new(),
+                ready: Vec::new(),
             },
         )
         .unwrap();

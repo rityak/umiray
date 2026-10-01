@@ -161,7 +161,7 @@ export default function GroupRow({
             error={
               RESERVED.includes(group.name.trim())
                 ? t(
-                    "This name is reserved for a client group. Replacing it breaks route switching in Connection. Choose another name.",
+                    "The client uses this name for its own group. Yours would replace it and break exit selection in Connection. Pick another name.",
                   )
                 : undefined
             }
@@ -256,7 +256,7 @@ export default function GroupRow({
           {selection.others.length > 0 && (
             <Text tone="muted" size="xs" className="block">
               {t(
-                "Other members: {names}. These are groups, direct connections or manually entered names; edit them in Code view.",
+                "Also in the group: {names} — other groups, DIRECT or names typed by hand. Edit them in Code.",
                 { names: selection.others.join(" · ") },
               )}
             </Text>
@@ -306,7 +306,7 @@ export default function GroupRow({
             {!isLive && parts.length > 0 && (
               <Text tone="muted" size="xs" className="block">
                 {t(
-                  "This subset stores exact names. New subscription nodes will not join automatically; select the whole source to keep the list live.",
+                  "Part of a source is saved as exact names, so new subscription nodes won't join. Check the whole source to keep the list live.",
                 )}
               </Text>
             )}
@@ -315,16 +315,19 @@ export default function GroupRow({
 
         {coded.length > 0 && (
           <Callout tone="warn">
-            {t("The form preserves unknown fields: {fields}. Edit them in Code view.", {
-              fields: coded.join(", "),
-            })}
+            {t(
+              "The form doesn't know these fields and keeps them as is: {fields}. Edit them in Code.",
+              {
+                fields: coded.join(", "),
+              },
+            )}
           </Callout>
         )}
 
         <Divider />
         <div className="flex items-center gap-2">
           <Text tone="muted" size="xs" className="block">
-            {t("This group becomes a member of umiray and can be used as a rule target.")}
+            {t("The group joins umiray and can be a rule target.")}
           </Text>
           <span className="flex-1" />
           <ConfirmButton

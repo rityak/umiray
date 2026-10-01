@@ -1,9 +1,9 @@
-import { Download, Server, ShieldAlert } from "lucide-react";
+import { Server, ShieldAlert } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { Button, Callout, Card, EmptyState, Field, Item, SegmentedControl } from "rootik";
 import type * as api from "../api";
 import NodeDelay from "../connection/NodeDelay";
-import Nodes from "../connection/Nodes";
+import NodeTiles from "../connection/NodeTiles";
 import PowerRow from "../connection/PowerRow";
 import Speed from "../connection/Speed";
 import { ENGINES } from "../engines";
@@ -13,7 +13,9 @@ import { type Speed as Rate, ZERO } from "../hooks/useTraffic";
 import { t } from "../i18n";
 import { failure, type Message, notice } from "../shell/Banner";
 import Uptime from "../shell/Uptime";
+import type { AddKind } from "../sources/AddMenu";
 import * as qd from "./api";
+import QdSubscription from "./QdSubscription";
 
 type Wish = { egress?: boolean; adblock?: boolean };
 
@@ -26,9 +28,10 @@ type Props = {
   powering: boolean;
   onPower: () => void;
   onChanged: () => Promise<void> | void;
-  onInstall: () => void;
   onElevate: () => void;
-  onAdd: () => void;
+  onAdd: (kind: AddKind) => void;
+  hidden: boolean;
+  onHidden: () => void;
   onMessage: (message: Message) => void;
 };
 
@@ -39,9 +42,10 @@ export default function QdConnection({
   powering,
   onPower,
   onChanged,
-  onInstall,
   onElevate,
   onAdd,
+  hidden,
+  onHidden,
   onMessage,
 }: Props) {
   const [nodes, setNodes] = useCached<qd.Node[]>("qd.nodes", []);
@@ -87,34 +91,14 @@ export default function QdConnection({
     () => onMessage(notice(t("qd picks the entry node itself."))),
     [onMessage],
   );
-  const refresh = useCallback(async () => {
-    await qd.refresh();
-    onChanged();
-  }, [onChanged]);
-
-  if (status && !status.present) {
-    return (
-      <Card>
-        <EmptyState
-          icon={<Download />}
-          title={t("qd is not downloaded yet")}
-          hint={t(
-            "It is fetched from the qd releases on GitHub and checked against the published checksum.",
-          )}
-          action={<Button onClick={onInstall}>{t("Download qd")}</Button>}
-        />
-      </Card>
-    );
-  }
+  // Нескачанного qd здесь не бывает: вид qd есть только при скачанном (D-161).
   if (status && !status.elevated) {
     return (
       <Card>
         <EmptyState
           icon={<ShieldAlert />}
           title={t("qd needs administrator rights")}
-          hint={t(
-            "It captures traffic through WinDivert, which only works for an elevated process.",
-          )}
+          hint={t("It captures traffic with WinDivert, which only works with admin rights.")}
           action={<Button onClick={onElevate}>{t("Restart as administrator")}</Button>}
         />
       </Card>
@@ -124,10 +108,11 @@ export default function QdConnection({
   const node = connected ? (state?.node ?? null) : null;
   const total = state?.nodes.total ?? 0;
   const face = node ?? (total === 1 ? (nodes[0] ?? null) : null);
-
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-[340px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-3">
-      <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
+    // Подписка у qd одна, а узлов немного: подписка и узлы стоят рядом с питанием без
+    // переключателя, а трафик под ними во всю ширину — так окно не пустует.
+    <div className="grid min-h-0 flex-1 grid-cols-[340px_minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] gap-3">
+      <div className="flex flex-col gap-3">
         {status?.problem && <Callout tone="danger" title={status.problem} />}
         {other && (
           <Callout
@@ -212,6 +197,37 @@ export default function QdConnection({
             </div>
           </div>
         </Card>
+      </div>
+
+      {/* `contain: size`: the row takes the height of the power card, and the nodes scroll
+          inside it instead of pushing the traffic down. */}
+      <div className="flex min-h-0 flex-col gap-3 [contain:size]">
+        <QdSubscription
+          state={state}
+          hidden={hidden}
+          onHidden={onHidden}
+          onChanged={onChanged}
+          onAdd={onAdd}
+          onMessage={onMessage}
+        />
+        {shown.length > 0 && (
+          <Card padding="sm" title={t("Entry nodes")} className="min-h-0 flex-1">
+            <div className="-mx-1 h-full overflow-y-auto px-1 pb-1">
+              <NodeTiles
+                nodes={shown}
+                selected={nodes.find((item) => item.selected && connected)?.name ?? null}
+                sourceName={() => "qd"}
+                hidden={false}
+                rates={{}}
+                plain
+                onSelect={pick}
+              />
+            </div>
+          </Card>
+        )}
+      </div>
+
+      <div className="col-span-2 flex min-h-0 flex-col">
         <Speed
           running={connected}
           history={history}
@@ -219,24 +235,6 @@ export default function QdConnection({
           totals={null}
         />
       </div>
-
-      <Nodes
-        nodes={shown}
-        selected={nodes.find((item) => item.selected && connected)?.name ?? null}
-        rules={false}
-        sources={[]}
-        hidden={false}
-        rates={{}}
-        onSelect={pick}
-        onManual={() => {}}
-        onChanged={reloadNodes}
-        onAdd={onAdd}
-        onMessage={onMessage}
-        onRefresh={refresh}
-        refreshLabel={t("Refresh the qd subscription")}
-        emptyHint={t("Add the qd:// link in Sources.")}
-        plain
-      />
     </div>
   );
 }

@@ -15,6 +15,7 @@ const INITIAL: api.Status = {
   trouble: null,
   port: null,
   corePresent: true,
+  qdPresent: false,
   elevated: false,
   alwaysAdmin: false,
   systemProxy: false,
@@ -54,7 +55,7 @@ export function useStatus(report: (message: Message) => void) {
     report(
       notice(
         t(
-          "System proxy is already set to {proxy}. Switch to System to take over, or check which app configured it.",
+          "System proxy is already set to {proxy}. Switch to System to replace it, or find the app that set it.",
           { proxy: status.foreignProxy },
         ),
       ),

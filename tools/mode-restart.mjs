@@ -74,14 +74,16 @@ async function fileMode(session) {
 
 const pick = (session, mode) =>
   session.eval(`
-    const input = [...document.querySelectorAll('input[name="mode"]')].find((i) => i.value === ${JSON.stringify(mode)});
+    const input = [...document.querySelectorAll('[aria-label="Перехват"] input[type="radio"]')].find((i) => i.value === ${JSON.stringify(mode)});
     if (!input) return false;
     input.click();
     return true;
   `);
 
 const shown = (session) =>
-  session.eval(`return document.querySelector('input[name="mode"]:checked')?.value ?? null;`);
+  session.eval(
+    `return document.querySelector('[aria-label="Перехват"] input[type="radio"]:checked')?.value ?? null;`,
+  );
 
 // --- поехали ---------------------------------------------------------------
 
@@ -122,7 +124,7 @@ check(
 );
 check(
   "и не поднял ядро: режим — не подключение (D-060)",
-  (await session.eval(`return document.body.textContent.includes("Отключено");`)) === true,
+  (await session.eval(`return document.body.textContent.includes("Отключён");`)) === true,
 );
 
 await pick(session, "tun");
@@ -133,7 +135,7 @@ await session.until(
 check("клик «TUN» записал режим в файл", (await fileMode(session)) === "true");
 check(
   "TUN тоже не поднимает ядро",
-  (await session.eval(`return document.body.textContent.includes("Отключено");`)) === true,
+  (await session.eval(`return document.body.textContent.includes("Отключён");`)) === true,
   elevated ? "окно от администратора — тем более важно" : "прав нет, и они не понадобились",
 );
 
@@ -154,7 +156,7 @@ check(
 );
 check(
   "ядро при этом не поднято",
-  (await session.eval(`return document.body.textContent.includes("Отключено");`)) === true,
+  (await session.eval(`return document.body.textContent.includes("Отключён");`)) === true,
 );
 check(
   "окно поднялось без ошибки",

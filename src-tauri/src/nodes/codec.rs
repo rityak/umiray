@@ -25,6 +25,11 @@ impl Base64 {
         base64::engine::general_purpose::STANDARD.encode(bytes)
     }
 
+    /// url-safe без набивки — так пишет `ssr://`, и так его читают все, включая ядро.
+    pub fn encode_url(bytes: &[u8]) -> String {
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+    }
+
     pub fn decode_text(raw: &str) -> Option<String> {
         String::from_utf8(Base64::decode(raw)?).ok()
     }

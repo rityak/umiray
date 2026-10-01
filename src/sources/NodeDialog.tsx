@@ -4,13 +4,13 @@ import { Button, Callout, Dialog, Spacer, Text } from "rootik";
 import * as api from "../api";
 import Editor from "../config/Editor";
 import { t } from "../i18n";
+import { failure } from "../shell/Banner";
 import ProxyForm from "./ProxyForm";
-import { missing, PROTOCOLS, toEntry, type Values } from "./proxy";
+import { missing, PROTOCOLS, toEntry, type Values, wrong } from "./proxy";
 
 type Props = {
   onDone: (result: api.Import) => void;
   onClose: () => void;
-  onFailed: (error: unknown) => void;
 };
 
 /**
@@ -23,22 +23,27 @@ type Props = {
  * written in the window would drift from the first at the first escape. An edit in code
  * takes over: once you go to text, the text is what gets added, and the window says so.
  */
-export default function NodeDialog({ onDone, onClose, onFailed }: Props) {
+export default function NodeDialog({ onDone, onClose }: Props) {
   const [kind, setKind] = useState(PROTOCOLS[0].id);
   const [values, setValues] = useState<Values>({});
   const [text, setText] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /// Отказ — здесь, у полей: баннер лежит под модальным окном, и его не видно.
+  const [failed, setFailed] = useState<string | null>(null);
 
   const gaps = missing(kind, values).map((label) => t(label));
+  const bad = wrong(kind, values).map((label) => t(label));
   const coding = text !== null;
+  const blocked = !coding && (gaps.length > 0 || bad.length > 0);
 
   /// Code starts from what is already typed: an empty code view would mean typing it all again.
   const toCode = async () => {
     setBusy(true);
+    setFailed(null);
     try {
       setText(await api.sourcesProxyYaml(toEntry(kind, values)));
     } catch (e) {
-      onFailed(e);
+      setFailed(failure(e).text);
     } finally {
       setBusy(false);
     }
@@ -46,6 +51,7 @@ export default function NodeDialog({ onDone, onClose, onFailed }: Props) {
 
   const add = async () => {
     setBusy(true);
+    setFailed(null);
     try {
       onDone(
         coding
@@ -53,7 +59,7 @@ export default function NodeDialog({ onDone, onClose, onFailed }: Props) {
           : await api.sourcesAddProxy(toEntry(kind, values)),
       );
     } catch (e) {
-      onFailed(e);
+      setFailed(failure(e).text);
     } finally {
       setBusy(false);
     }
@@ -64,7 +70,7 @@ export default function NodeDialog({ onDone, onClose, onFailed }: Props) {
       open
       size="lg"
       title={t("Custom node")}
-      description={t("Fields are named the way mihomo names them. Empty ones are not written.")}
+      description={t("Fields use mihomo's names. Empty ones aren't written.")}
       onClose={onClose}
       footer={
         <>
@@ -86,11 +92,13 @@ export default function NodeDialog({ onDone, onClose, onFailed }: Props) {
             variant="primary"
             icon={<Plus />}
             loading={busy}
-            disabled={!coding && gaps.length > 0}
+            disabled={blocked}
             title={
               !coding && gaps.length > 0
                 ? t("Missing: {fields}", { fields: gaps.join(", ") })
-                : undefined
+                : !coding && bad.length > 0
+                  ? t("Check: {fields}", { fields: bad.join(", ") })
+                  : undefined
             }
             onClick={add}
           >
@@ -100,6 +108,7 @@ export default function NodeDialog({ onDone, onClose, onFailed }: Props) {
       }
     >
       <div className="flex flex-col gap-2">
+        {failed && <Callout tone="danger" title={failed} />}
         {coding ? (
           <>
             <div className="h-96 overflow-hidden">
@@ -107,7 +116,7 @@ export default function NodeDialog({ onDone, onClose, onFailed }: Props) {
             </div>
             <Text tone="muted" size="xs" className="block">
               {t(
-                "What is written here will be added. You can go back to the fields, but what you typed in code is lost then — the form assembles the node again.",
+                "What's written here gets added. Going back to the fields drops what you typed — the form rebuilds the node.",
               )}
             </Text>
           </>
@@ -121,12 +130,19 @@ export default function NodeDialog({ onDone, onClose, onFailed }: Props) {
             />
             {gaps.length > 0 && (
               <Callout tone="warn">
-                {t("The node will not come up without: {fields}.", { fields: gaps.join(", ") })}
+                {t("The node won't come up without: {fields}.", { fields: gaps.join(", ") })}
+              </Callout>
+            )}
+            {bad.length > 0 && (
+              <Callout tone="warn">
+                {t("The node won't come up with these values: {fields}.", {
+                  fields: bad.join(", "),
+                })}
               </Callout>
             )}
             <Text tone="muted" size="xs" className="block">
               {t(
-                "The core has more fields than shown here — add the rest in code: a node added this way is editable as a whole config.",
+                "The core has more fields than the form — add the rest in code. A node added this way can be edited as a whole config.",
               )}
             </Text>
           </>

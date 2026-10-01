@@ -132,7 +132,7 @@ export default function GroupsForm({ text, onDraft, onMessage }: Props) {
         <EmptyState
           tone="warn"
           title={t("This document can only be edited as code")}
-          hint={`${refused} ${t("Open Code view to edit the original document without losing anything.")}`}
+          hint={`${refused} ${t("Open Code to edit the document without losing anything.")}`}
         />
       </Card>
     );
@@ -148,7 +148,7 @@ export default function GroupsForm({ text, onDraft, onMessage }: Props) {
             choices.sources.length === 0
               ? t("Add a subscription or a link in Sources first.")
               : t(
-                  "AUTO already includes every source. Create a group to select a subset, such as one country.",
+                  "AUTO already covers every source. Create a group to pick a subset, like one country.",
                 )
           }
         />

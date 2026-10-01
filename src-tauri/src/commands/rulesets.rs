@@ -1,4 +1,5 @@
-//! Команды про встроенные наборы правил (D-083).
+//! Команды про готовые наборы правил (D-083): сами файлы. Какие из них в маршруте,
+//! решает раздел `ready` документа набора (D-158) — его пишет `config_write`.
 
 use tauri::State;
 
@@ -8,7 +9,7 @@ use crate::config::rulesets::Ruleset;
 use crate::config::rulesets::RulesetStore;
 use crate::error::Result;
 
-/// Все наборы папки и то, какие из них включены.
+/// Все наборы папки с их выходом по умолчанию.
 #[tauri::command]
 pub fn rulesets_list() -> Vec<Ruleset> {
     RulesetStore::list()
@@ -20,15 +21,15 @@ pub fn rulesets_read(id: String) -> Result<String> {
     RulesetStore::read(&id)
 }
 
-/// Завести свой набор. Ядру ничего не доезжает: новый набор выключен, и в сборку
-/// он не входит — поэтому здесь идентификатор, а не статус.
+/// Завести свой набор. Ядру ничего не доезжает: в маршрут новый набор не входит, пока
+/// его не выберут, — поэтому здесь идентификатор, а не статус.
 #[tauri::command]
 pub fn rulesets_create(title: String) -> Result<String> {
     RulesetStore::create(&title)
 }
 
-/// Удалить набор — и довести это до живого ядра: удалённый включённый набор уносит
-/// свои правила из сборки.
+/// Удалить набор — и довести это до живого ядра: выбранный в маршруте уносит свои
+/// правила из сборки.
 #[tauri::command]
 pub async fn rulesets_delete(
     id: String,
@@ -56,20 +57,5 @@ pub async fn rulesets_write(
     state
         .connection
         .change(&app, &state, || RulesetStore::write(&id, &text))
-        .await
-}
-
-/// Включить или выключить набор — и довести до живого ядра (D-102, D-143), поэтому
-/// команда отдаёт статус.
-#[tauri::command]
-pub async fn rulesets_set(
-    id: String,
-    on: bool,
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
-) -> Result<Status> {
-    state
-        .connection
-        .change(&app, &state, || RulesetStore::toggle(&id, on))
         .await
 }

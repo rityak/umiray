@@ -4,8 +4,11 @@
 //! (Remnawave). Формат значения панель проверяет: `[a-zA-Z0-9=-]{10,64}`, а стандарт XTLS
 //! ограничивает длину 36 символами — MachineGuid укладывается ровно.
 
+use crate::db::{Db, Table};
 use crate::error::{AppError, Result};
-use crate::paths::Paths;
+
+/// Строка идентификатора в таблице состояния (D-170).
+const ROW: &str = "hwid";
 
 pub struct Device;
 
@@ -19,9 +22,9 @@ impl Device {
     /// Файл рядом — не источник истины, а слепок: если реестр недоступен, берём из него,
     /// иначе перезаписываем. Два разных значения означали бы два устройства в панели.
     pub fn hwid() -> Result<String> {
-        let path = Paths::hwid();
-        let cached = std::fs::read_to_string(&path)
+        let cached = Db::get(Table::State, ROW, "")
             .ok()
+            .flatten()
             .map(|text| text.trim().to_string())
             .filter(|id| is_valid(id));
 
@@ -34,8 +37,7 @@ impl Device {
         };
 
         if cached.as_deref() != Some(id.as_str()) {
-            Paths::ensure_root()?;
-            crate::atomic::AtomicFile::write(&path, &id)?;
+            Db::put(Table::State, ROW, "", &id)?;
         }
         Ok(id)
     }

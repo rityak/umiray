@@ -1,4 +1,4 @@
-//! Что Windows думает про сеть: адаптеры, маршруты по умолчанию, свои резолверы.
+//! Что Windows думает про сеть: маршруты по умолчанию, свои резолверы, хозяин порта.
 //!
 //! Читаем командлетами `NetTCPIP`/`DnsClient`, а не `route print` и `ipconfig`: их вывод
 //! переведён на язык системы и разбит по ширине консоли, а мы уже обжигались на
@@ -6,23 +6,12 @@
 //! одинаковые везде.
 //!
 //! Модуль **только читает**. Ничего не меняет и не решает: что из прочитанного считать
-//! бедой — дело диагностики.
+//! бедой — дело того, кто спросил.
 
 #[cfg(test)]
 use std::collections::HashSet;
 
 use crate::error::{AppError, Result};
-
-/// Сетевой адаптер так, как его видит система.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Adapter {
-    pub name: String,
-    /// Описание драйвера. По нему и узнаются соседи: «WireGuard Tunnel», «TAP-Windows»,
-    /// «Hyper-V Virtual Ethernet».
-    pub driver: String,
-    /// `Up` · `Disconnected` · `Disabled`.
-    pub status: String,
-}
 
 /// Маршрут по умолчанию: чей адаптер и с какой метрикой. Побеждает наименьшая сумма
 /// метрик — по ней и видно, идёт ли трафик в туннель или мимо него.
@@ -34,6 +23,7 @@ pub struct Route {
 }
 
 /// Резолверы, прописанные системой на адаптере.
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Resolvers {
     pub adapter: String,
@@ -70,13 +60,6 @@ fn powershell(_script: &str) -> Result<String> {
 pub struct NetInfo;
 
 impl NetInfo {
-    pub fn adapters() -> Result<Vec<Adapter>> {
-        let raw = powershell(
-        "Get-NetAdapter | ForEach-Object { \"$($_.Name)|$($_.InterfaceDescription)|$($_.Status)\" }",
-    )?;
-        Ok(parse_adapters(&raw))
-    }
-
     /// Маршруты по умолчанию — все, а не один: их бывает несколько, и вопрос как раз в том,
     /// чей выиграл.
     pub fn default_routes() -> Result<Vec<Route>> {
@@ -88,17 +71,6 @@ impl NetInfo {
         // Побеждает меньшая метрика — сортируем сразу, чтобы читающий не считал сам.
         routes.sort_by_key(|route| route.metric);
         Ok(routes)
-    }
-
-    /// Резолверы системы — только у поднятых адаптеров с непустым списком: у выключенной
-    /// сетевой карты он остаётся от прошлой жизни и в диагностике только мешает.
-    pub fn resolvers() -> Result<Vec<Resolvers>> {
-        let raw = powershell(
-            "Get-DnsClientServerAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | \
-         Where-Object { $_.ServerAddresses.Count -gt 0 } | \
-         ForEach-Object { \"$($_.InterfaceAlias)|$($_.ServerAddresses -join ',')\" }",
-        )?;
-        Ok(parse_resolvers(&raw))
     }
 
     /// DNS поднятых физических адаптеров до появления TUN. Берём оба семейства: IPv6 DNS
@@ -113,18 +85,6 @@ impl NetInfo {
          ForEach-Object { \"$($_.InterfaceAlias)|$($_.ServerAddresses -join ',')\" }",
     )?;
         Ok(resolver_servers(&raw))
-    }
-
-    /// Первый резолвер системы: тот, кого спрашивает всё остальное на машине. Именно его
-    /// чаще всего и подменяют.
-    pub fn first_resolver() -> Option<String> {
-        NetInfo::resolvers()
-            .ok()?
-            .into_iter()
-            .flat_map(|entry| entry.servers)
-            // Локальная заглушка (сам ядро в TUN, DNS-прокси роутера на 127.x) отвечает
-            // не за провайдера, и сверять с ней подмену бессмысленно.
-            .find(|server| !server.starts_with("127."))
     }
 
     /// Кто слушает TCP-порт: имя процесса с номером, а если имени не прочитать — один номер
@@ -150,16 +110,6 @@ fn parse_owner(raw: &str) -> Option<String> {
     })
 }
 
-fn parse_adapters(raw: &str) -> Vec<Adapter> {
-    fields(raw, 3)
-        .map(|parts| Adapter {
-            name: parts[0].to_string(),
-            driver: parts[1].to_string(),
-            status: parts[2].to_string(),
-        })
-        .collect()
-}
-
 fn parse_routes(raw: &str) -> Vec<Route> {
     fields(raw, 3)
         .filter_map(|parts| {
@@ -172,6 +122,7 @@ fn parse_routes(raw: &str) -> Vec<Route> {
         .collect()
 }
 
+#[cfg(test)]
 fn parse_resolvers(raw: &str) -> Vec<Resolvers> {
     fields(raw, 2)
         .map(|parts| Resolvers {
@@ -211,18 +162,6 @@ fn fields(raw: &str, count: usize) -> impl Iterator<Item = Vec<&str>> {
 mod tests {
     use super::*;
 
-    /// Вывод настоящей машины: имена с пробелами, описания с запятыми и скобками.
-    #[test]
-    fn adapters_survive_spaces_and_commas_in_names() {
-        let raw = "Ethernet|Realtek PCIe GbE Family Controller|Up\n\
-                   Подключение 2|Hyper-V Virtual Ethernet Adapter, #2|Disconnected\n";
-        let list = parse_adapters(raw);
-        assert_eq!(list.len(), 2);
-        assert_eq!(list[1].name, "Подключение 2");
-        assert_eq!(list[1].driver, "Hyper-V Virtual Ethernet Adapter, #2");
-        assert_eq!(list[1].status, "Disconnected");
-    }
-
     /// Маршрут по умолчанию бывает не один — и выигрывает тот, у кого метрика меньше.
     #[test]
     fn routes_carry_the_metric_that_decides() {
@@ -236,7 +175,7 @@ mod tests {
     #[test]
     fn a_broken_line_is_skipped() {
         assert!(parse_routes("Ethernet|192.168.1.1|как-то так\n").is_empty());
-        assert!(parse_adapters("одно поле\n").is_empty());
+        assert!(parse_routes("одно поле\n").is_empty());
     }
 
     /// Процесс с правами администратора имени не отдаёт — остаётся номер, и это всё ещё

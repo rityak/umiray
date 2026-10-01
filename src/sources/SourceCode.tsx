@@ -41,7 +41,7 @@ export default function SourceCode({ source, hidden, draft, onDraft, onDisk, onM
       <Card>
         <EmptyState
           title={t("No sources")}
-          hint={t("Add a subscription or a link — what the panel sent will show up here.")}
+          hint={t("Add a subscription or a link — the provider's response will show up here.")}
         />
       </Card>
     );
@@ -69,7 +69,7 @@ export default function SourceCode({ source, hidden, draft, onDraft, onDisk, onM
       title={tn(source.nodes, "{n} node", "{n} nodes")}
       description={
         source.url === null
-          ? t("Your links — nobody overwrites them.")
+          ? t("Your links — refreshes never overwrite them.")
           : t("Will be overwritten on the next subscription refresh.")
       }
     >

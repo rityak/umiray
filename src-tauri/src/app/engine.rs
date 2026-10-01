@@ -43,12 +43,15 @@ pub struct EngineState {
     pub started: Option<u64>,
     /// Пусто — не держит.
     pub capture: Option<Capture>,
+    /// Трафика нет, но процесс жив и возвращает его сам (qd после потери туннеля). Это
+    /// не падение: подъём надзора поверх своего у ядра кончался бы остановкой (D-057).
+    pub recovering: bool,
 }
 
 impl EngineState {
     /// Умерло само, хотя должно работать (D-057).
     pub fn crashed(&self) -> bool {
-        self.wanted && !self.on
+        self.wanted && !self.on && !self.recovering
     }
 }
 
@@ -69,6 +72,11 @@ pub trait Engine: Send + Sync {
     fn binary(&self) -> PathBuf;
     /// Скачать и положить на место. Отдаёт версию.
     fn install(&self) -> Job<'_, String>;
+    /// Скачанные списки на диске изменились (D-157): собрать из них свой формат и, если
+    /// работает, перечитать. Ядру без правил делать нечего — отсюда умолчание.
+    fn lists_changed(&self) -> Job<'_> {
+        Box::pin(async { Ok(()) })
+    }
 }
 
 impl AppState {
@@ -104,5 +112,24 @@ impl AppState {
         self.engine(self.settings.get().engine)
             .log()
             .note(level, message);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_engine_bringing_its_traffic_back_itself_has_not_crashed() {
+        let lost = EngineState {
+            wanted: true,
+            ..Default::default()
+        };
+        assert!(lost.crashed());
+        assert!(!EngineState {
+            recovering: true,
+            ..lost
+        }
+        .crashed());
     }
 }

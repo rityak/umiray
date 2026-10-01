@@ -1,5 +1,5 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { FlaskConical, Palette, Plus } from "lucide-react";
+import { FlaskConical, Palette, Plus, WandSparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
   TitleBar as Bar,
@@ -9,8 +9,9 @@ import {
   StatusDot,
 } from "rootik";
 import type { Engine, Tone } from "../api";
-import { ENGINE_IDS, ENGINES, type Headline } from "../engines";
+import { ENGINES, type Headline } from "../engines";
 import { t } from "../i18n";
+import AddMenu, { type AddKind } from "../sources/AddMenu";
 
 // A plain browser serves as a responsive-layout bench. It has no Tauri window, so the
 // window buttons simply do nothing there.
@@ -27,8 +28,13 @@ type Props = {
   headline: Headline;
   /// The engine the sections show. A view switch, not power: the running one keeps running.
   engine: Engine;
+  /// Engines on disk. One — no switch: qd shows up once it is downloaded (D-161).
+  engines: Engine[];
   onEngine: (engine: Engine) => void;
-  onAdd: () => void;
+  /// One add menu for every "+" (D-160).
+  onAdd: (kind: AddKind) => void;
+  /// Мастер настройки (D-162): тот же, что открывается при первом запуске.
+  onSetup: () => void;
   onSettings: () => void;
   onDev?: () => void;
   dev?: boolean;
@@ -45,8 +51,10 @@ const TONE: Record<Tone, KitTone> = {
 export default function TitleBar({
   headline: view,
   engine,
+  engines,
   onEngine,
   onAdd,
+  onSetup,
   onSettings,
   onDev,
   dev,
@@ -79,19 +87,31 @@ export default function TitleBar({
       }
       end={
         <>
-          <SegmentedControl
-            size="sm"
-            aria-label={t("Engine")}
-            options={ENGINE_IDS.map((id) => ({ value: id, label: ENGINES[id].label }))}
-            value={engine}
-            onChange={onEngine}
+          {engines.length > 1 && (
+            <SegmentedControl
+              size="sm"
+              aria-label={t("Engine")}
+              options={engines.map((id) => ({ value: id, label: ENGINES[id].label }))}
+              value={engine}
+              onChange={onEngine}
+            />
+          )}
+          <AddMenu
+            onPick={onAdd}
+            trigger={
+              <IconButton
+                icon={<Plus />}
+                label={t("Add a subscription or a link")}
+                variant="ghost"
+                className="max-[819px]:hidden"
+              />
+            }
           />
           <IconButton
-            icon={<Plus />}
-            label={t("Add a subscription or a link")}
+            icon={<WandSparkles />}
+            label={t("Setup wizard")}
             variant="ghost"
-            className="max-[819px]:hidden"
-            onClick={onAdd}
+            onClick={onSetup}
           />
           <IconButton
             icon={<Palette />}

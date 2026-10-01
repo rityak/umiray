@@ -13,6 +13,9 @@ import type * as api from "../api";
 
 const now = () => Math.floor(Date.now() / 1000);
 
+/// `?fresh` — первый запуск: ни источников, ни qd, мастер не пройден (D-162).
+const fresh = new URLSearchParams(location.search).has("fresh");
+
 let status: api.Status = {
   active: null,
   running: false,
@@ -22,6 +25,7 @@ let status: api.Status = {
   trouble: null,
   port: 2080,
   corePresent: true,
+  qdPresent: !fresh,
   elevated: true,
   alwaysAdmin: false,
   systemProxy: false,
@@ -44,9 +48,11 @@ let settings: api.Settings = {
   autoConnect: false,
   launch: "smart",
   adminOffer: true,
+  setup: !fresh,
+  routing: true,
 };
 
-const sources: api.Source[] = [
+const DEMO_SOURCES: api.Source[] = [
   {
     id: "demo",
     name: "Demo VPN",
@@ -57,6 +63,7 @@ const sources: api.Source[] = [
   },
   { id: "links", name: "My links", url: null, updated: null, nodes: 3, records: true },
 ];
+let sources: api.Source[] = fresh ? [] : DEMO_SOURCES;
 
 const node = (
   name: string,
@@ -79,7 +86,7 @@ const node = (
   ...extra,
 });
 
-let nodes: api.Node[] = [
+const DEMO_NODES: api.Node[] = [
   node("Poland 1", "Hysteria2", "demo", "PL", 118),
   node("Netherlands 1", "Vless", "demo", "NL", 120),
   node("Netherlands 2", "Vless", "demo", "NL", null),
@@ -93,9 +100,10 @@ let nodes: api.Node[] = [
   node("vless-tls", "Vless", "links", "RU", 98),
   node("hy-tls", "Hysteria2", "links", "RU", 453),
 ];
+let nodes: api.Node[] = fresh ? [] : DEMO_NODES;
 
-let selected: string | null = "Poland 1";
-let direction: api.Direction = "rules";
+let selected: string | null = fresh ? null : "Poland 1";
+let direction: api.Direction = fresh ? "direct" : "auto";
 let ping: api.PingMethod = "tcp";
 let health = "http://www.gstatic.com/generate_204";
 let geo = 168;
@@ -122,9 +130,11 @@ let advanced: api.Advanced = {
   mtu: 0,
   strictRoute: false,
   dnsHijack: ["any:53"],
+  openNat: false,
   dnsEnable: true,
   enhancedMode: "fake-ip",
   nameserver: ["https://1.1.1.1/dns-query", "tls://8.8.8.8"],
+  preferH3: false,
 };
 
 const groups: api.Group[] = [
@@ -188,18 +198,93 @@ const routing: Record<string, api.Routing> = {
       { kind: "PROCESS-NAME", values: ["Telegram.exe"], target: "Europe", options: [] },
     ],
     fallback: "umiray",
+    ruleSets: [
+      { id: "itdog-inside", target: "umiray" },
+      { id: "antizapret", target: "AUTO" },
+    ],
+    ready: [{ id: "ai" }],
   },
-  work: { rules: [], fallback: "DIRECT" },
+  work: { rules: [], fallback: "DIRECT", ruleSets: [], ready: [] },
 };
 
 let rulesets: api.Ruleset[] = [
   {
     id: "ai",
     title: "AI services",
-    on: true,
-    rules: ["DOMAIN-SUFFIX,openai.com", "DOMAIN-SUFFIX,chatgpt.com"],
+    target: "umiray",
+    rules: ["DOMAIN-SUFFIX,openai.com,umiray", "DOMAIN-SUFFIX,chatgpt.com,umiray"],
   },
-  { id: "streaming", title: "Streaming", on: false, rules: ["DOMAIN-SUFFIX,netflix.com"] },
+  {
+    id: "streaming",
+    title: "Streaming",
+    target: "DIRECT",
+    rules: ["DOMAIN-SUFFIX,netflix.com,DIRECT"],
+  },
+];
+
+/// Rule sets (D-157): one fresh, one stale — so the age badge has something to show.
+const DAY = 86_400;
+const listOffers: Omit<api.ListOffer, "added">[] = [
+  {
+    id: "itdog-inside",
+    title: "Russia inside — itdoginfo",
+    group: "blocked",
+    note: "заблокированное и закрытое для России",
+    noteEn: "blocked in Russia and geo-blocked for it",
+    urls: ["https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Russia/inside-raw.lst"],
+  },
+  {
+    id: "antizapret",
+    title: "antizapret",
+    group: "blocked",
+    note: "реестр целиком",
+    noteEn: "the whole registry",
+    urls: [
+      "https://github.com/savely-krasovsky/antizapret-sing-box/releases/latest/download/antizapret-ruleset.json",
+    ],
+  },
+  {
+    id: "telegram",
+    title: "Telegram",
+    group: "services",
+    note: "домены и подсети",
+    noteEn: "domains and subnets",
+    urls: ["https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/telegram.lst"],
+  },
+  {
+    id: "geoip-ru",
+    title: "Российские адреса",
+    titleEn: "Russian addresses",
+    group: "russia",
+    note: "geoip:ru",
+    urls: ["https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/ru.list"],
+  },
+];
+let ruleLists: api.RuleList[] = [
+  {
+    id: "itdog-inside",
+    title: "Russia inside — itdoginfo",
+    urls: listOffers[0].urls,
+    updated: now() - 3600,
+    published: null,
+    domains: 1183,
+    cidrs: 0,
+    skipped: 0,
+  },
+  {
+    id: "antizapret",
+    title: "antizapret",
+    urls: listOffers[1].urls,
+    updated: now() - 7200,
+    published: now() - 188 * DAY,
+    domains: 982094,
+    cidrs: 337343,
+    skipped: 6,
+  },
+];
+let geoFiles: api.GeoFile[] = [
+  { name: "geoip.metadb", modified: now() - 2 * DAY },
+  { name: "GeoSite.dat", modified: now() - 2 * DAY },
 ];
 
 const docs: Record<string, string> = {
@@ -218,7 +303,7 @@ const sections = (): api.ConfigSection[] => [
       {
         id: "groups",
         label: "Groups",
-        hint: "your node groups, shared across routes; AUTO and umiray are assembled by the client",
+        hint: "your node groups, shared by all routes; the client builds AUTO and umiray itself",
         core: true,
         applied: true,
       },
@@ -274,32 +359,20 @@ const logs = [
   "panic: runtime error: invalid memory address (raw output example)",
 ];
 
-const tools: api.Tool[] = [
-  {
-    id: "dns",
-    title: "Resolver race",
-    group: "Network",
-    hint: "which resolvers respond quickly and reliably",
-    params: ["domain", "all"],
-    network: true,
+const TUNED: Record<string, api.Report> = {
+  recommended: {
+    tool: "recommended",
+    verdict: "ok",
+    headline:
+      "Конфиг ядра: рекомендованный, DNS и сниффер — во всех режимах. Рискованное: dns.prefer-h3, tun.endpoint-independent-nat",
   },
-  {
-    id: "mtu",
-    title: "Path MTU",
-    group: "Network",
-    hint: "largest packet without fragmentation",
-    params: ["host", "timeout"],
-    network: true,
+  "dns-race": {
+    tool: "dns-race",
+    verdict: "ok",
+    headline: "DNS: Quad9 DNS (DoH), Control D (DoH), Cloudflare DNS (DoH)",
   },
-  {
-    id: "clock",
-    title: "Clock",
-    group: "System",
-    hint: "whether the system clock matches network time",
-    params: [],
-    network: true,
-  },
-];
+  pmtu: { tool: "pmtu", verdict: "ok", headline: "MTU: 1440" },
+};
 
 /// Работающее ядро — одно (D-154): mihomo, если запущен, иначе qd, если поднят.
 const status_ = (): api.Status => {
@@ -331,8 +404,9 @@ let qdRouting = {
   ],
 };
 let qdSettings = { refreshMinutes: 480, refreshPinned: false, fixedRate: 0, ratePinned: false };
+let qdImported = !fresh;
 const qdState = () => ({
-  imported: true,
+  imported: qdImported,
   connected: qdUp,
   node: qdUp ? qdNodes[0] : null,
   nodes: { total: qdNodes.length, reachable: qdNodes.length },
@@ -436,7 +510,11 @@ const HANDLERS: Record<string, (args: Args) => unknown> = {
   core_restart: () => HANDLERS.core_start({}),
   core_traffic: traffic,
   core_logs: ({ engine }) => (engine === "qd" ? qdLogs : logs),
-  core_install: ({ engine }) => (engine === "qd" ? "v0.1.4-alpha" : "v1.19.0"),
+  core_install: ({ engine }) => {
+    if (engine !== "qd") return "v1.19.0";
+    status = { ...status, qdPresent: true };
+    return "v0.1.5";
+  },
   core_flush_fake_ip: () => null,
   mode_set: ({ mode }) => {
     status = { ...status, desiredMode: mode as api.Choice };
@@ -459,7 +537,10 @@ const HANDLERS: Record<string, (args: Args) => unknown> = {
     return docs[key] ?? "";
   },
   config_write: ({ id, text: body }) => {
-    docs[String(id)] = String(body);
+    const key = String(id);
+    // Набор живёт разобранным: его читают и форма, и снимок «Соединения» (MATCH, D-166).
+    if (key.startsWith("rules/")) routing[key.slice(6)] = JSON.parse(String(body));
+    else docs[key] = String(body);
     return status_();
   },
   config_reset: ({ id }) => docs[String(id)] ?? "",
@@ -478,6 +559,12 @@ const HANDLERS: Record<string, (args: Args) => unknown> = {
         message: "Это не ссылка: нет схемы вроде https:// или vless://",
         details: [],
       };
+    if (sources.length === 0) {
+      sources = DEMO_SOURCES;
+      nodes = DEMO_NODES;
+      // Как бэкенд (D-056): первый источник переводит DIRECT в автовыбор.
+      if (direction === "direct") direction = "auto";
+    }
     return { notices: [], source: sources[0] };
   },
   sources_refresh: () => ({ notices: ["Панель прислала 9 узлов"], source: sources[0] }),
@@ -490,6 +577,7 @@ const HANDLERS: Record<string, (args: Args) => unknown> = {
   sources_add_proxy_text: () => ({ notices: [], source: sources[1] }),
   sources_proxy_yaml: ({ entry }) => text(entry),
   sources_add_file: () => null,
+  sources_add_warp: () => ({ notices: [], source: sources[1] }),
   nodes_list: () => nodes,
   nodes_ping: () => {
     nodes = nodes.map((item) =>
@@ -499,35 +587,37 @@ const HANDLERS: Record<string, (args: Args) => unknown> = {
     );
     return null;
   },
-  // Как у живого ядра: выбранное и то, куда оно ведёт (D-145). В Auto и Rules группу
-  // разворачивает только работающее ядро.
-  connection_snapshot: () => ({
-    nodes,
-    direction,
-    ping,
-    route:
-      direction === "direct"
-        ? ["DIRECT"]
-        : direction === "manual" || !status.running
-          ? selected === null
-            ? []
-            : [selected]
-          : [direction === "rules" ? "CUSTOM-FALLBACK" : "AUTO", nodes[1].name],
+  // Как у живого ядра: выбранное и то, куда оно ведёт (D-145). В Auto группу
+  // разворачивает только работающее ядро; MATCH мимо псевдонима называет набор (D-166).
+  connection_snapshot: () => {
+    const active = presets.find((preset) => preset.applied)?.id;
+    const target = active === undefined ? undefined : routing[active]?.fallback;
+    const fallback = settings.routing && target && target !== "umiray" ? target : null;
+    return {
+      nodes,
+      direction,
+      node: direction === "manual" ? selected : null,
+      fallback,
+      ping,
+      route:
+        fallback !== null
+          ? [fallback]
+          : direction === "direct"
+            ? ["DIRECT"]
+            : direction === "manual" || !status.running
+              ? selected === null
+                ? []
+                : [selected]
+              : ["AUTO", nodes[1].name],
+    };
+  },
+  // Как бэкенд с D-122: у всякого узла есть запись — ссылка разбирается в неё же.
+  nodes_code: ({ node: name }) => ({
+    text: `name: ${name}\ntype: vless\nserver: host\nport: 443\nuuid: "0000"\n`,
+    editable: true,
+    entry: { name, type: "vless", server: "host", port: 443, uuid: "0000" },
+    why: null,
   }),
-  nodes_code: ({ source }) =>
-    source === "links"
-      ? {
-          text: "name: vless-reality\ntype: vless\nserver: host\nport: 443\n",
-          editable: true,
-          entry: { name: "vless-reality", type: "vless", server: "host", port: 443, uuid: "0000" },
-          why: null,
-        }
-      : {
-          text: "vless://uuid@host:443#node",
-          editable: false,
-          entry: null,
-          why: "Узел пришёл ссылкой: её читает ядро, правится только параметром ссылки.",
-        },
   nodes_entry_set: () => null,
   nodes_delete: () => null,
   nodes_code_set: () => null,
@@ -537,6 +627,23 @@ const HANDLERS: Record<string, (args: Args) => unknown> = {
     if (name) selected = String(name);
     return status_();
   },
+  routing_set: ({ on }) => {
+    settings = { ...settings, routing: Boolean(on) };
+    return status_();
+  },
+  // Как бэкенд: готовый набор в применённом наборе, включённый — с маршрутизацией.
+  routing_ads_set: ({ on }) => {
+    const id = presets.find((preset) => preset.applied)?.id ?? presets[0].id;
+    const ready = (routing[id].ready ?? []).filter((use) => use.id !== "block-ads");
+    routing[id] = { ...routing[id], ready: on ? [...ready, { id: "block-ads" }] : ready };
+    if (on) settings = { ...settings, routing: true };
+    return status_();
+  },
+  // Как бэкенд: наборы и применённый — тот, что решает маршрут.
+  presets_list: () => ({
+    presets: presets.map(({ id, name }) => ({ id, name, created: now() })),
+    active: presets.find((preset) => preset.applied)?.id ?? presets[0]?.id ?? null,
+  }),
   presets_create: () => {
     const preset = {
       id: `p${presets.length}`,
@@ -544,11 +651,12 @@ const HANDLERS: Record<string, (args: Args) => unknown> = {
       applied: false,
     };
     presets = [...presets, preset];
-    routing[preset.id] = { rules: [], fallback: "umiray" };
+    routing[preset.id] = { rules: [], fallback: "umiray", ruleSets: [], ready: [] };
     return { id: preset.id, name: preset.name, created: now() };
   },
   presets_select: ({ id }) => {
     presets = presets.map((preset) => ({ ...preset, applied: preset.id === id }));
+    settings = { ...settings, routing: true };
     return null;
   },
   presets_rename: ({ id, name }) => {
@@ -567,17 +675,64 @@ const HANDLERS: Record<string, (args: Args) => unknown> = {
     presets = presets.filter((preset) => preset.id !== id);
     return null;
   },
-  rulesets_list: () => rulesets,
-  rulesets_set: ({ id, on }) => {
-    rulesets = rulesets.map((set) => (set.id === id ? { ...set, on: Boolean(on) } : set));
-    return status_();
+  lists_list: () => ruleLists,
+  lists_catalog: () => listOffers,
+  lists_fetch: ({ id }) => {
+    const cached = ruleLists.find((list) => list.id === id);
+    if (cached) return cached;
+    const offer = listOffers.find((item) => item.id === id);
+    if (!offer) throw { kind: "invalid", message: `В каталоге нет списка ${id}`, details: [] };
+    const list: api.RuleList = {
+      id: offer.id,
+      title: offer.title,
+      titleEn: offer.titleEn,
+      urls: offer.urls,
+      updated: now(),
+      published: now() - DAY,
+      domains: 20,
+      cidrs: 14,
+      skipped: 0,
+    };
+    ruleLists = [...ruleLists, list];
+    return list;
   },
+  lists_add_url: ({ url, title }) => {
+    const name = String(title) || String(url).split("/").pop()?.split(".")[0] || "list";
+    const list: api.RuleList = {
+      id: name.toLowerCase().replace(/[^a-z0-9а-я]+/g, "-"),
+      title: name,
+      urls: [String(url)],
+      updated: now(),
+      domains: 42,
+      cidrs: 0,
+      skipped: 0,
+    };
+    ruleLists = [...ruleLists, list];
+    return list;
+  },
+  lists_refresh: ({ id }) => {
+    ruleLists = ruleLists.map((list) =>
+      id === null || list.id === id ? { ...list, updated: now(), error: null } : list,
+    );
+    return null;
+  },
+  lists_ensure: () => null,
+  geo_files: () => geoFiles,
+  geo_update: () => {
+    if (!status.running) throw { kind: "invalid", message: "Ядро не запущено", details: [] };
+    geoFiles = geoFiles.map((file) => ({ ...file, modified: now() }));
+    return geoFiles;
+  },
+  rulesets_list: () => rulesets,
   rulesets_read: ({ id }) =>
     `title: ${rulesets.find((set) => set.id === id)?.title}\nrules:\n  - DOMAIN-SUFFIX,example.com\n`,
   rulesets_write: status_,
   rulesets_create: ({ title }) => {
     const id = `set${rulesets.length}`;
-    rulesets = [...rulesets, { id, title: String(title), on: false, rules: [] }];
+    rulesets = [
+      ...rulesets,
+      { id, title: String(title), target: "DIRECT", rules: ["DOMAIN-SUFFIX,example.com,DIRECT"] },
+    ];
     return id;
   },
   rulesets_delete: ({ id }) => {
@@ -633,37 +788,39 @@ const HANDLERS: Record<string, (args: Args) => unknown> = {
   updates_check: () => ({ enabled: false, version: null, notes: null }),
   updates_install: () => null,
   qd_status: () => ({
-    present: true,
+    present: status.qdPresent,
     elevated: true,
-    running: true,
-    state: qdState(),
+    running: status.qdPresent,
+    state: status.qdPresent ? qdState() : null,
     problem: null,
   }),
+  qd_adopt: async ({ link }) => {
+    if (!String(link).toLowerCase().startsWith("qd://"))
+      throw { kind: "invalid", message: "Это не ссылка qd", details: [] };
+    const downloaded = status.qdPresent ? null : "v0.1.5";
+    // Загрузка идёт секунды — ровно то, что показывает тост.
+    if (downloaded) await new Promise((resolve) => setTimeout(resolve, 1500));
+    status = { ...status, qdPresent: true };
+    qdImported = true;
+    return { downloaded, pending: false };
+  },
+  qd_remove: () => {
+    if (qdUp) throw { kind: "invalid", message: "Сначала отключите qd", details: [] };
+    status = { ...status, qdPresent: false };
+    settings = { ...settings, engine: "mihomo" };
+    return null;
+  },
+  system_export: () => "C:\\Users\\demo\\Documents\\umiray-settings.db",
+  system_open_github: ({ url }) => {
+    window.open(String(url), "_blank", "noopener");
+    return null;
+  },
   qd_call: ({ method, path, body }) =>
     qdCall(String(method), String(path), (body as Record<string, unknown>) ?? null),
   qd_rules_export: () => "C:\\Users\\demo\\rules.qdr",
   qd_rules_import: () => ({ rules: 2 }),
-  diag_tools: () => tools,
-  diag_run: ({ id }) => ({
-    tool: id,
-    verdict: "warn",
-    headline: "5 из 9",
-    ms: 840,
-    columns: ["резолвер", "ответ", "время"],
-    rows: [
-      { cells: ["1.1.1.1", "93.184.216.34", "12 мс"], verdict: "ok", mark: true },
-      { cells: ["8.8.8.8", "93.184.216.34", "31 мс"], verdict: "ok", mark: false },
-      { cells: ["провайдер", "10.10.10.10", "4 мс"], verdict: "bad", mark: false },
-    ],
-    lines: [
-      { tone: "info", text: `${id}: старт` },
-      { tone: "ok", text: "1.1.1.1 — 12 мс" },
-      { tone: "warn", text: "провайдер подменяет ответ" },
-      { tone: "dim", text: "готово за 840 мс" },
-    ],
-  }),
-  diag_apply: ({ id }) => HANDLERS.diag_run({ id }),
-  diag_providers: () => ({ version: 1, providers: [] }),
+  // Те же строки, что пишет бэкенд (`diag/smart.rs`): мастер показывает их как есть.
+  diag_apply: ({ id }) => TUNED[String(id)] ?? { tool: id, verdict: "idle", headline: "—" },
 };
 
 document.documentElement.dataset.demo = "true";
@@ -673,7 +830,7 @@ document.documentElement.dataset.demo = "true";
     const handler = HANDLERS[cmd];
     if (!handler)
       throw { kind: "unknown", message: `Заглушка не знает команду ${cmd}`, details: [] };
-    return structuredClone(handler(args));
+    return structuredClone(await handler(args));
   },
   transformCallback: () => 0,
 };

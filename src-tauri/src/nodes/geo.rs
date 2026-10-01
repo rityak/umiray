@@ -14,12 +14,15 @@ use serde_yaml::Value;
 
 use crate::config::files::Documents;
 use crate::config::files::CLIENT;
+use crate::db::{Db, Table};
 use crate::error::Result;
-use crate::paths::Paths;
 use crate::yaml::Yaml;
 
 /// Поле `client.yaml`: через сколько часов спрашивать заново. Ноль — не спрашивать вовсе.
 const HOURS: &str = "geo-hours";
+
+/// Строка кэша в таблице состояния (D-170).
+const ROW: &str = "geo";
 
 /// Неделя. Сервер не переезжает из страны в страну по вторникам, а каждый запрос — это
 /// адрес подписки, ушедший наружу.
@@ -52,8 +55,9 @@ pub struct GeoCache;
 
 impl GeoCache {
     pub fn load() -> Cache {
-        std::fs::read_to_string(Paths::geo())
+        Db::get(Table::State, ROW, "")
             .ok()
+            .flatten()
             .and_then(|text| serde_json::from_str(&text).ok())
             .unwrap_or_default()
     }
@@ -149,10 +153,9 @@ impl GeoCache {
 }
 
 fn save(cache: &Cache) -> Result<()> {
-    Paths::ensure_root()?;
     let text = serde_json::to_string_pretty(cache)
         .map_err(|e| crate::error::AppError::io(format!("Кэш стран не записался: {e}")))?;
-    Ok(crate::atomic::AtomicFile::write(Paths::geo(), text)?)
+    Db::put(Table::State, ROW, "", &text)
 }
 
 /// Страна одного адреса. Снаружи `None` — ответа не было (сеть, отказ сервиса): это

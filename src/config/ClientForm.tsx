@@ -1,5 +1,6 @@
 import {
   ArrowRightLeft,
+  Database,
   Download,
   Eraser,
   type LucideIcon,
@@ -9,6 +10,7 @@ import {
   ShieldAlert,
   SlidersHorizontal,
   VenetianMask,
+  Wand2,
   Waves,
   Wrench,
   Zap,
@@ -24,7 +26,6 @@ import SectionBar from "../shell/SectionBar";
 import ClientUpdate from "./ClientUpdate";
 import MaskForm from "./MaskForm";
 import Page, { type Group } from "./Page";
-import RulesetsList from "./RulesetsList";
 
 /// Всё, что форма не может узнать сама: это опрашивает `App` — он же держит шапку,
 /// и второй опрос статуса рядом с первым разошёлся бы с ним на такт.
@@ -53,6 +54,14 @@ export type ClientProps = {
   onAlwaysAdmin: (on: boolean) => void;
   onKillSwitch: (on: boolean) => void;
   onReset: () => void;
+  /// Тумблер «qd»: включить — скачать, выключить — удалить бинарь (D-161).
+  onQd: (on: boolean) => void;
+  /// Тумблер маршрутизации (D-166) — в полосе раздела «Маршрутизация».
+  onRouting: (on: boolean) => void;
+  /// Открыть мастер настройки снова (D-162).
+  onSetup: () => void;
+  /// Настройки архивом (D-163).
+  onExport: () => void;
   onStatus: (status: api.Status) => void;
   onLanguageChange: (language: LanguagePreference) => void;
 };
@@ -86,13 +95,13 @@ const PINGS: { id: api.PingMethod; label: string; hint: string; icon: LucideIcon
   {
     id: "proxy",
     label: api.PING_LABEL.proxy,
-    hint: tk("Closest to real use. Requires a running VPN"),
+    hint: tk("Closest to real use. Needs VPN on"),
     icon: ArrowRightLeft,
   },
   {
     id: "proxy-keepalive",
     label: api.PING_LABEL["proxy-keepalive"],
-    hint: tk("Excludes handshake time. Requires a running VPN"),
+    hint: tk("Leaves out the handshake. Needs VPN on"),
     icon: Zap,
   },
 ];
@@ -190,6 +199,9 @@ export default function ClientForm({
   onAlwaysAdmin,
   onKillSwitch,
   onReset,
+  onQd,
+  onSetup,
+  onExport,
   onStatus,
   onLanguageChange,
   onMessage,
@@ -299,8 +311,8 @@ export default function ClientForm({
               label: t("Always run as administrator"),
               inline: true,
               hint: status.alwaysAdmin
-                ? t("The task is installed: no UAC prompt, TUN is ready to start.")
-                : t("TUN needs administrator rights. Creating the task requires elevation now."),
+                ? t("Task installed: no UAC prompt, TUN starts right away.")
+                : t("TUN needs admin rights. Creating the task asks for them now."),
               control: check(t("Always run as administrator"), status.alwaysAdmin, onAlwaysAdmin),
             },
           ],
@@ -313,7 +325,7 @@ export default function ClientForm({
               id: "language",
               label: t("Interface language"),
               hint: t(
-                "Automatic uses Russian when a Russian keyboard layout is installed, otherwise English.",
+                "Automatic picks Russian if a Russian keyboard layout is installed, English otherwise.",
               ),
               control: (
                 <Select
@@ -332,7 +344,7 @@ export default function ClientForm({
               id: "auto-connect",
               label: t("Connect on launch"),
               inline: true,
-              hint: t("Use the same route and mode as last time."),
+              hint: t("Same route and mode as last time."),
               control: check(t("Connect on launch"), settings.autoConnect, (autoConnect) =>
                 onChange({ autoConnect }),
               ),
@@ -369,7 +381,7 @@ export default function ClientForm({
               hint: settings.killSwitch
                 ? status.killSwitch
                   ? t("Active: all traffic outside the tunnel is blocked")
-                  : t("Enabled but inactive: requires TUN mode and a running VPN")
+                  : t("On but idle: works only in TUN mode with VPN on")
                 : t(
                     "Blocks traffic outside VPN. If the client crashes, internet stays blocked until restart",
                   ),
@@ -390,7 +402,7 @@ export default function ClientForm({
           id: "antidpi-wireguard",
           label: "WireGuard",
           hint: t(
-            "WireGuard can be identified and blocked by its first packet. Junk packets obscure the handshake.",
+            "WireGuard can be spotted and blocked by its first packet. Junk packets before the handshake hide it.",
           ),
           settings: [
             {
@@ -440,9 +452,7 @@ export default function ClientForm({
             {
               id: "health",
               label: t("Health check URL"),
-              hint: t(
-                "Groups use this URL to check availability. Only HTTP 204 counts as a successful response",
-              ),
+              hint: t("Groups check availability at this URL. Only HTTP 204 counts as success"),
               control: (
                 <Select
                   aria-label={t("Availability check URL")}
@@ -478,7 +488,7 @@ export default function ClientForm({
                   : udp.nodes === 0
                     ? t("No compatible nodes: add a hysteria2, tuic or wireguard source")
                     : t(
-                        "Calls, games and QUIC use hysteria2, tuic or wireguard ({n} nodes). With vless and trojan, UDP uses TCP; a lost packet delays everything behind it.",
+                        "Calls, games and QUIC go through hysteria2, tuic or wireguard ({n} nodes). Over vless and trojan, UDP rides inside TCP, and one lost packet holds up the rest.",
                         { n: udp.nodes },
                       ),
               control: check(
@@ -499,7 +509,7 @@ export default function ClientForm({
               label: t("Look up server country"),
               hint:
                 geo === 0
-                  ? t("Off: no addresses are shared; nodes have no country flags")
+                  ? t("Off: no addresses are sent anywhere, so no flags")
                   : t(
                       "Only the server address is sent to ipinfo.io, at most once per selected interval",
                     ),
@@ -522,17 +532,6 @@ export default function ClientForm({
       label: t("Maintenance"),
       icon: Wrench,
       parts: [
-        {
-          id: "service-rules",
-          label: t("Built-in rule sets"),
-          hint: t("Domain lists placed below your rules. Your own rules always take priority."),
-          settings: [
-            {
-              id: "rulesets",
-              control: <RulesetsList active onStatus={onStatus} onMessage={onMessage} />,
-            },
-          ],
-        },
         {
           id: "service-client",
           label: t("Client"),
@@ -557,6 +556,31 @@ export default function ClientForm({
                 />
               ),
             },
+            {
+              id: "setup",
+              label: t("Setup wizard"),
+              hint: t("Subscription, capture and route, step by step. Your sources stay"),
+              control: (
+                <Button icon={<Wand2 />} disabled={busy} onClick={onSetup}>
+                  {t("Open")}
+                </Button>
+              ),
+            },
+          ],
+        },
+        {
+          id: "service-qd",
+          label: "qd",
+          settings: [
+            {
+              id: "qd",
+              label: t("qd engine"),
+              inline: true,
+              hint: status.qdPresent
+                ? t("Turning it off deletes the qd program; its link and settings stay")
+                : t("Downloads qd from GitHub and shows the engine switch in the header"),
+              control: check(t("qd engine"), status.qdPresent, onQd, busy),
+            },
           ],
         },
         {
@@ -566,9 +590,7 @@ export default function ClientForm({
             {
               id: "install",
               label: t("Update core"),
-              hint: t(
-                "Downloads the official GitHub release. Disconnect before replacing the running core",
-              ),
+              hint: t("From the official GitHub release. Disconnect before replacing the core"),
               control: (
                 <Button
                   icon={<Download />}
@@ -590,7 +612,7 @@ export default function ClientForm({
               id: "device",
               label: t("Device ID"),
               hint: t(
-                "HWID identifies this device to your provider. Each new ID uses a subscription device slot",
+                "HWID is how your provider knows this device. Each new one takes a device slot in the subscription",
               ),
               control: (
                 <Tooltip content={settings.private ? undefined : (device ?? undefined)}>
@@ -604,9 +626,7 @@ export default function ClientForm({
               id: "flush",
               label: t("Clear fake-IP mappings"),
               hint: status.running
-                ? t(
-                    "Reassigns addresses. Apps caching an old address may follow the wrong routing rule",
-                  )
+                ? t("Hands out addresses again. An app holding an old one may hit the wrong rule")
                 : t(
                     "Nothing to clear: domain-to-address mappings exist only while the core is running",
                   ),
@@ -618,6 +638,18 @@ export default function ClientForm({
                   onClick={flush}
                 >
                   {t("Clear")}
+                </Button>
+              ),
+            },
+            {
+              id: "export",
+              label: t("Export settings"),
+              hint: t(
+                "A copy of the database with documents, sources and presets. Subscription addresses are inside; HWID is not",
+              ),
+              control: (
+                <Button icon={<Database />} disabled={busy} onClick={onExport}>
+                  {t("Export")}
                 </Button>
               ),
             },

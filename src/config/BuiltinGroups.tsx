@@ -36,9 +36,7 @@ export default function BuiltinGroups({ choices, mine }: Props) {
         [t("members"), t("all nodes of all sources, as a live list")],
       ],
       order: [] as { name: string; tone: Tone }[],
-      note: t(
-        "The name is taken by the client. Create your own group named AUTO and yours stays: your own outranks ours.",
-      ),
+      note: t("The client uses this name. Create your own group called AUTO and yours wins."),
     },
     {
       id: "umiray",
@@ -46,8 +44,8 @@ export default function BuiltinGroups({ choices, mine }: Props) {
       summary: t("the exit MATCH points at"),
       spec: [
         [t("type"), "select"],
-        [t("who picks"), t("the route in the Connection section — it is what points this group")],
-        [t("why"), t("the only target of the final MATCH rule: all uncaught traffic goes here")],
+        [t("who picks"), t("the choice in Connection — it points this group")],
+        [t("why"), t("the target of the final MATCH rule: whatever nothing else caught goes here")],
       ],
       order: [
         { name: "AUTO", tone: "accent" as Tone },
@@ -58,7 +56,7 @@ export default function BuiltinGroups({ choices, mine }: Props) {
         ...mine.map((name) => ({ name, tone: "accent" as Tone })),
         { name: "DIRECT", tone: "neutral" as Tone },
       ],
-      note: t("Your groups sit here as items — in the same order as in the list above."),
+      note: t("Your groups, in the same order as the list above."),
     },
   ];
 

@@ -16,7 +16,7 @@ export default function NodeTree({ choices, picked, disabled, onPicked }: Props)
   if (choices.sources.length === 0) {
     return (
       <Text tone="muted" size="xs" className="block">
-        {t("No sources — nowhere to take nodes from. Add a subscription or a link.")}
+        {t("No sources, so no nodes. Add a subscription or a link.")}
       </Text>
     );
   }

@@ -4,11 +4,14 @@
 //!
 //! Остальное разделено по тому, чем управляет: `controller` — работающим ядром через
 //! `external-controller` (D-007), `download` — файлом ядра на диске (D-006), `apply` —
-//! тем, доедет ли правка до живого ядра перезагрузкой (D-102).
+//! тем, доедет ли правка до живого ядра перезагрузкой (D-102), `lists` — скачанными
+//! списками в формате ядра (D-157).
 
 pub mod apply;
 pub mod controller;
 pub mod download;
+pub mod keys;
+pub mod lists;
 
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
@@ -20,10 +23,27 @@ use crate::config::mode::Mode;
 use crate::core::process::CoreProcess;
 use crate::core::process::LogRing;
 use crate::error::{AppError, Result};
-use crate::nodes::sources::SourceStore;
 use crate::paths::Paths;
 use crate::render::mihomo::Effective;
 use crate::system::elevation::Elevation;
+
+/// Имена geo-баз mihomo в рабочем каталоге: mmdb-режим, dat-режим и база ASN.
+const GEO_FILES: [&str; 5] = [
+    "geoip.metadb",
+    "GeoIP.dat",
+    "GeoSite.dat",
+    "GeoLite2-ASN.mmdb",
+    "ASN.mmdb",
+];
+
+/// Geo-база ядра для окна.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeoFile {
+    pub name: String,
+    /// Когда файл менялся, в секундах эпохи.
+    pub modified: Option<u64>,
+}
 
 /// Сколько ждём, пока ядро начнёт отвечать: большой конфиг грузится небыстро.
 const READY_TIMEOUT: Duration = Duration::from_secs(10);
@@ -237,6 +257,21 @@ impl Mihomo {
         }
     }
 
+    /// Перечитать собранный список (D-157). Не запущено — нечего: файл и так на диске.
+    pub async fn reload_rules(&self, name: &str) -> Result<()> {
+        match self.controller() {
+            Some(controller) => controller.reload_rules(name).await,
+            None => Ok(()),
+        }
+    }
+
+    /// Обновить geo-базы руками ядра (D-157). Без работающего ядра — нечем. Отдаёт даты
+    /// файлов после обновления — ради них кнопку и нажимали.
+    pub async fn update_geo(&self) -> Result<Vec<GeoFile>> {
+        self.require_controller()?.update_geo().await?;
+        Ok(Mihomo::geo_files())
+    }
+
     fn require_controller(&self) -> Result<Controller> {
         self.controller()
             .ok_or_else(|| AppError::invalid("Ядро не запущено"))
@@ -317,12 +352,9 @@ impl Mihomo {
             .arg(Paths::run_dir())
             .arg("-f")
             .arg(Paths::effective_config())
-            // Ядро отказывается читать файлы провайдеров вне своего рабочего каталога:
-            // «path is not subpath of home directory or SAFE_PATHS». Рабочий каталог —
-            // `run/`, а источники лежат в соседнем `sources/` (D-014), и это правильно:
-            // они наши, а не его. Открываем ему ровно один каталог, а не расширяем `-d`
-            // до корня — иначе ядро начало бы писать свой кэш вперемешку с нашими файлами.
-            .env("SAFE_PATHS", SourceStore::dir())
+            // Ядро отказывается читать файлы вне своего рабочего каталога: «path is not
+            // subpath of home directory or SAFE_PATHS» (B-002). Провайдеры источников
+            // и собранные списки поэтому выкладываются внутрь `run/` (D-170).
             .args(controller.args())
             // `null`, а не наследование: после мягкой остановки (S-021) клиент отцепляется
             // от консоли ядра, и его собственные стандартные дескрипторы становятся
@@ -356,6 +388,25 @@ impl Mihomo {
     /// Рабочий каталог ядра: кэш, собранный конфиг, пробные прогоны.
     pub fn workdir() -> std::path::PathBuf {
         Paths::run_dir()
+    }
+
+    /// Geo-базы в рабочем каталоге и когда каждая менялась (D-157). Какие именно лежат,
+    /// решает ядро по режиму `geodata-mode` — поэтому показываем те, что нашлись.
+    pub fn geo_files() -> Vec<GeoFile> {
+        GEO_FILES
+            .iter()
+            .filter_map(|name| {
+                let meta = std::fs::metadata(Paths::run_dir().join(name)).ok()?;
+                Some(GeoFile {
+                    name: (*name).to_string(),
+                    modified: meta
+                        .modified()
+                        .ok()
+                        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|since| since.as_secs()),
+                })
+            })
+            .collect()
     }
 
     /// TUN настраивает виртуальный адаптер и без прав администратора падает уже после запуска,

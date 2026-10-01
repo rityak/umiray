@@ -18,9 +18,8 @@ export type Headline = { tone: api.Tone; label: string; detail: ReactNode };
 
 type Engine = {
   label: string;
-  /// Строка состояния в шапке. Шапка говорит о **работающем** ядре; ничего не работает —
-  /// о выбранном.
-  headline: (seen: Seen) => Headline;
+  /// Вторая строка шапки, пока это ядро держит трафик: чем оно его держит.
+  detail: (seen: Seen) => ReactNode;
   /// Разделы конфига, какими их показывает это ядро: чего у него нет — нет и в dock.
   sections: (all: api.ConfigSection[]) => api.ConfigSection[];
   /// Настройки клиента (`id` групп, частей и полей формы), которых у этого ядра нет.
@@ -35,31 +34,22 @@ type Engine = {
 export const ENGINES: Record<api.Engine, Engine> = {
   mihomo: {
     label: "mihomo",
-    headline: ({ status, powering }) => ({
-      ...api.statusView(status, powering),
-      detail: status.running ? (
-        <Uptime started={status.started} fallback={t("just now")} />
-      ) : (
-        t("core stopped")
-      ),
-    }),
+    detail: ({ status }) => {
+      const mode = api.runningMode(status);
+      return (
+        <>
+          {mode && `${api.MODE_LABEL[mode]} · `}
+          <Uptime started={status.started} fallback={t("just now")} />
+        </>
+      );
+    },
     sections: (all) => all,
     hiddenClientSettings: new Set(),
   },
   qd: {
     label: "qd",
-    headline: ({ qd: seen, status, powering }) => {
-      const state = seen?.state ?? null;
-      const on = status.active === "qd";
-      const view: Pick<Headline, "tone" | "label"> = powering
-        ? { tone: "connecting", label: t("Starting…") }
-        : state?.failed
-          ? { tone: "error", label: t("qd connection failed") }
-          : on
-            ? { tone: "on", label: `${t("Connected")} · qd` }
-            : { tone: "off", label: t("Disconnected") };
-      return { ...view, detail: (on && state?.node?.name) || t("qd stopped") };
-    },
+    detail: ({ qd: seen, status }) =>
+      seen?.state?.node?.name ?? <Uptime started={status.started} fallback={t("just now")} />,
     // Узлы qd выбирает сам — групп нет; маршруты — свои правила по приложениям,
     // без наборов; вместо конфига mihomo — свои настройки.
     sections: (all) =>
@@ -94,4 +84,15 @@ export const ENGINES: Record<api.Engine, Engine> = {
   },
 };
 
-export const ENGINE_IDS = Object.keys(ENGINES) as api.Engine[];
+/**
+ * Шапка — о клиенте, а не о виде (D-154): включён ли VPN и каким ядром, в любом разделе
+ * и при любом положении переключателя. Беды одного ядра говорит его кнопка питания.
+ */
+export function headline(seen: Seen): Headline {
+  const { status, powering } = seen;
+  const on = status.active && ENGINES[status.active];
+  const detail = on ? on.detail(seen) : t("core stopped");
+  if (powering) return { tone: "connecting", label: t("Starting…"), detail };
+  if (!on) return { tone: "off", label: t("Disconnected"), detail };
+  return { tone: "on", label: `${t("Connected")} · ${on.label}`, detail };
+}

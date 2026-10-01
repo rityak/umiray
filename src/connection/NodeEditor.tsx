@@ -4,15 +4,14 @@ import { Button, Callout, ConfirmButton, Dialog, Spacer, Text, Tooltip } from "r
 import * as api from "../api";
 import Editor from "../config/Editor";
 import { t } from "../i18n";
-import { failure, type Message } from "../shell/Banner";
+import { failure } from "../shell/Banner";
 import ProxyForm from "../sources/ProxyForm";
-import { type Entry, fromEntry, missing, toEntry, type Values } from "../sources/proxy";
+import { type Entry, fromEntry, missing, toEntry, type Values, wrong } from "../sources/proxy";
 
 type Props = {
   node: api.Node;
   onClose: () => void;
   onChanged: () => void;
-  onMessage: (message: Message) => void;
 };
 
 /// Шапка кода у узла, который клиент написал сам. Её же признак — что узел можно убрать:
@@ -33,9 +32,15 @@ const MINE = "# Ваш узел";
  * Чего модель не знает, форма не теряет: незнакомые поля переживают правку, и окно
  * пересчитывает их вслух — молчащая потеря хуже отказа.
  */
-export default function NodeEditor({ node, onClose, onChanged, onMessage }: Props) {
+export default function NodeEditor({ node, onClose, onChanged }: Props) {
   const [code, setCode] = useState<api.NodeCode | null>(null);
   const [text, setText] = useState<string | null>(null);
+  /// Текст, с которого начался вид кода. Правка кода — отличие от него, а не от файла:
+  /// вход в код показывает собранное формой, и сравнение с файлом считало правкой
+  /// уже сам вход.
+  const [base, setBase] = useState<string | null>(null);
+  /// Отказ показывается в окне: баннер лежит под модальным окном, и его не видно.
+  const [failed, setFailed] = useState<string | null>(null);
   const [values, setValues] = useState<Values>({});
   const [extra, setExtra] = useState<Entry>({});
   const [coding, setCoding] = useState(false);
@@ -51,15 +56,16 @@ export default function NodeEditor({ node, onClose, onChanged, onMessage }: Prop
         (next) => {
           setCode(next);
           setText(next.text);
+          setBase(next.text);
           if (next.entry !== null) {
             const parsed = fromEntry(next.entry);
             setValues(parsed.values);
             setExtra(parsed.extra);
           }
         },
-        (e) => onMessage(failure(e)),
+        (e) => setFailed(failure(e).text),
       ),
-    [node.source, node.name, onMessage],
+    [node.source, node.name],
   );
 
   // Черновик заводится на **узел**, а не на каждый его приезд: список опрашивается
@@ -69,6 +75,8 @@ export default function NodeEditor({ node, onClose, onChanged, onMessage }: Prop
     setCoding(false);
     setCode(null);
     setText(null);
+    setBase(null);
+    setFailed(null);
     setValues({});
     setExtra({});
     load();
@@ -76,19 +84,29 @@ export default function NodeEditor({ node, onClose, onChanged, onMessage }: Prop
 
   const built = form ? toEntry(kind, values, extra) : null;
   const gaps = form ? missing(kind, values) : [];
-  const recoded = code !== null && text !== null && code.editable && text !== code.text;
+  const bad = form ? wrong(kind, values) : [];
+  const recoded = code !== null && text !== null && code.editable && text !== base;
   const reshaped = built !== null && JSON.stringify(built) !== JSON.stringify(entry);
   const dirty = recoded || reshaped;
   const leftover = Object.keys(extra);
 
   /// Переход в код показывает то, что уедет ядру, — с несохранённой правкой поверх.
+  /// Обратно в поля правка кода не переезжает (YAML разбирает бэкенд): уход из кода с
+  /// правкой её сбрасывает, и кнопка об этом спрашивает. Молча она оставалась висеть —
+  /// «Сохранить» в полях закрывало окно, ничего не записав.
   const show = async (next: boolean) => {
     setSaving(true);
+    setFailed(null);
     try {
-      if (built !== null && next) setText(await api.sourcesProxyYaml(built));
+      if (built !== null && next) {
+        const shown = await api.sourcesProxyYaml(built);
+        setText(shown);
+        setBase(shown);
+      }
+      if (!next) setText(base);
       setCoding(next);
     } catch (e) {
-      onMessage(failure(e));
+      setFailed(failure(e).text);
     } finally {
       setSaving(false);
     }
@@ -97,6 +115,7 @@ export default function NodeEditor({ node, onClose, onChanged, onMessage }: Prop
   /// Одно действие на три: сохранить, откатить к присланному, убрать свой узел.
   const apply = async (what: "save" | "rollback" | "delete") => {
     setSaving(true);
+    setFailed(null);
     try {
       if (what === "delete") {
         await api.nodesDelete(node.source, node.name);
@@ -104,7 +123,7 @@ export default function NodeEditor({ node, onClose, onChanged, onMessage }: Prop
         await api.nodesReset(node.source, node.name);
       } else {
         // Из кода едет текст, из формы — объект: обе дороги ведут в одно хранилище.
-        if (coding && recoded && text !== null) {
+        if (recoded && text !== null) {
           await api.nodesCodeSet(node.source, node.name, text);
         } else if (built !== null && reshaped) {
           await api.nodesEntrySet(node.source, node.name, built);
@@ -113,7 +132,7 @@ export default function NodeEditor({ node, onClose, onChanged, onMessage }: Prop
       onChanged();
       onClose();
     } catch (e) {
-      onMessage(failure(e));
+      setFailed(failure(e).text);
     } finally {
       setSaving(false);
     }
@@ -130,16 +149,32 @@ export default function NodeEditor({ node, onClose, onChanged, onMessage }: Prop
       onClose={onClose}
       footer={
         <>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={saving}
-            data-view={showingCode ? "code" : "visual"}
-            icon={showingCode ? <SlidersHorizontal /> : <Code2 />}
-            onClick={() => show(!coding)}
-          >
-            {showingCode ? t("Fields") : t("Code")}
-          </Button>
+          {/* Без формы переключать не на что: остаётся только код. */}
+          {form &&
+            (coding && recoded ? (
+              <ConfirmButton
+                variant="ghost"
+                size="sm"
+                disabled={saving}
+                data-view="code"
+                icon={<SlidersHorizontal />}
+                confirmLabel={t("Drop code changes?")}
+                onConfirm={() => show(false)}
+              >
+                {t("Fields")}
+              </ConfirmButton>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={saving}
+                data-view={showingCode ? "code" : "visual"}
+                icon={showingCode ? <SlidersHorizontal /> : <Code2 />}
+                onClick={() => show(!coding)}
+              >
+                {showingCode ? t("Fields") : t("Code")}
+              </Button>
+            ))}
           <Spacer />
           {mine && (
             <ConfirmButton
@@ -153,15 +188,17 @@ export default function NodeEditor({ node, onClose, onChanged, onMessage }: Prop
               {t("Remove")}
             </ConfirmButton>
           )}
-          <Tooltip content={t("Restore the node exactly as supplied by its source")}>
-            <Button
+          {/* Откат стирает правки насовсем — как и удаление, вторым нажатием. */}
+          <Tooltip content={t("Restore the node as its source sent it")}>
+            <ConfirmButton
               size="sm"
               disabled={saving || !node.edited}
               icon={<RotateCcw />}
-              onClick={() => apply("rollback")}
+              confirmLabel={t("Drop your changes?")}
+              onConfirm={() => apply("rollback")}
             >
               {t("Revert")}
-            </Button>
+            </ConfirmButton>
           </Tooltip>
           <Tooltip
             content={
@@ -174,7 +211,7 @@ export default function NodeEditor({ node, onClose, onChanged, onMessage }: Prop
               variant="primary"
               size="sm"
               loading={saving}
-              disabled={!dirty || (!coding && gaps.length > 0)}
+              disabled={!dirty || (!coding && (gaps.length > 0 || bad.length > 0))}
               icon={<Save />}
               onClick={() => apply("save")}
             >
@@ -185,6 +222,7 @@ export default function NodeEditor({ node, onClose, onChanged, onMessage }: Prop
       }
     >
       <div className="flex flex-col gap-2">
+        {failed && <Callout tone="danger" title={failed} />}
         {showingCode ? (
           <>
             <div
@@ -202,7 +240,7 @@ export default function NodeEditor({ node, onClose, onChanged, onMessage }: Prop
             <Text tone="muted" size="xs" className="block">
               {code?.editable
                 ? t(
-                    "Edit the whole config here. Only overrides are stored, so fresh subscription keys still arrive after your edits.",
+                    "Edit the whole config here. Only your changes are stored, so new keys from the subscription still come through.",
                   )
                 : (code?.why ?? t("Read-only."))}
             </Text>
@@ -214,25 +252,32 @@ export default function NodeEditor({ node, onClose, onChanged, onMessage }: Prop
               values={values}
               locked={["name"]}
               why={t(
-                "groups, rules and routing identify this node by name — it cannot be renamed here",
+                "groups, rules and the exit choice find this node by name — it can't be renamed here",
               )}
               onChange={(key, value) => setValues((was) => ({ ...was, [key]: value }))}
             />
             {gaps.length > 0 && (
               <Callout tone="warn">
-                {t("The node will not come up without: {fields}.", {
+                {t("The node won't come up without: {fields}.", {
                   fields: gaps.map((field) => t(field)).join(", "),
+                })}
+              </Callout>
+            )}
+            {bad.length > 0 && (
+              <Callout tone="warn">
+                {t("The node won't come up with these values: {fields}.", {
+                  fields: bad.map((field) => t(field)).join(", "),
                 })}
               </Callout>
             )}
             {/* Сколько полей форма не знает — вслух. Молчащая потеря хуже отказа (D-121). */}
             <Text tone="muted" size="xs" className="block">
               {leftover.length > 0
-                ? t(
-                    "{n} fields are not shown: {fields}. They are preserved as-is and can be edited in Code view.",
-                    { n: leftover.length, fields: leftover.join(", ") },
-                  )
-                : t("All existing fields are shown. Add other settings in Code view.")}
+                ? t("{n} fields aren't shown: {fields}. They're kept as is; edit them in Code.", {
+                    n: leftover.length,
+                    fields: leftover.join(", "),
+                  })
+                : t("All the node's fields are shown. Add others in Code.")}
             </Text>
           </>
         ) : (

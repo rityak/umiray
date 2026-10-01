@@ -1,12 +1,16 @@
 import { useCallback, useState } from "react";
+import { toast } from "rootik";
 import * as api from "../api";
 import { t } from "../i18n";
+import * as qd from "../qd/api";
 import { failure, type Message, notice } from "../shell/Banner";
 import type { Job } from "./useJob";
 
 type Deps = {
   status: api.Status;
   setStatus: (status: api.Status) => void;
+  /// Удалённый qd возвращает вид к mihomo на диске (D-161) — настройки перечитываются.
+  setSettings: (settings: api.Settings) => void;
   /// Ядро, которое показывают разделы и поднимет кнопка (D-154).
   engine: api.Engine;
   setJob: (job: Job | null) => void;
@@ -20,6 +24,7 @@ type Deps = {
 export function useConnectionActions({
   status,
   setStatus,
+  setSettings,
   engine,
   setJob,
   report,
@@ -62,8 +67,10 @@ export function useConnectionActions({
 
   /// Режим перехвата (D-060). Работающее ядро бэкенд доводит до него сам: TUN —
   /// перезапуском, System и Proxy — реестром; открытые соединения рвутся (D-143).
+  /// Отдаёт отказ (или `null`): мастеру его надо показать у себя — баннер лежит
+  /// под модальным окном, а шаг без этого шёл дальше, будто режим встал.
   const choose = useCallback(
-    async (choice: api.Choice) => {
+    async (choice: api.Choice): Promise<unknown> => {
       setJob("mode");
       setPending(choice);
       report(null);
@@ -71,27 +78,24 @@ export function useConnectionActions({
         const next = await api.modeSet(choice);
         setStatus(next);
         // Про системный прокси молчать нельзя ни в одну сторону (D-047): не прописался —
-        // «Подключено» ещё не значит, что трафик идёт; заменили чужой — это чужой VPN,
+        // «Подключён» ещё не значит, что трафик идёт; заменили чужой — это чужой VPN,
         // и его поломка выглядела бы нашей виной.
         if (choice === "system" && next.running && !next.systemProxy) {
-          report(
-            notice(
-              t("Could not set the Windows proxy — enter the address in your browser manually."),
-            ),
-          );
+          report(notice(t("Couldn't set the Windows proxy — enter the address in your browser.")));
         } else if (choice === "system" && status.foreignProxy !== null) {
           report(
             notice(
-              t(
-                "System proxy was {proxy} — it will be replaced on connection and restored on disconnect.",
-                { proxy: status.foreignProxy },
-              ),
+              t("System proxy was {proxy} — it's replaced while connected and restored after.", {
+                proxy: status.foreignProxy,
+              }),
             ),
           );
         }
+        return null;
       } catch (e) {
         report(failure(e));
         setStatus(await api.coreStatus());
+        return e;
       } finally {
         setJob(null);
         setPending(null);
@@ -115,8 +119,50 @@ export function useConnectionActions({
     }
   }, [setJob, report, setStatus]);
 
+  /// Тумблер «qd» (D-161): включить — скачать, выключить — удалить бинарь. Загрузка —
+  /// секунды, о которых говорит тост.
+  const qdSwitch = useCallback(
+    async (on: boolean) => {
+      setJob("install");
+      report(null);
+      const id = on ? toast({ title: t("Downloading qd…"), loading: true }) : undefined;
+      try {
+        if (on) {
+          const version = await api.coreInstall("qd");
+          toast.success(t("{engine} {version} downloaded", { engine: "qd", version }), { id });
+        } else {
+          await qd.remove();
+        }
+      } catch (e) {
+        if (id) toast.dismiss(id);
+        report(failure(e));
+      } finally {
+        setStatus(await api.coreStatus());
+        setSettings(await api.settingsGet());
+        setJob(null);
+      }
+    },
+    [setJob, report, setStatus, setSettings],
+  );
+
+  /// Тумблер маршрутизации (D-166): сборка меняется целиком и доезжает до ядра сразу,
+  /// поэтому перечитываем и статус, и настройки, где лежит галка.
+  const routing = useCallback(
+    async (on: boolean) => {
+      report(null);
+      try {
+        setStatus(await api.routingSet(on));
+      } catch (e) {
+        report(failure(e));
+      } finally {
+        setSettings(await api.settingsGet());
+      }
+    },
+    [report, setStatus, setSettings],
+  );
+
   /// Режим, который показывает переключатель: целевой, пока идёт запись, иначе выбранный.
   const mode: api.Choice = pending ?? status.desiredMode;
 
-  return { power, restart, choose, install, mode };
+  return { power, restart, choose, install, qdSwitch, routing, mode };
 }

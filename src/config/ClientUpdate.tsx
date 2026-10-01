@@ -57,7 +57,7 @@ export default function ClientUpdate({
                 ? t("Updates are unavailable in this build.")
                 : info
                   ? t("You have the latest version.")
-                  : t("Checks on launch. Installation requires your confirmation.")}
+                  : t("Checks on launch; installs only when you say so.")}
       </Text>
       {progress && (
         <Progress

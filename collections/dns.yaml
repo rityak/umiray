@@ -205,19 +205,21 @@ providers:
     name: OpenBLD.net DNS
     note: только шифрованные точки, обычного DNS у него нет
     site: https://openbld.net
+    # Строгий первым: подбор берёт первый вариант категории, а адаптивный пропускает
+    # doubleclick.net (S-033) — «блокировки рекламы» от него не дождаться.
     variants:
-      - id: ada
-        name: адаптивный
-        filter: ads
-        servers:
-          - { proto: doh, addr: https://ada.openbld.net/dns-query }
-          - { proto: dot, addr: tls://ada.openbld.net }
       - id: ric
         name: строгий
         filter: ads
         servers:
           - { proto: doh, addr: https://ric.openbld.net/dns-query }
           - { proto: dot, addr: tls://ric.openbld.net }
+      - id: ada
+        name: адаптивный
+        filter: ads
+        servers:
+          - { proto: doh, addr: https://ada.openbld.net/dns-query }
+          - { proto: dot, addr: tls://ada.openbld.net }
 
   - id: alidns
     name: Ali DNS
@@ -266,3 +268,75 @@ providers:
         servers:
           - { proto: udp, addr: 8.26.56.26 }
           - { proto: udp, addr: 8.20.247.20 }
+
+  # Ниже — добавлены под выбор категории в мастере (S-033): блокировщиков рекламы
+  # с шифрованием было два, и подбор «три быстрых» брал бы их всех. Проверены живьём
+  # 01.10.2026: отвечают, а «ads» правда режут doubleclick.net.
+  - id: controld
+    name: Control D
+    note: бесплатные публичные редакции без регистрации
+    site: https://controld.com/free-dns
+    variants:
+      - id: p0
+        name: без фильтрации
+        filter: none
+        servers:
+          - { proto: udp, addr: 76.76.2.0 }
+          - { proto: doh, addr: https://freedns.controld.com/p0 }
+          - { proto: dot, addr: tls://p0.freedns.controld.com }
+      - id: p1
+        name: защита
+        filter: security
+        servers:
+          - { proto: udp, addr: 76.76.2.1 }
+          - { proto: doh, addr: https://freedns.controld.com/p1 }
+          - { proto: dot, addr: tls://p1.freedns.controld.com }
+      - id: p2
+        name: защита и реклама
+        filter: ads
+        servers:
+          - { proto: udp, addr: 76.76.2.2 }
+          - { proto: doh, addr: https://freedns.controld.com/p2 }
+          - { proto: dot, addr: tls://p2.freedns.controld.com }
+
+  - id: mullvad
+    name: Mullvad DNS
+    note: без логов; DoH из РФ отвечает не везде, DoT — да
+    site: https://mullvad.net/help/dns-over-https-and-dns-over-tls
+    variants:
+      - id: default
+        name: без фильтрации
+        filter: none
+        servers:
+          - { proto: doh, addr: https://dns.mullvad.net/dns-query }
+          - { proto: dot, addr: tls://dns.mullvad.net }
+      - id: adblock
+        name: реклама
+        filter: ads
+        servers:
+          - { proto: doh, addr: https://adblock.dns.mullvad.net/dns-query }
+          - { proto: dot, addr: tls://adblock.dns.mullvad.net }
+
+  - id: dnsforge
+    name: dnsforge.de
+    note: немецкий, режет рекламу и трекеры
+    site: https://dnsforge.de
+    variants:
+      - id: default
+        name: обычный
+        filter: ads
+        servers:
+          - { proto: udp, addr: 176.9.93.198 }
+          - { proto: doh, addr: https://dnsforge.de/dns-query }
+          - { proto: dot, addr: tls://dnsforge.de }
+
+  - id: libredns
+    name: LibreDNS
+    note: греческий, некоммерческий
+    site: https://libredns.gr
+    variants:
+      - id: ads
+        name: реклама
+        filter: ads
+        servers:
+          - { proto: doh, addr: https://doh.libredns.gr/ads }

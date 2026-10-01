@@ -14,6 +14,7 @@ use crate::app::lifecycle::{Hook, Phase, When};
 use crate::app::state::AppState;
 use crate::core::process::LogRing;
 use crate::core::qd::Qd;
+use crate::core::EngineId;
 use crate::error::{AppError, Result};
 use crate::system::elevation::Elevation;
 
@@ -54,6 +55,7 @@ impl Engine for Qd {
             wanted: status.wanted,
             started: status.started,
             capture: status.on.then_some(Capture::Divert),
+            recovering: status.recovering,
         }
     }
 
@@ -104,9 +106,71 @@ pub struct QdStatus {
     problem: Option<String>,
 }
 
+/// Что стало со ссылкой qd (D-161).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Adopted {
+    /// Версия qd, если его пришлось скачать ради этой ссылки.
+    downloaded: Option<String>,
+    /// Ссылка ждёт первого подъёма qd: сейчас нет прав, и принять её некому.
+    pending: bool,
+}
+
 const RULES_FILTER: &[(&str, &str)] = &[("Правила qd (*.qdr)", "*.qdr"), ("Все файлы", "*.*")];
 
 impl QdPanel {
+    /// Ссылка `qd://` из любого поля добавления (D-161): qd скачивается, если его нет,
+    /// и принимает ссылку. Без прав qd не встаёт — ссылка ждёт его первого подъёма.
+    pub async fn adopt(&self, state: &AppState, link: &str) -> Result<Adopted> {
+        let link = link.trim();
+        // Схема регистра не различает (RFC 3986), а qd ждёт её строчной — `QD://` из окна
+        // приезжает как ссылка qd, и схему приводим здесь.
+        if !link
+            .get(..5)
+            .is_some_and(|scheme| scheme.eq_ignore_ascii_case("qd://"))
+        {
+            return Err(AppError::invalid("Это не ссылка qd"));
+        }
+        let link = &format!("qd://{}", &link[5..]);
+        let downloaded = if state.qd.present() {
+            None
+        } else {
+            Some(state.connection.install(state, EngineId::Qd).await?)
+        };
+        let body = serde_json::json!({ "uri": link });
+        let pending = match state
+            .qd
+            .call("POST", "/client/api/import", Some(body))
+            .await
+        {
+            Err(AppError::NeedsElevation { .. }) => {
+                state.qd.hold(link)?;
+                true
+            }
+            other => other.map(|_| false)?,
+        };
+        Ok(Adopted {
+            downloaded,
+            pending,
+        })
+    }
+
+    /// Выключить qd — удалить бинарь (D-161). Работающий не трогаем, как и при замене
+    /// (D-137); вид возвращается к mihomo, иначе кнопка питания поднимала бы пустоту.
+    pub async fn remove(&self, state: &AppState) -> Result<()> {
+        let _transition = state.connection.lock().await;
+        let now = Engine::state(&state.qd);
+        if now.on || now.wanted {
+            return Err(AppError::invalid(
+                "Сначала отключите qd: работающее ядро нельзя удалить",
+            ));
+        }
+        state.qd.remove().await?;
+        state
+            .settings
+            .update(|settings| settings.engine = EngineId::Mihomo)
+    }
+
     /// Спросить состояние — значит поднять процесс, если он нужен и может встать:
     /// разделы qd без него пусты.
     pub async fn status(&self, state: &AppState) -> QdStatus {

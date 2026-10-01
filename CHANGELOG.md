@@ -3,6 +3,59 @@
 The version comes from `package.json`, is mirrored in `Cargo.toml`, and appears in
 the subscription User-Agent as `umiray/<version>`.
 
+## 1.3.0
+
+### New
+
+- First-run setup wizard, also available from the title bar: a source, the capture mode
+  and the exit, step by step. "Recommended" writes a tuned mihomo config, picks the fastest
+  DNS resolvers and the TUN MTU, can block ads, and has a step for options with
+  trade-offs: sniffing, `prefer-h3` and open NAT.
+- Rule sets: downloaded lists of domains and subnets — antizapret, antifilter, Telegram,
+  YouTube and more from the built-in catalog, or any list by address. Each has its own exit
+  and priority and is refreshed in the background; a list from GitHub has a button that
+  opens its page.
+- Routing is one layered document: your rules, then rule sets and ready-made sets, then
+  the client's own rules. Routing can be switched off without losing it.
+- Cloudflare WARP node in one click. OpenVPN `.ovpn` and usque files can be added as
+  nodes, and every mihomo protocol that has a link is supported.
+- qd appears only once it is downloaded: a `qd://` link pasted into any add field
+  downloads qd and hands it the subscription.
+- Geo databases can be updated with a button while the core is running.
+- Export settings into one file.
+
+### Changes
+
+- All client data — settings, documents, sources, presets, rule sets and collections —
+  lives in one SQLite database, `umiray.db`. The data folder holds only the client, the
+  cores, the database and what the cores read. Existing installations move on first
+  start; each file is checked against the database before it is removed.
+- The client always runs from `%LOCALAPPDATA%\umiray`. A copy started anywhere else
+  installs itself there and starts from there; the startup task and autostart point there
+  too.
+- Sources moved into Connection: one card switches between nodes and sources, and one "+"
+  menu adds anything — a link, a subscription, a file, WARP or a `qd://` link.
+- `DIRECT` and `AUTO` are the first rows of the node list instead of a separate switch.
+- DNS and sniffing are on in every capture mode, not only in TUN. DNS resolvers are picked
+  from a category: no filtering, ad blocking, or any.
+- The Tools section is gone: each check runs where its answer is needed.
+
+### Fixes
+
+- Deleting a subscription no longer stops the VPN from starting when a rule pointed at one
+  of its nodes.
+- With qd, sleep or a network change no longer turns the VPN off for good.
+- A newer portable copy asks to close the running client instead of opening the old one.
+- Nodes with the same name in two sources can both be selected.
+- One broken node no longer removes its whole source from the core.
+- Node code edits are saved from either view; links pasted into one line become separate
+  nodes; a custom refresh interval shows what was saved.
+- The setup wizard can no longer be closed in the middle of a measurement, shows when the
+  capture mode could not be set, and no longer overwrites DNS chosen earlier.
+
+For Windows x64, download `umiray_1.3.0_x64-setup.exe` from this release's assets.
+Existing installations can update from within the client.
+
 ## 1.2.0
 
 ### Fixes

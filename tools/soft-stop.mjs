@@ -143,7 +143,7 @@ async function connect() {
   );
   await session.click(power);
   if (
-    !(await session.until(`document.body.textContent.includes("Подключено")`, { timeout: 30000 }))
+    !(await session.until(`document.body.textContent.includes("Подключён")`, { timeout: 30000 }))
   ) {
     console.error("ядро не поднялось");
     kill("umiray.exe");

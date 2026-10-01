@@ -1,11 +1,13 @@
-import { Activity, Layers, Network, Route, Rss, ScrollText, SlidersHorizontal } from "lucide-react";
+import { Layers, Network, Route, ScrollText, SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AppShell, Button, Callout, Dialog, Dock, type DockItem } from "rootik";
-import type * as api from "./api";
+import { flushSync } from "react-dom";
+import { AppShell, Button, Callout, Dialog, Dock, type DockItem, Toaster } from "rootik";
+import * as api from "./api";
 import TitleBar from "./chrome/TitleBar";
 import ClientUpdate from "./config/ClientUpdate";
 import ConfigEditor from "./config/ConfigEditor";
 import Connection from "./connection/Connection";
+import { useAdding } from "./controllers/useAdding";
 import { useConnectionActions } from "./controllers/useConnectionActions";
 import { useDrafts } from "./controllers/useDrafts";
 import { useJob } from "./controllers/useJob";
@@ -15,18 +17,20 @@ import { useSources } from "./controllers/useSources";
 import { useStatus } from "./controllers/useStatus";
 import { useSystemActions } from "./controllers/useSystemActions";
 import { useUpdates } from "./controllers/useUpdates";
-import Tools from "./diag/Tools";
-import { ENGINES } from "./engines";
+import { ENGINES, headline } from "./engines";
 import { saveLanguagePreference, t, tk } from "./i18n";
 import * as lifecycle from "./lifecycle";
 import Logs from "./logs/Logs";
 import QdSection from "./qd/QdSection";
 import { useQd } from "./qd/useQd";
 import Settings from "./settings/Settings";
+import Setup from "./setup/Setup";
 import AdminOffer from "./shell/AdminOffer";
 import Banner, { failure, type Message, notice } from "./shell/Banner";
 import Debug from "./shell/Debug";
-import Sources from "./sources/Sources";
+import LinkDialog from "./sources/LinkDialog";
+import NodeDialog from "./sources/NodeDialog";
+import WarpDialog from "./sources/WarpDialog";
 
 /// Постоянные разделы. Между ними встают разделы конфига: «Группы», «Маршрутизация»,
 /// «Настройки» (D-044). Документов внутри может быть больше одного (D-070), но полосе
@@ -37,25 +41,19 @@ import Sources from "./sources/Sources";
 /// по идентификатору, а не по порядку: переименуют раздел — значок останется на месте.
 const ICONS: Record<string, React.ReactNode> = {
   connection: <Network />,
-  sources: <Rss />,
   groups: <Layers />,
   rules: <Route />,
   advanced: <SlidersHorizontal />,
-  diag: <Activity />,
   logs: <ScrollText />,
 };
 
+/// Источники — вид внутри «Соединения», а не раздел (D-160).
 const FIRST: DockItem[] = [
   { value: "connection", label: tk("Connection"), icon: ICONS.connection },
-  { value: "sources", label: tk("Sources"), icon: ICONS.sources },
 ];
-/// Инструменты стоят перед логами и после конфига: сначала настраивают, потом смотрят,
-/// что получилось, и только потом читают вывод ядра (D-097). Раздел называется тем,
-/// что в нём есть: проверки, которые нужны сами по себе, теперь стоят хуками (D-115).
-const LAST: DockItem[] = [
-  { value: "diag", label: tk("Tools"), icon: ICONS.diag },
-  { value: "logs", label: tk("Logs"), icon: ICONS.logs },
-];
+/// Логи — после конфига: сначала настраивают, потом читают вывод ядра. Раздела
+/// «Инструменты» нет: замер стоит там, где нужен его ответ (D-115, D-167).
+const LAST: DockItem[] = [{ value: "logs", label: tk("Logs"), icon: ICONS.logs }];
 
 /**
  * Оболочка окна (D-155): раскладка, навигация по разделам и баннер. Состояние живёт
@@ -81,12 +79,15 @@ export default function App() {
     setStatus,
   });
   /// Какое ядро показывают разделы (D-154). Работающее может быть другим — о нём шапка.
-  const engine = ENGINES[settings.engine];
-  const qd = useQd(settings.engine === "qd" || status.active === "qd");
+  /// qd виден, только пока он скачан (D-161): пропал файл — вид возвращается к mihomo.
+  const viewed: api.Engine = status.qdPresent ? settings.engine : "mihomo";
+  const engine = ENGINES[viewed];
+  const qd = useQd(viewed === "qd" || status.active === "qd");
   const connection = useConnectionActions({
     status,
     setStatus,
-    engine: settings.engine,
+    setSettings,
+    engine: viewed,
     setJob,
     report: setMessage,
     afterPower: qd.reload,
@@ -96,6 +97,17 @@ export default function App() {
     clearDrafts();
     await reloadSources();
   }, [clearDrafts, reloadSources]);
+  /// Добавили источник — откуда угодно (D-160): перечитать источники, статус (qd мог
+  /// появиться) и состояние qd.
+  const { reload: reloadQd } = qd;
+  const afterAdd = useCallback(async () => {
+    await reloadSources();
+    setStatus(await api.coreStatus());
+    reloadQd();
+  }, [reloadSources, setStatus, reloadQd]);
+  const adding = useAdding({ report: setMessage, onAdded: afterAdd });
+  /// Мастер первого запуска (D-162): открывает шаг запуска `setup` или кнопка в настройках.
+  const [setupOpen, setSetupOpen] = useState(false);
   const system = useSystemActions({
     setStatus,
     setSettings,
@@ -114,10 +126,6 @@ export default function App() {
   /// Кто открыл настройки: `<dialog>` возвращал фокус сам, а обычный экран — нет,
   /// и клавиатура после закрытия оказывалась в `<body>`.
   const opener = useRef<HTMLElement | null>(null);
-  /// Нажали «+» в шапке. Кнопка обещает «добавить», значит и довести должна до поля ввода,
-  /// а не только до раздела. Флаг гасит сам раздел, иначе фокус уезжал бы туда при каждом
-  /// возврате в «Источники».
-  const [focusAdd, setFocusAdd] = useState(false);
 
   /// Запуск — список хуков, а не ветка в этом файле (D-095). Окно не знает, из чего он
   /// состоит: оно даёт хукам, куда положить добытое, и ждёт, пока они снимут заставку.
@@ -131,29 +139,36 @@ export default function App() {
       status: setStatus,
       message: setMessage,
       updates: setUpdateInfo,
+      setup: () => setSetupOpen(true),
     });
   }, [setSettings, setSections, setSources, setStatus, setUpdateInfo]);
 
-  const onFocused = useCallback(() => setFocusAdd(false), []);
-
-  /// «Добавить источник» — из шапки и из пустого состояния узлов. Кнопка обещает
-  /// «добавить», значит и доводит до поля ввода, а не только до раздела.
-  const add = useCallback(() => {
-    setTab("sources");
-    setFocusAdd(true);
-  }, []);
+  /// Мастер пройден (D-162): запомнить это и настроенное ядро.
+  const setupDone = useCallback(
+    async (next: api.Engine) => {
+      await update({ setup: true, engine: next });
+      setSetupOpen(false);
+    },
+    [update],
+  );
 
   /// Переключатель ядер — вид, а не питание (D-154). Раздела, которого у ядра нет,
-  /// не остаётся на экране.
+  /// не остаётся на экране: вкладка меняется в том же кадре, что и вид, — иначе между
+  /// ними мелькал пустой раздел.
   const chooseEngine = useCallback(
-    async (next: api.Engine) => {
-      await update({ engine: next });
-      setTab((was) =>
-        sections.some((item) => item.id === was) &&
-        !ENGINES[next].sections(sections).some((item) => item.id === was)
-          ? "connection"
-          : was,
-      );
+    (next: api.Engine) => {
+      const swap = () => {
+        setTab((was) =>
+          sections.some((item) => item.id === was) &&
+          !ENGINES[next].sections(sections).some((item) => item.id === was)
+            ? "connection"
+            : was,
+        );
+        void update({ engine: next });
+      };
+      // Окно сменяется кроссфейдом целиком, а не гасит раздел в ноль (STYLEGUIDE).
+      if (document.startViewTransition) document.startViewTransition(() => flushSync(swap));
+      else swap();
     },
     [update, sections],
   );
@@ -183,12 +198,7 @@ export default function App() {
         }
       : null);
   const shownSections = engine.sections(sections);
-  /// Шапка говорит о работающем ядре; ничего не работает — о выбранном.
-  const headline = ENGINES[status.active ?? settings.engine].headline({
-    status,
-    qd: qd.status,
-    powering: job === "power",
-  });
+  const header = headline({ status, qd: qd.status, powering: job === "power" });
   const tabs: DockItem[] = [
     ...FIRST.map((item) => ({ ...item, label: t(item.label) })),
     ...shownSections.map((section) => ({
@@ -247,6 +257,10 @@ export default function App() {
           onAlwaysAdmin: system.alwaysAdmin,
           onKillSwitch: system.killSwitch,
           onReset: system.reset,
+          onQd: connection.qdSwitch,
+          onRouting: connection.routing,
+          onSetup: () => setSetupOpen(true),
+          onExport: system.exportSettings,
           onStatus: setStatus,
           onLanguageChange: (language) => {
             if (Object.values(drafts.configs).some((draft) => draft.text !== draft.saved)) {
@@ -272,10 +286,12 @@ export default function App() {
       dimWhenInactive
       header={
         <TitleBar
-          headline={headline}
-          engine={settings.engine}
+          headline={header}
+          engine={viewed}
+          engines={status.qdPresent ? ["mihomo", "qd"] : ["mihomo"]}
           onEngine={chooseEngine}
-          onAdd={add}
+          onAdd={adding.pick}
+          onSetup={() => setSetupOpen(true)}
           onSettings={() => {
             opener.current = document.activeElement as HTMLElement | null;
             setSettingsOpen(true);
@@ -299,6 +315,37 @@ export default function App() {
         />
       }
     >
+      {/* Тосты живут в верхнем слое: видны и поверх мастера (D-161). */}
+      <Toaster position="bottom-right" />
+      {/* Окна добавления — одни на все кнопки «+» (D-160). */}
+      {adding.open === "link" && <LinkDialog onSubmit={adding.submit} onClose={adding.close} />}
+      {adding.open === "warp" && <WarpDialog onDone={adding.done} onClose={adding.close} />}
+      {adding.open === "node" && <NodeDialog onDone={adding.done} onClose={adding.close} />}
+      {setupOpen && (
+        <Setup
+          again={settings.setup}
+          status={status}
+          sources={sources}
+          mode={connection.mode}
+          onLink={adding.link}
+          onFile={adding.file}
+          onElevate={system.elevate}
+          onMode={async (mode) => {
+            const refused = await connection.choose(mode);
+            if (refused) throw refused;
+          }}
+          onStatus={setStatus}
+          onDone={setupDone}
+          // Уже работает — не гасим: мастер, открытый снова, правит живое соединение.
+          onConnect={async () => {
+            if (status.active === null) await connection.power();
+          }}
+          onClose={() => {
+            setSetupOpen(false);
+            update({ setup: true });
+          }}
+        />
+      )}
       {(updates.open || updates.progress) && (
         <Dialog
           title={t("Client updates")}
@@ -326,8 +373,9 @@ export default function App() {
         {/* Предложение закрепить права. Всплывает ровно тогда, когда оно уместно:
               клиент запущен с правами, задачи ещё нет и от неё ещё не отказывались
               (D-087). Отказ помнится — предложение, возвращающееся каждый запуск,
-              это уже не предложение. */}
-        {status.elevated && !status.alwaysAdmin && settings.adminOffer && (
+              это уже не предложение. И не поверх мастера: два вопроса разом —
+              ни на один не ответят. */}
+        {status.elevated && !status.alwaysAdmin && settings.adminOffer && !setupOpen && (
           <AdminOffer
             onAccept={() => system.alwaysAdmin(true)}
             onDismiss={() => update({ adminOffer: false })}
@@ -368,14 +416,14 @@ export default function App() {
           <>
             {/* Подложку несёт каждая карточка раздела сама (D-142): листа под разделом нет. */}
             <section
-              key={`${tab}-${settings.engine}`}
+              key={tab}
               id="section-panel"
               role="tabpanel"
               aria-labelledby={`tab-${tab}`}
               className="um-section flex min-h-0 flex-1 flex-col gap-3"
             >
               {/* Одна точка выбора ядра (D-154): свои разделы у каждого, общие — ниже. */}
-              {settings.engine === "qd" ? (
+              {viewed === "qd" ? (
                 <QdSection
                   tab={tab}
                   section={section}
@@ -385,9 +433,7 @@ export default function App() {
                   onPower={connection.power}
                   hidden={settings.private}
                   onHidden={() => update({ private: !settings.private })}
-                  focus={focusAdd}
-                  onFocused={onFocused}
-                  onAdd={add}
+                  onAdd={adding.pick}
                   onElevate={system.elevate}
                   onMessage={setMessage}
                   config={config}
@@ -406,31 +452,20 @@ export default function App() {
                       hidden={settings.private}
                       onHidden={() => update({ private: !settings.private })}
                       onStatus={setStatus}
-                      onAdd={add}
+                      onAdd={adding.pick}
                       onMessage={setMessage}
-                    />
-                  )}
-                  {tab === "sources" && (
-                    <Sources
-                      sources={sources}
-                      hidden={settings.private}
-                      onHidden={() => update({ private: !settings.private })}
-                      focus={focusAdd}
-                      onFocused={onFocused}
                       schedule={settings.refresh}
                       onSchedule={(refresh) => update({ refresh })}
                       drafts={drafts.sources}
                       onDraft={drafts.onSourceDraft}
                       onDisk={drafts.onSourceDisk}
-                      onChanged={reloadSources}
-                      onMessage={setMessage}
+                      onSourcesChanged={reloadSources}
                     />
                   )}
                   {config()}
                 </>
               )}
-              {tab === "diag" && <Tools onMessage={setMessage} />}
-              {tab === "logs" && <Logs engine={settings.engine} hidden={settings.private} />}
+              {tab === "logs" && <Logs key={viewed} engine={viewed} hidden={settings.private} />}
             </section>
           </>
         )}

@@ -33,6 +33,8 @@ export type Boot = {
   status: (status: api.Status) => void;
   message: (message: Message) => void;
   updates: (info: api.UpdateInfo) => void;
+  /// Открыть мастер первого запуска (D-162).
+  setup: () => void;
 };
 
 export type Hook = {
@@ -111,7 +113,7 @@ on({
 
     // Строка называет и то, чего ждём, и то, что это не повторится: без второй половины
     // полминуты на бегунке читаются как «повисло». Потолок заставки на это время поднят.
-    splash.step(t("downloading mihomo — once on first launch"));
+    splash.step(t("downloading mihomo"));
     splash.hold();
     try {
       const version = await api.coreInstall("mihomo");
@@ -123,7 +125,7 @@ on({
       const error = api.asAppError(e);
       boot.message({
         tone: "error",
-        text: t("The core could not be downloaded automatically — VPN cannot start without it."),
+        text: t("Couldn't download the core — VPN can't start without it."),
         details: [error.message, ...error.details],
         kind: "coreMissing",
       });
@@ -137,5 +139,22 @@ on({
   async run(boot) {
     // A slow or unavailable release server must not delay opening the window.
     void api.updatesCheck().then(boot.updates, () => {});
+  },
+});
+
+/// Мастер первого запуска (D-162) — после ядра: без него мастеру нечего подключать.
+/// Открывается, пока он не пройден и нет ни одного источника — ни mihomo, ни qd. Спрашиваем
+/// заново, а не берём у шагов выше: у них свои отказы, и по пустому ответу мастер открылся
+/// бы тому, у кого источники есть.
+on({
+  id: "setup",
+  label: tk("setup"),
+  async run(boot) {
+    const [settings, sources, status] = await Promise.all([
+      api.settingsGet(),
+      api.sourcesList(),
+      api.coreStatus(),
+    ]);
+    if (!settings.setup && sources.length === 0 && !status.qdPresent) boot.setup();
   },
 });

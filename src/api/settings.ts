@@ -57,6 +57,11 @@ export const Settings = z.object({
   /// ещё нет (D-087). Отказ помнится: предложение, возвращающееся каждый запуск, —
   /// это уже не предложение.
   adminOffer: z.boolean(),
+  /// Пройден ли мастер первого запуска (D-162). Закрытый — тоже пройден.
+  setup: z.boolean(),
+  /// Работает ли маршрутизация (D-166). Меняется своей командой, не `SettingsPatch`:
+  /// переключение доезжает до ядра.
+  routing: z.boolean(),
 });
 export type Settings = z.infer<typeof Settings>;
 
@@ -72,6 +77,7 @@ export type SettingsPatch = {
   autoConnect?: boolean;
   launch?: Launch;
   adminOffer?: boolean;
+  setup?: boolean;
 };
 
 /// Готовые варианты для выпадающего списка. «Своё» — не пресет, его считает форма.

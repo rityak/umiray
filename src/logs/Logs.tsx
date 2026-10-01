@@ -59,11 +59,7 @@ export default function Logs({ engine, hidden }: { engine: api.Engine; hidden: b
   if (raw.length === 0) {
     return (
       <Card>
-        <EmptyState
-          icon={<ScrollText />}
-          title={t("Empty")}
-          hint={t("The core has not run — nothing to write.")}
-        />
+        <EmptyState icon={<ScrollText />} title={t("Empty")} hint={t("The core hasn't run yet.")} />
       </Card>
     );
   }

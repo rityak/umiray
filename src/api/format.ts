@@ -75,7 +75,7 @@ export function delayLabel(node: Node): string {
 /// Запасной замер называет себя первым: число в такой строке отвечает не на тот вопрос,
 /// который задавали, и молча выдавать его за заказанный нельзя (D-069).
 export function delayHint(node: Node): string {
-  if (node.method === null) return t("not measured or the server did not respond");
+  if (node.method === null) return t("not measured, or the server didn't answer");
   if (node.fallback) {
     // У `hysteria2`, `tuic` и `wireguard` TCP-порта нет вовсе, и «проверка не дала
     // результата» про них — не про сервер, а про сам способ. Такие меряет ядро.

@@ -3,6 +3,7 @@
 use crate::error::{AppError, Result};
 use crate::nodes::source_id::SourceId;
 use crate::nodes::sources::own_proxies;
+use crate::nodes::sources::taken_by_others;
 use crate::nodes::sources::write;
 use crate::nodes::sources::Source;
 use crate::nodes::sources::SourceStore;
@@ -74,7 +75,7 @@ impl SourceImporter {
         });
 
         let mut lines: Vec<String> = SourceStore::raw(&id).lines().map(str::to_string).collect();
-        lines.push(uri.to_string());
+        lines.extend(crate::nodes::link::LinkParser::lines_of(uri));
         write(&mut source, lines, &id, &crate::config::awg::Mask::get())?;
         SourceStore::get(&id)
     }
@@ -92,9 +93,12 @@ impl SourceImporter {
             .and_then(serde_yaml::Value::as_str)
             .unwrap_or("Узел")
             .to_string();
+        // Свои имена и имена всех остальных источников: узел подписки с тем же именем
+        // сделал бы выбор в группе неоднозначным (S-012).
         let taken: Vec<String> = proxies
             .iter()
             .filter_map(|proxy| proxy.get("name")?.as_str().map(str::to_string))
+            .chain(taken_by_others(&id))
             .collect();
         crate::yaml::Yaml::set(
             &mut entry,
@@ -120,9 +124,10 @@ impl SourceImporter {
         SourceStore::get(&id)
     }
 
-    /// Принять файл с конфигом. Понимаем только то, что узнаём: чужой формат получает отказ
-    /// с текстом, а не узел, который молча не работает (D-120).
-    pub fn import_file(path: &std::path::Path) -> Result<Source> {
+    /// Запись узла из файла с конфигом. Понимаем только то, что узнаём: чужой формат получает
+    /// отказ с текстом, а не узел, который молча не работает (D-120). В источник запись
+    /// кладёт сервис — после того, как её проверило ядро.
+    pub fn file_entry(path: &std::path::Path) -> Result<serde_yaml::Mapping> {
         let text = std::fs::read_to_string(path)
             .map_err(|e| AppError::io(format!("Файл не читается: {e}")))?;
         let name = path
@@ -130,40 +135,19 @@ impl SourceImporter {
             .and_then(|stem| stem.to_str())
             .unwrap_or("Узел")
             .to_string();
-        SourceImporter::add_proxy(crate::nodes::wgconf::WgConf::to_proxy(&text, &name)?)
+        SourceImporter::file_proxy(&text, &name)
     }
 
-    /// Принять готовые записи прокси при переезде со старой раскладки.
-    ///
-    /// Ядро читает провайдер и в YAML-виде, поэтому серверы, которые уже были разобраны,
-    /// не приходится собирать обратно в ссылки. Первое «Обновить» заменит это списком ссылок.
-    pub fn adopt(url: &str, proxies: Vec<serde_yaml::Value>) -> Result<Source> {
-        let id = SourceId::new()?.as_str().to_string();
-        let mut map = serde_yaml::Mapping::new();
-        crate::yaml::Yaml::set(&mut map, "proxies", serde_yaml::Value::Sequence(proxies));
-        let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(map))
-            .map_err(|e| AppError::invalid(e.to_string()))?;
-
-        let mut source = Source {
-            id: id.clone(),
-            name: if url.is_empty() {
-                MANUAL.into()
-            } else {
-                host_of(url)
-            },
-            url: (!url.is_empty()).then(|| url.to_string()),
-            updated: None,
-            nodes: 0,
-            records: false,
-            skipped: Vec::new(),
-        };
-        write(
-            &mut source,
-            vec![yaml],
-            &id,
-            &crate::config::awg::Mask::get(),
-        )?;
-        SourceStore::get(&id)
+    /// Запись узла из текста файла. Различаем по тексту, а не по расширению: `.conf`
+    /// бывает и у OpenVPN.
+    pub fn file_proxy(text: &str, name: &str) -> Result<serde_yaml::Mapping> {
+        if crate::nodes::ovpn::Ovpn::looks_like(text) {
+            crate::nodes::ovpn::Ovpn::to_proxy(text, name)
+        } else if crate::nodes::usque::Usque::looks_like(text) {
+            crate::nodes::usque::Usque::to_proxy(text, name)
+        } else {
+            crate::nodes::wgconf::WgConf::to_proxy(text, name)
+        }
     }
 }
 

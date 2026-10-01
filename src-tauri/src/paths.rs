@@ -8,6 +8,9 @@
 //! подписки, выбор узла и настройки того, кто просто хотел, чтобы VPN работал.
 //! Признак — профиль сборки, а не переменная окружения: забыть её ровно так же легко,
 //! как и не заметить, что правишь настоящий конфиг.
+//!
+//! В каталоге — клиент, ядра, база и то, что читают ядра (D-170, D-171): данные клиента
+//! лежат в базе, на диске остаётся только сгенерированное для ядра в `run/`.
 
 use std::io;
 use std::path::PathBuf;
@@ -16,6 +19,14 @@ pub const APP_NAME: &str = if cfg!(debug_assertions) {
     "umiray-dev"
 } else {
     "umiray"
+};
+
+/// Имя клиента в каталоге данных (D-171). Совпадает с именем бинаря сборки: так копия
+/// из `target/debug` и установленная — один и тот же процесс для `taskkill` и проверок.
+pub const CLIENT_NAME: &str = if cfg!(debug_assertions) {
+    "umiray-dev.exe"
+} else {
+    "umiray.exe"
 };
 
 pub const CORE_NAME: &str = if cfg!(debug_assertions) {
@@ -41,9 +52,14 @@ impl Paths {
         })
     }
 
-    /// Конфиг до разделения на профиль и оверрайд. Остался только ради разовой миграции.
-    pub fn legacy_config() -> PathBuf {
-        Paths::root().join("config.yaml")
+    /// База клиента: все его данные (D-170).
+    pub fn db() -> PathBuf {
+        Paths::root().join("umiray.db")
+    }
+
+    /// Единственное место, откуда клиент работает (D-171).
+    pub fn client_exe() -> PathBuf {
+        Paths::root().join(CLIENT_NAME)
     }
 
     pub fn qd() -> PathBuf {
@@ -55,111 +71,20 @@ impl Paths {
         Paths::root().join("qd")
     }
 
-    /// Настройки приложения: поведение, переживающее перезапуск (D-024).
-    pub fn settings() -> PathBuf {
-        Paths::root().join("settings.json")
-    }
-
-    /// Каталог источников: список ссылок и метаданные на каждый (D-032).
-    /// Список ссылок читает само ядро — это `path:` его провайдера.
+    /// Провайдеры источников для ядра: то, что хранилище источников выкладывает из базы
+    /// при каждой публикации (D-170). Внутри рабочего каталога ядра — читать вне его
+    /// mihomo отказывается (B-002).
     pub fn sources_dir() -> PathBuf {
-        Paths::root().join("sources")
+        Paths::run_dir().join("sources")
     }
 
-    pub fn source_links(id: &str) -> PathBuf {
-        Paths::sources_dir().join(format!("{id}.txt"))
+    pub fn source_provider(id: &str) -> PathBuf {
+        Paths::sources_dir().join(format!("{id}.yaml"))
     }
 
-    /// Что прислала панель, до наших правок. Без него кнопка «Сброс» не может ничего вернуть.
-    pub fn source_raw(id: &str) -> PathBuf {
-        Paths::sources_dir().join(format!("{id}.raw"))
-    }
-
-    /// Правки пользователя: разница, а не поправленные узлы.
-    pub fn source_patches(id: &str) -> PathBuf {
-        Paths::sources_dir().join(format!("{id}.patch.json"))
-    }
-
-    /// Правка **записи** узла — та, что клиент пишет сам (D-119). Тоже разница, а не копия.
-    pub fn source_entries(id: &str) -> PathBuf {
-        Paths::sources_dir().join(format!("{id}.entry.yaml"))
-    }
-
-    pub fn source_meta(id: &str) -> PathBuf {
-        Paths::sources_dir().join(format!("{id}.json"))
-    }
-
-    /// Настройки ядра: конфиг целиком, кроме источников, групп и правил.
-    /// Правит его и редактор, и переключатель режима — файл один на обоих (D-052).
-    pub fn advanced() -> PathBuf {
-        Paths::root().join("advanced.yaml")
-    }
-
-    /// Настройки самого клиента: то, чего нет в конфиге ядра (D-068). Ядру не уходит.
-    pub fn client() -> PathBuf {
-        Paths::root().join("client.yaml")
-    }
-
-    /// Тот же файл до переименования. Остался ради разового переезда.
-    pub fn legacy_override() -> PathBuf {
-        Paths::root().join("override.yaml")
-    }
-
-    /// Группы выбора пользователя. Пусто — группу собирает клиент (D-044).
-    pub fn groups() -> PathBuf {
-        Paths::root().join("groups.yaml")
-    }
-
-    /// Маршрутизация пользователя. Пусто — весь трафик идёт через группу клиента (D-044).
-    pub fn rules() -> PathBuf {
-        Paths::root().join("rules.yaml")
-    }
-
-    pub fn ensure_sources_dir() -> io::Result<()> {
-        std::fs::create_dir_all(Paths::sources_dir())
-    }
-
-    /// Наборы конфигов: пара «группы + маршрутизация» под направление (D-056).
-    pub fn presets_dir() -> PathBuf {
-        Paths::root().join("presets")
-    }
-
-    pub fn preset_meta(id: &str) -> PathBuf {
-        Paths::presets_dir().join(format!("{id}.json"))
-    }
-
-    /// Файл набора. `part` — идентификатор пользовательского файла: `groups` или `rules`.
-    pub fn preset_part(id: &str, part: &str) -> PathBuf {
-        Paths::presets_dir().join(format!("{id}.{part}.yaml"))
-    }
-
-    pub fn ensure_presets_dir() -> io::Result<()> {
-        std::fs::create_dir_all(Paths::presets_dir())
-    }
-
-    /// Коллекции: всё, что клиент поставляет данными, а владеет ими пользователь (D-100).
-    /// Резолверы, эталонные ресурсы, встроенные наборы правил — читается отсюда, а не из бинаря.
-    pub fn collections_dir() -> PathBuf {
-        Paths::root().join("collections")
-    }
-
-    /// Коллекция-документ: один файл с известной схемой.
-    pub fn collection_file(name: &str) -> PathBuf {
-        Paths::collections_dir().join(format!("{name}.yaml"))
-    }
-
-    /// Коллекция-папка: много файлов одной схемы, которые перечисляются на лету.
-    pub fn collection_folder(name: &str) -> PathBuf {
-        Paths::collections_dir().join(name)
-    }
-
-    /// Где лежали коллекции до D-100. Нужны переезду, и только ему.
-    pub fn legacy_catalog_dir() -> PathBuf {
-        Paths::root().join("catalog")
-    }
-
-    pub fn legacy_rulesets_dir() -> PathBuf {
-        Paths::root().join("rulesets")
+    /// Собранное ядрами из rule sets (D-157): `<ядро>/<id>.<часть>.mrs`. Сами списки — в базе.
+    pub fn lists_dir() -> PathBuf {
+        Paths::run_dir().join("lists")
     }
 
     /// Рабочий каталог ядра: сюда кладётся сгенерированный конфиг, сюда ядро пишет своё.
@@ -174,17 +99,6 @@ impl Paths {
 
     pub fn core() -> PathBuf {
         Paths::root().join(CORE_NAME)
-    }
-
-    /// Идентификатор установки для подписок с привязкой по устройству.
-    /// Страна по адресу узла, кэшем (D-084). Ключ — `host:port`: имя узла панель меняет,
-    /// адрес нет.
-    pub fn geo() -> PathBuf {
-        Paths::root().join("geo.json")
-    }
-
-    pub fn hwid() -> PathBuf {
-        Paths::root().join("hwid.txt")
     }
 
     pub fn ensure_root() -> io::Result<()> {
@@ -204,47 +118,56 @@ pub const QD_NAME: &str = if cfg!(debug_assertions) {
     "qd.exe"
 };
 
+/// Свой `LOCALAPPDATA` для проверки с диском — под замком на весь процесс: переменная одна
+/// на процесс, и две проверки иначе подменяли бы каталог друг у друга на ходу.
+#[cfg(test)]
+pub struct Sandbox {
+    _lock: std::sync::MutexGuard<'static, ()>,
+    pub dir: PathBuf,
+}
+
+#[cfg(test)]
+impl Sandbox {
+    pub fn new(name: &str) -> Sandbox {
+        static DISK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let lock = DISK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!("umiray-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::env::set_var("LOCALAPPDATA", &dir);
+        Sandbox { _lock: lock, dir }
+    }
+}
+
+#[cfg(test)]
+impl Drop for Sandbox {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     /// Кто вправе знать, где лежит каждый вид данных (D-155). Путь знает только его
-    /// хранилище: ради этого переезд части данных в SQLite — замена одного хранилища,
-    /// а не поиск путей по всему коду. Новый путь без строки здесь — провал теста:
-    /// у данных обязан быть владелец.
+    /// хранилище: ради этого переезд в SQLite (D-170) заменил хранилища, а не искал пути
+    /// по всему коду. Новый путь без строки здесь — провал теста: у данных обязан быть владелец.
     const OWNERS: &[(&str, &[&str])] = &[
-        ("settings", &["app/settings.rs"]),
+        ("db", &["db.rs"]),
+        ("client_exe", &["system/install.rs"]),
         ("sources_dir", &["nodes/sources.rs"]),
-        (
-            "ensure_sources_dir",
-            &["nodes/sources.rs", "nodes/entries.rs"],
-        ),
-        ("source_links", &["nodes/sources.rs"]),
-        ("source_raw", &["nodes/sources.rs"]),
-        ("source_patches", &["nodes/sources.rs"]),
-        ("source_meta", &["nodes/sources.rs"]),
-        ("source_entries", &["nodes/entries.rs"]),
-        ("advanced", &["config/files.rs"]),
-        ("client", &["config/files.rs"]),
-        ("groups", &["config/files.rs"]),
-        ("presets_dir", &["config/presets.rs"]),
-        ("preset_meta", &["config/presets.rs"]),
-        ("preset_part", &["config/presets.rs"]),
-        ("ensure_presets_dir", &["config/presets.rs"]),
-        ("collections_dir", &["collections.rs"]),
-        ("collection_file", &["collections.rs"]),
-        ("collection_folder", &["collections.rs"]),
+        ("source_provider", &["nodes/sources.rs"]),
+        ("lists_dir", &["lists/store.rs"]),
         ("core", &["core/mihomo.rs"]),
         ("run_dir", &["core/mihomo.rs"]),
         ("ensure_run_dir", &["core/mihomo.rs"]),
         ("effective_config", &["core/mihomo.rs"]),
         ("qd", &["core/qd.rs"]),
         ("qd_dir", &["core/qd.rs"]),
-        ("geo", &["nodes/geo.rs"]),
-        ("hwid", &["nodes/device.rs"]),
     ];
     /// Сам каталог данных общий: «убедиться, что он есть» — не знание о чужих данных.
     const SHARED: &[&str] = &["root", "ensure_root"];
     /// Переезд по определению знает и старую раскладку, и новую.
-    const MIGRATION: &[&str] = &["app/migrate.rs", "app/data.rs"];
+    const MIGRATION: &[&str] = &["app/import.rs", "app/data.rs"];
 
     #[test]
     fn only_the_owner_knows_where_its_data_lives() {

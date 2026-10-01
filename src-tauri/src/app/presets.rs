@@ -6,7 +6,6 @@
 use tauri::AppHandle;
 
 use crate::app::state::AppState;
-use crate::config::direction::Direction;
 use crate::config::presets::Preset;
 use crate::config::presets::PresetStore;
 use crate::error::{AppError, Result};
@@ -28,7 +27,7 @@ impl Presets {
 
     /// Применить набор: с этого момента маршрут решают его документы.
     ///
-    /// Направление при этом встаёт в `RULES` — это и значит «применить». Набор, лежащий
+    /// Маршрутизация при этом включается — это и значит «применить» (D-166): набор, лежащий
     /// в стороне от сборки, применённым не является ни в каком смысле. Документы набора
     /// ядро читает на старте (D-010), поэтому работающее перезапускается (D-064).
     pub async fn select(&self, app: &AppHandle, state: &AppState, id: &str) -> Result<()> {
@@ -45,7 +44,7 @@ impl Presets {
         PresetStore::get(id)?;
         state.settings.update(|settings| {
             settings.preset = Some(id.to_string());
-            settings.direction = Direction::Rules;
+            settings.routing = true;
         })
     }
 
@@ -66,8 +65,8 @@ impl Presets {
             ));
         }
         PresetStore::delete(id)?;
-        // Запомненный, но не применённый: ссылку чистим, иначе возврат в RULES полезет
-        // за набором, которого нет.
+        // Запомненный, но не применённый: ссылку чистим, иначе сборка полезет за набором,
+        // которого нет.
         if state.settings.get().preset.as_deref() == Some(id) {
             state.settings.update(|settings| settings.preset = None)?;
         }

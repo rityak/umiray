@@ -12,6 +12,9 @@ if (!code) {
   process.exit(1);
 }
 
-const session = await attach({ reload: process.argv.includes("--reload") });
+const session = await attach({
+  port: Number(process.env.UI_CHECK_PORT ?? 9222),
+  reload: process.argv.includes("--reload"),
+});
 console.log(JSON.stringify(await session.eval(code), null, 2));
 process.exit(0);

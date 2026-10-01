@@ -1,6 +1,6 @@
 import { Cpu, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { Card, EmptyState, Select, Spinner } from "rootik";
+import { Callout, Card, EmptyState, Select, Spinner, Switch } from "rootik";
 import * as api from "../api";
 import { t } from "../i18n";
 import { failure, type Message, notice } from "../shell/Banner";
@@ -62,13 +62,13 @@ const RULES = "rules";
 /// сколько его ни правь (D-071).
 function savedText(doc: api.ConfigDoc, presets: boolean, running: boolean): string {
   if (presets && !doc.applied)
-    return t("Saved to preset «{name}». Another preset controls the route; choose Use to switch.", {
+    return t("Saved to preset «{name}». Another preset is in use; press Use to switch.", {
       name: doc.label,
     });
   if (!doc.core) return t("Saved.");
   return running
     ? t("Saved and applied to the running VPN.")
-    : t("Saved. Changes take effect when you connect.");
+    : t("Saved. Applies when you connect.");
 }
 
 /**
@@ -146,7 +146,11 @@ export default function ConfigEditor({
       onMessage(notice(savedText(doc, section.presets, status.running)));
     } catch (e) {
       onMessage(failure(e));
+      return;
     }
+    // Список мог появиться в коде строкой, а не кнопкой (D-158): докачиваем, что не скачано.
+    // Отказ — отдельным сообщением: записанное уже записано.
+    if (section.id === RULES) api.listsEnsure().catch((e) => onMessage(failure(e)));
   };
 
   /// Применить набор: с этого момента маршрут решают его документы. Ядро читает их
@@ -162,10 +166,10 @@ export default function ConfigEditor({
       onMessage(
         notice(
           client.status.running
-            ? t("Preset «{name}» is now in use. The running core was restarted to apply it.", {
+            ? t("Now using preset «{name}». The core was restarted.", {
                 name: doc.label,
               })
-            : t("Preset «{name}» is now in use and takes effect when you connect.", {
+            : t("Preset «{name}» selected; it applies when you connect.", {
                 name: doc.label,
               }),
         ),
@@ -229,6 +233,14 @@ export default function ConfigEditor({
     }
   };
 
+  /// Выключенная маршрутизация не берёт из набора ничего (D-166): правка сохраняется,
+  /// но не действует, — и это видно сразу, в обоих видах.
+  const routingOff = section.id === RULES && !client.settings.routing && (
+    <Callout tone="info">
+      {t("Routing is off: all traffic goes to the exit chosen in Connection.")}
+    </Callout>
+  );
+
   /// Какой документ правим — в «Настройках» (два документа). У «Маршрутизации» это
   /// выбор набора, у «Групп» документ один, и выбирать нечего.
   const docSwitch =
@@ -254,6 +266,14 @@ export default function ConfigEditor({
   const start = (
     <>
       {doc.id !== own?.id && <ViewSwitch value={view} onChange={setView} />}
+      {section.id === RULES && (
+        <Switch
+          label={t("Routing")}
+          checked={client.settings.routing}
+          disabled={client.busy}
+          onChange={(event) => client.onRouting(event.target.checked)}
+        />
+      )}
       {section.presets ? (
         // Наборы — выпадающим списком, действия над ними — в меню рядом (D-075).
         <PresetPicker
@@ -314,6 +334,7 @@ export default function ConfigEditor({
       <>
         <SectionBar start={start} end={drafted && actions} hint={doc.hint} />
         <Scroll>
+          {routingOff}
           {draft === undefined ? (
             <Spinner label={t("Loading")} />
           ) : section.id === GROUPS ? (
@@ -328,6 +349,7 @@ export default function ConfigEditor({
               onDraft={(text) => onDraft(doc.id, text)}
               onMessage={onMessage}
               onPending={setRendering}
+              running={client.status.running}
             />
           ) : (
             <Card>
@@ -345,6 +367,7 @@ export default function ConfigEditor({
   return (
     <>
       <SectionBar start={start} end={actions} hint={doc.hint} />
+      {routingOff}
       {/* Редактор — во всю оставшуюся высоту и со своей прокруткой. */}
       <Card className="min-h-0 flex-1" padding="sm">
         {draft === undefined ? (

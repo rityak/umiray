@@ -9,6 +9,7 @@ use crate::app::state::AppState;
 use crate::app::status::Status;
 use crate::config::files;
 use crate::config::files::Documents;
+use crate::config::route_doc::RouteDocument;
 use crate::error::Result;
 
 /// Разделы окна с документами внутри (D-044, D-070). Команды принимают идентификатор
@@ -40,7 +41,7 @@ pub async fn config_write(
 ) -> Result<Status> {
     state
         .connection
-        .change(&app, &state, || Documents::write(&id, &text))
+        .change(&app, &state, || RouteDocument::write(&id, &text))
         .await
 }
 
@@ -48,11 +49,8 @@ pub async fn config_write(
 /// он в документах. Служебный вход замера не подмешиваем — он нужен живому ядру, а не читателю.
 #[tauri::command]
 pub fn config_assembled(state: State<AppState>) -> Result<String> {
-    crate::render::effective::ConfigRenderer::effective(
-        state.routing.rules(&state)?.as_deref(),
-        None,
-    )
-    .map(|built| built.yaml)
+    crate::render::effective::ConfigRenderer::effective(&state.routing.document(&state)?, None)
+        .map(|built| built.yaml)
 }
 
 /// Умолчание у файла клиента — шаблон, у части набора — собранное клиентом, поэтому

@@ -1,0 +1,165 @@
+# Каталог rule sets (D-157): списки доменов и подсетей, которые клиент умеет скачать.
+#
+# Это ваш файл: правьте, удаляйте, добавляйте. Клиент его не перезаписывает.
+#
+# Поля списка:
+#   id        — имя файла и имя в правиле: RULE-SET,<id>,umiray. Буквы, цифры, дефис.
+#   title     — как список называется в окне; title_en — по-английски, если язык окна английский
+#   group     — blocked, services, russia: как каталог разбит на части
+#   note      — строка под именем: что внутри; note_en — по-английски
+#   urls      — откуда. Несколько адресов складываются в один список
+#
+# Форматы клиент узнаёт сам: простой список (голый домен — с поддоменами), payload
+# Clash/mihomo (голый домен — точный, +. — с поддоменами), domain:/full: v2ray,
+# JSON sing-box. Сверено 30.09.2026 (S-028).
+
+version: 1
+lists:
+  # Заблокированное в России
+  - id: itdog-inside
+    title: Russia inside — itdoginfo
+    group: blocked
+    note: заблокированное и закрытое для России — ~1,5 тыс. доменов, хватает большинству
+    note_en: blocked in Russia and geo-blocked for it — ~1.5k domains, enough for most
+    urls:
+      - https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Russia/inside-raw.lst
+  - id: antifilter-community
+    title: antifilter community
+    group: blocked
+    note: что сообщество добавило к реестру — домены и адреса
+    note_en: what the community added to the registry — domains and addresses
+    urls:
+      - https://community.antifilter.download/list/domains.lst
+      - https://community.antifilter.download/list/community.lst
+  - id: ru-blocked
+    title: ru-blocked — runetfreedom
+    group: blocked
+    note: реестр без мусорных доменов и адреса antifilter
+    note_en: the registry without junk domains, plus antifilter addresses
+    urls:
+      - https://github.com/runetfreedom/russia-blocked-geosite/releases/latest/download/ru-blocked.txt
+      - https://raw.githubusercontent.com/runetfreedom/russia-blocked-geoip/release/clash/ipcidr/ru-blocked.txt
+  - id: refilter
+    title: Re:filter
+    group: blocked
+    note: реестр и популярное недоступное из России
+    note_en: the registry and popular sites unavailable from Russia
+    urls:
+      - https://github.com/1andrevich/Re-filter-lists/releases/latest/download/domains_all.lst
+      - https://github.com/1andrevich/Re-filter-lists/releases/latest/download/ipsum.lst
+  - id: legiz-ru-bundle
+    title: ru-bundle — legiz
+    group: blocked
+    note: подборка под mihomo — itdoginfo, antifilter community и свои
+    note_en: a mihomo-oriented bundle — itdoginfo, antifilter community and extras
+    urls:
+      - https://raw.githubusercontent.com/legiz-ru/mihomo-rule-sets/main/ru-bundle/rule.yaml
+  - id: antifilter
+    title: antifilter — реестр целиком
+    title_en: antifilter — full registry
+    group: blocked
+    note: весь реестр РКН — около миллиона доменов и свёрнутые подсети
+    note_en: the whole RKN registry — about a million domains and summarized subnets
+    urls:
+      - https://antifilter.download/list/domains.lst
+      - https://antifilter.download/list/allyouneed.lst
+  - id: antizapret
+    title: antizapret
+    group: blocked
+    note: реестр целиком из antizapret-sing-box — 1,8 млн записей; обновляется редко
+    note_en: the whole registry from antizapret-sing-box — 1.8M entries; rarely updated
+    urls:
+      - https://github.com/savely-krasovsky/antizapret-sing-box/releases/latest/download/antizapret-ruleset.json
+
+  # Сервисы: домены и подсети
+  - id: youtube
+    title: YouTube
+    group: services
+    urls:
+      - https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/youtube.lst
+  - id: telegram
+    title: Telegram
+    group: services
+    note: домены и подсети — звонки и медиа идут по адресам
+    note_en: domains and subnets — calls and media go by address
+    urls:
+      - https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/telegram.lst
+      - https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Subnets/IPv4/telegram.lst
+      - https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Subnets/IPv6/telegram.lst
+  - id: discord
+    title: Discord
+    group: services
+    note: домены и подсети голосовых серверов
+    note_en: domains and voice server subnets
+    urls:
+      - https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/discord.lst
+      - https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Subnets/IPv4/discord.lst
+  - id: meta
+    title: Instagram, Facebook, WhatsApp
+    group: services
+    urls:
+      - https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/meta.lst
+      - https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Subnets/IPv4/meta.lst
+      - https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Subnets/IPv6/meta.lst
+  - id: twitter
+    title: X (Twitter)
+    group: services
+    urls:
+      - https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/twitter.lst
+      - https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Subnets/IPv4/twitter.lst
+      - https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Subnets/IPv6/twitter.lst
+  - id: tiktok
+    title: TikTok
+    group: services
+    urls:
+      - https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/tiktok.lst
+  - id: google-ai
+    title: Gemini и Google AI
+    title_en: Gemini and Google AI
+    group: services
+    urls:
+      - https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/google_ai.lst
+  - id: cloudflare
+    title: Cloudflare
+    group: services
+    note: когда в России режут сайты за Cloudflare
+    note_en: for when sites behind Cloudflare are throttled in Russia
+    urls:
+      - https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/cloudflare.lst
+      - https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Subnets/IPv4/cloudflare.lst
+  - id: hostings
+    title: Зарубежные хостинги
+    title_en: Foreign hosting
+    group: services
+    note: подсети Hetzner, OVH, DigitalOcean и CloudFront — их режут целиком
+    note_en: Hetzner, OVH, DigitalOcean and CloudFront subnets — throttled as a whole
+    urls:
+      - https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Subnets/IPv4/hetzner.lst
+      - https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Subnets/IPv4/ovh.lst
+      - https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Subnets/IPv4/digitalocean.lst
+      - https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Subnets/IPv4/cloudfront.lst
+
+  # Россия — напрямую
+  - id: category-ru
+    title: Российские сервисы
+    title_en: Russian services
+    group: russia
+    note: category-ru от MetaCubeX — Госуслуги, банки, маркетплейсы
+    note_en: category-ru by MetaCubeX — government, banks, marketplaces
+    urls:
+      - https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-ru.yaml
+  - id: geoip-ru
+    title: Российские адреса
+    title_en: Russian addresses
+    group: russia
+    note: geoip:ru от MetaCubeX — все подсети России
+    note_en: geoip:ru by MetaCubeX — every Russian subnet
+    urls:
+      - https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/ru.list
+  - id: itdog-outside
+    title: Russia outside — itdoginfo
+    group: russia
+    note: российское, что открывается только из России — для тех, кто за границей
+    note_en: Russian sites that open only from Russia — for those abroad
+    urls:
+      - https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Russia/outside-raw.lst

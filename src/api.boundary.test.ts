@@ -29,13 +29,24 @@ describe("the Rust boundary", () => {
   });
 
   it("rule sets accept optional English titles and reject invalid translations", async () => {
-    const set = { id: "ads", title: "Ads", on: false, rules: ["MATCH,DIRECT"] };
+    const set = { id: "ads", title: "Ads", target: "REJECT", rules: ["GEOSITE,ads,REJECT"] };
     answer.value = [set];
+    expect(await rulesetsList()).toEqual(answer.value);
+    // D-158: у набора со строками в разные выходы общего нет — это `null`, а не отказ.
+    answer.value = [{ ...set, target: null }];
     expect(await rulesetsList()).toEqual(answer.value);
     answer.value = [{ ...set, titleEn: "Ad blocking" }];
     expect(await rulesetsList()).toEqual(answer.value);
     answer.value = [{ ...set, titleEn: 123 }];
     await expect(rulesetsList()).rejects.toMatchObject({ kind: "unexpected" });
+  });
+
+  it("a qd link answer says whether qd was downloaded and whether the link waits", async () => {
+    const { adopt } = await import("./qd/api");
+    answer.value = { downloaded: "v0.1.5", pending: true };
+    expect(await adopt("qd://x")).toEqual(answer.value);
+    answer.value = { downloaded: null, pending: "yes" };
+    await expect(adopt("qd://x")).rejects.toMatchObject({ kind: "unexpected" });
   });
 
   it("update metadata and progress are validated before reaching the window", async () => {

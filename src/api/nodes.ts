@@ -56,10 +56,9 @@ export const Node = z.object({
 });
 export type Node = z.infer<typeof Node>;
 
-/// Куда идёт трафик (D-056). Одно решение вместо двух: раньше это были «выбранный узел»
-/// и негласный режим, и на вопрос «что будет с выбором, если я перепишу маршрутизацию»
-/// ответа не было вовсе.
-export const Direction = z.enum(["auto", "manual", "direct", "rules"]);
+/// Куда идёт трафик — выход из списка узлов (D-056, D-166): `DIRECT`, `AUTO` или узел
+/// (`manual`). Правила набора включает не он, а тумблер маршрутизации.
+export const Direction = z.enum(["auto", "manual", "direct"]);
 export type Direction = z.infer<typeof Direction>;
 
 /// Домен `nodes`, а не `core`: список приходит с диска и одинаков при живом
@@ -105,6 +104,10 @@ export const nodesReset = (source: string, node: string) =>
 export const ConnectionSnapshot = z.object({
   nodes: z.array(Node),
   direction: Direction,
+  /// Узел, выбранный в `manual`; вне него пусто (D-166).
+  node: z.string().nullable(),
+  /// Куда маршрутизация шлёт непойманное, когда `MATCH` набора не за выбором (D-166).
+  fallback: z.string().nullable(),
   ping: PingMethod,
   /// `["AUTO", "Poland 1"]`: что выбрано и куда оно ведёт на самом деле. Пусто — выхода нет.
   route: z.array(z.string()),
@@ -117,3 +120,7 @@ export const connectionSnapshot = () => call(ConnectionSnapshot, "connection_sna
 /// и окно обязано показать результат сразу, а не через опрос.
 export const directionSet = (direction: Direction, node?: string) =>
   call(Status, "direction_set", { direction, node: node ?? null });
+/// Включить или выключить маршрутизацию (D-166): выключенная шлёт всё в выбранный выход.
+export const routingSet = (on: boolean) => call(Status, "routing_set", { on });
+/// Блокировать ли рекламу (D-169): готовый набор в применённом наборе маршрута.
+export const routingAdsSet = (on: boolean) => call(Status, "routing_ads_set", { on });

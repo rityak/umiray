@@ -6,8 +6,9 @@
 //! направление, изменение доезжает до ядра и рвёт соединения, страны узлов обновляются.
 
 use serde::Serialize;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
+use crate::app::node_check::NodeCheck;
 use crate::app::state::AppState;
 use crate::config::files::Documents;
 use crate::config::presets::PresetStore;
@@ -36,7 +37,9 @@ impl Sources {
             return Err(AppError::invalid("Пустая ссылка"));
         }
         let had_sources = !SourceStore::list().is_empty();
-        let (source, notices) = if input.starts_with("http://") || input.starts_with("https://") {
+        // Схема ссылки регистра не различает (RFC 3986): `HTTPS://` — тоже подписка.
+        let scheme = input.to_ascii_lowercase();
+        let (source, notices) = if scheme.starts_with("http://") || scheme.starts_with("https://") {
             SourceImporter::add_subscription(input).await?
         } else {
             (SourceImporter::add_link(input)?, Vec::new())
@@ -51,6 +54,7 @@ impl Sources {
         state: &AppState,
         entry: serde_yaml::Mapping,
     ) -> Result<Import> {
+        NodeCheck::entry(&entry)?;
         let had_sources = !SourceStore::list().is_empty();
         let source = SourceImporter::add_proxy(entry)?;
         Ok(self
@@ -70,14 +74,18 @@ impl Sources {
         self.add_proxy(app, state, entry).await
     }
 
-    /// Конфиг WireGuard или AmneziaWG файлом (D-120). Пусто — человек передумал.
+    /// Конфиг WireGuard, AmneziaWG, OpenVPN или usque файлом (D-120, D-164). Пусто — человек
+    /// передумал.
     pub async fn add_file(&self, app: &AppHandle, state: &AppState) -> Result<Option<Import>> {
         // Окно модальное и держит поток, пока человек не ответит, — поэтому не в рантайме.
         let picked = tauri::async_runtime::spawn_blocking(|| {
             crate::system::pick::FileDialog::file(
-                "Конфиг WireGuard или AmneziaWG",
+                "Конфиг WireGuard, AmneziaWG, OpenVPN или usque",
                 &[
-                    ("Конфиг WireGuard (*.conf)", "*.conf"),
+                    (
+                        "Конфиг VPN (*.conf, *.ovpn, *.json)",
+                        "*.conf;*.ovpn;*.json",
+                    ),
                     ("Все файлы", "*.*"),
                 ],
             )
@@ -87,12 +95,24 @@ impl Sources {
         let Some(path) = picked else {
             return Ok(None);
         };
-        let had_sources = !SourceStore::list().is_empty();
-        let source = SourceImporter::import_file(&path)?;
-        Ok(Some(
-            self.added(app, state, source, Vec::new(), had_sources)
-                .await,
-        ))
+        let entry = SourceImporter::file_entry(&path)?;
+        Ok(Some(self.add_proxy(app, state, entry).await?))
+    }
+
+    /// Cloudflare WARP (D-165): ключ от ядра, регистрация у Cloudflare, узел — в «Свои узлы».
+    /// Нажатие кнопки — согласие человека с условиями WARP: окно их называет.
+    pub async fn add_warp(
+        &self,
+        app: &AppHandle,
+        state: &AppState,
+        tunnel: crate::nodes::warp::Tunnel,
+    ) -> Result<Import> {
+        let keys = crate::core::mihomo::keys::KeyGen::wireguard()?;
+        let mask = crate::config::awg::Mask::get().option();
+        let status = state.mihomo.status();
+        let through = status.running.then_some(status.port).flatten();
+        let entry = crate::nodes::warp::Warp::issue(tunnel, &keys, mask, through).await?;
+        self.add_proxy(app, state, entry).await
     }
 
     /// Обновить одну подписку по кнопке.
@@ -120,6 +140,7 @@ impl Sources {
         id: &str,
         text: &str,
     ) -> Result<Import> {
+        NodeCheck::document(text)?;
         let source = SourceStore::write_raw(id, text)?;
         let notices = reload(app, state, id).await;
         spawn_geo();
@@ -160,8 +181,8 @@ impl Sources {
     }
 
     /// Общий хвост добавления: первый источник включает автовыбор (D-056), источник доезжает
-    /// до ядра, страны новых узлов уточняются. Неудача записи направления — не повод считать
-    /// импорт провалившимся: узлы уже на диске.
+    /// до ядра, страны и задержки новых узлов уточняются. Неудача записи направления — не повод
+    /// считать импорт провалившимся: узлы уже на диске.
     async fn added(
         &self,
         app: &AppHandle,
@@ -173,6 +194,7 @@ impl Sources {
         let _ = state.routing.note_source_added(state, had_sources);
         notices.extend(reload(app, state, &source.id).await);
         spawn_geo();
+        spawn_ping(app, &source.id);
         Import { notices, source }
     }
 }
@@ -203,6 +225,18 @@ async fn reload(app: &AppHandle, state: &AppState, id: &str) -> Vec<String> {
 fn spawn_geo() {
     tauri::async_runtime::spawn(async {
         let _ = crate::nodes::geo::GeoCache::refresh().await;
+    });
+}
+
+/// Задержки нового источника — в фоне (D-166): без них свежие узлы стояли прочерками,
+/// пока человек не нажмёт «Проверить задержку», а мерить заодно весь список незачем.
+/// Отказ молчит, как и прочие автоматические замеры (D-062).
+fn spawn_ping(app: &AppHandle, source: &str) {
+    let app = app.clone();
+    let source = source.to_string();
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        let _ = state.catalog.measure_source(&state, &source).await;
     });
 }
 

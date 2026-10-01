@@ -30,8 +30,8 @@ type Props = {
 /**
  * Picking a routing preset (D-075).
  *
- * There can be several presets, and the route in Rules is decided by exactly one — the one
- * in use (D-071). Any of them can be viewed and edited: that is how a preset is prepared
+ * There can be several presets, and routing follows exactly one — the one in use (D-071,
+ * D-166). Any of them can be viewed and edited: that is how a preset is prepared
  * without touching the working route. So next to the list there is one of two things: an
  * "in use" badge or a "Use" button — and nothing else. Rename, create and delete are rare
  * actions; they live in the "⋯" menu, not as four icons in the bar.
@@ -97,7 +97,7 @@ export default function PresetPicker({
         </MenuItem>
         <MenuItem
           icon={<Plus />}
-          hint={t("a copy of what the client assembles itself")}
+          hint={t("a copy of what the client builds itself")}
           onSelect={onCreate}
         >
           {t("New preset")}
@@ -117,11 +117,7 @@ export default function PresetPicker({
           {t("in use")}
         </Badge>
       ) : (
-        <Tooltip
-          content={t(
-            "The route in Rules will be decided by this preset's rules; the route switches to Rules",
-          )}
-        >
+        <Tooltip content={t("Turns routing on and follows this preset")}>
           <Button onClick={onApply}>{t("Use")}</Button>
         </Tooltip>
       )}

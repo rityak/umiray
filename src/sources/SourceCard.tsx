@@ -1,4 +1,4 @@
-import { RefreshCw, Trash2, X } from "lucide-react";
+import { FileCode, RefreshCw, Trash2, X } from "lucide-react";
 import { Badge, Button, Card, ConfirmButton, IconButton, Item, ItemGroup, Text } from "rootik";
 import type * as api from "../api";
 import { updatedLabel } from "../api";
@@ -19,6 +19,8 @@ type Props = {
   onRemove: () => void;
   /// Only record sources allow removal: subscription nodes return on refresh (D-121).
   onDropNode: (node: string) => void;
+  /// The raw response as text (D-065). Absent — the engine keeps no raw text (qd).
+  onCode?: () => void;
   note?: string;
 };
 
@@ -55,12 +57,15 @@ export default function SourceCard({
   onRefresh,
   onRemove,
   onDropNode,
+  onCode,
   note,
 }: Props) {
   const kinds = protocols(nodes);
 
   return (
+    // Outline: the card lives inside the "Sources" card of Connection (D-160).
     <Card
+      variant="outline"
       collapsible
       open={open}
       onOpenChange={onToggle}
@@ -96,6 +101,15 @@ export default function SourceCard({
               {t("Refresh")}
             </Button>
           )}
+          {onCode && (
+            <IconButton
+              size="sm"
+              variant="ghost"
+              icon={<FileCode />}
+              label={t("Source code")}
+              onClick={onCode}
+            />
+          )}
           {/* Removal also deletes node overrides; require a second click. */}
           <ConfirmButton
             size="sm"
@@ -121,7 +135,7 @@ export default function SourceCard({
         )}
         {nodes.length === 0 ? (
           <Text tone="muted" size="xs" className="block">
-            {t("No nodes — refresh the source or inspect its response in Code view.")}
+            {t("No nodes — refresh the source or check its response in Code.")}
           </Text>
         ) : (
           <ItemGroup variant="divided" maxHeight={256}>

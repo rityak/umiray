@@ -10,9 +10,8 @@
 //! и обычный замер задержки.
 
 use std::net::{IpAddr, Ipv4Addr};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use crate::diag::report::{Report, Row, Tone, Verdict};
 use crate::error::{AppError, Result};
 
 /// Заголовки IPv4 (20) и ICMP (8): их размер не входит в тело, но входит в MTU.
@@ -28,130 +27,33 @@ const TIMEOUT: Duration = Duration::from_millis(1200);
 pub struct PmtuProbe;
 
 impl PmtuProbe {
-    /// `pmtu`: наибольший пакет, доходящий до адреса целиком.
-    pub fn measure(host: &str) -> Result<Report> {
-        let started = Instant::now();
-        let mut report = Report::new("pmtu");
-        let address = resolve(host)
-            .ok_or_else(|| AppError::invalid(format!("«{host}» не адрес и не имя")))?;
-        report.say(
-            Tone::Info,
-            format!("pmtu {host} → {address}, DF, {LOW}…{HIGH}"),
-        );
-        report.columns = ["Пробовали", "Тело", "Результат"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-
-        // Сперва убеждаемся, что адрес вообще отвечает: без этого поиск сойдётся в «ничего
-        // не проходит» и обвинит канал в том, чего он не делал.
-        if !fits(address, LOW - HEADERS) {
-            report.say(
-                Tone::Bad,
-                format!("{LOW} байт не прошли — узел молчит по ICMP"),
-            );
-            return Ok(report.finish(
-                Verdict::Idle,
-                "узел не отвечает по ICMP — мерить нечем".to_string(),
-                started.elapsed().as_millis() as u64,
-            ));
-        }
-
-        let mut low = LOW;
-        search(address, |size, passed| {
-            low = size.max(low);
-            report.say(
-                if passed { Tone::Ok } else { Tone::Dim },
-                format!(
-                    "{size:>5} байт  тело {:>5}  {}",
-                    size - HEADERS,
-                    if passed {
-                        "прошло"
-                    } else {
-                        "не прошло"
-                    }
-                ),
-            );
-            report.rows.push(Row {
-                cells: vec![
-                    size.to_string(),
-                    (size - HEADERS).to_string(),
-                    if passed {
-                        "прошло"
-                    } else {
-                        "не прошло"
-                    }
-                    .to_string(),
-                ],
-                verdict: if passed { Verdict::Ok } else { Verdict::Idle },
-                mark: false,
-            });
-        });
-
-        let ms = started.elapsed().as_millis() as u64;
-        let advice = low.saturating_sub(TUNNEL);
-        report.say(
-            Tone::Info,
-            format!(
-                "путь держит {low}; туннелю оставить {advice} — 60 байт уходят под его заголовок"
-            ),
-        );
-        report.rows.push(Row {
-            cells: vec![
-                "итог".into(),
-                advice.to_string(),
-                format!("MTU пути {low}, туннелю {advice}"),
-            ],
-            verdict: Verdict::Ok,
-            mark: true,
-        });
-
-        let (verdict, headline) = if low >= HIGH {
-            (Verdict::Ok, format!("{low} — полный кадр"))
-        } else {
-            (Verdict::Warn, format!("{low}, туннелю {advice}"))
-        };
-        Ok(report.finish(verdict, headline, ms))
-    }
-
-    /// Наибольший пакет, доходящий до адреса целиком, — типизированный слой под отчётом
-    /// (D-097). Пусто — узел молчит по ICMP, и мерить нечем.
-    ///
-    /// Им пользуется и таблица выше, и автоподбор MTU (D-105): второго двоичного поиска
-    /// в клиенте быть не должно.
+    /// Наибольший пакет, доходящий до адреса целиком. Пусто — узел молчит по ICMP,
+    /// и мерить нечем. Зовёт автоподбор MTU мастера (D-105).
     pub fn path(host: &str) -> Result<Option<u32>> {
         let address = resolve(host)
             .ok_or_else(|| AppError::invalid(format!("«{host}» не адрес и не имя")))?;
         if !fits(address, LOW - HEADERS) {
             return Ok(None);
         }
-        let mut low = LOW;
-        search(address, |size, passed| {
-            if passed {
-                low = size.max(low);
-            }
-        });
-        Ok(Some(low))
+        Ok(Some(search(address)))
     }
 }
 
 /// Сколько уходит под собственный заголовок туннеля: у WireGuard это 60 байт на IPv4.
 pub const TUNNEL: u32 = 60;
 
-/// Сам поиск: `low` всегда проходит, `high` всегда нет. О каждой пробе рассказывает
-/// вызывающему — таблице нужны все шаги, автоподбору только итог.
-fn search(address: Ipv4Addr, mut step: impl FnMut(u32, bool)) {
+/// Сам поиск: `low` всегда проходит, `high` всегда нет. Отдаёт наибольший прошедший.
+fn search(address: Ipv4Addr) -> u32 {
     let (mut low, mut high) = (LOW, HIGH + 1);
     while high - low > 1 {
         let middle = low + (high - low) / 2;
-        let passed = fits(address, middle - HEADERS);
-        step(middle, passed);
-        if passed {
+        if fits(address, middle - HEADERS) {
             low = middle;
         } else {
             high = middle;
         }
     }
+    low
 }
 
 /// Проходит ли пакет с телом такого размера и запретом фрагментации.

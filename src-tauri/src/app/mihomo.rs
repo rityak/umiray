@@ -11,6 +11,7 @@ use crate::app::lifecycle::{Hook, Phase, When};
 use crate::app::state::AppState;
 use crate::config::mode::Mode;
 use crate::core::mihomo::download::MihomoDownload;
+use crate::core::mihomo::lists::{Built, ListBuild};
 use crate::core::mihomo::Mihomo;
 use crate::core::process::LogRing;
 use crate::error::AppError;
@@ -25,7 +26,8 @@ pub struct Plan {
 
 /// Запуск mihomo. Порядок несущий, и каждый шаг стоит там, где стоит, по причине:
 ///
-/// - `config` первым и «до»: собрать нечего — запускать нечего.
+/// - `lists` перед конфигом: `RULE-SET` на несобранный список в конфиг не войдёт (D-157).
+/// - `config` и «до»: собрать нечего — запускать нечего.
 /// - `check` между сборкой и запуском: ядро говорит, что не так, **до** того, как
 ///   что-то поднялось (D-106) — иначе причина приходит строкой в логе упавшего запуска.
 /// - `port` перед процессом: с занятым портом прокси ядро поднимается как ни в чём
@@ -33,6 +35,13 @@ pub struct Plan {
 /// - `process` тоже «до»: не поднявшееся ядро отменяет всё остальное.
 /// - `alias` после процесса: наводить псевдоним не на чем, пока ядро не работает (D-056).
 const START: &[Hook<Plan>] = &[
+    Hook {
+        phase: Phase::Start,
+        when: When::Before,
+        id: "lists",
+        label: "сборка rule sets",
+        run: lists,
+    },
     Hook {
         phase: Phase::Start,
         when: When::Before,
@@ -96,6 +105,7 @@ impl Engine for Mihomo {
             wanted: status.wanted,
             started: status.started,
             capture,
+            recovering: false,
         }
     }
 
@@ -110,6 +120,47 @@ impl Engine for Mihomo {
     fn install(&self) -> Job<'_, String> {
         Box::pin(MihomoDownload::install())
     }
+
+    /// Собрать `.mrs` из изменившихся списков и дать работающему ядру их перечитать.
+    /// Смешанный список — два провайдера (`<id>` и `<id>@ip`), перечитываем оба: какого
+    /// нет, ядро ответит 404, и это не ошибка.
+    fn lists_changed(&self) -> Job<'_> {
+        Box::pin(async move {
+            let built = build_lists().await?;
+            for failure in &built.failed {
+                self.log()
+                    .note("warning", &format!("список не собрался — {failure}"));
+            }
+            for id in built.changed {
+                self.reload_rules(&id).await?;
+                self.reload_rules(&format!("{id}@ip")).await?;
+            }
+            Ok(())
+        })
+    }
+}
+
+/// Сборка `.mrs` зовёт ядро процессом — секунды на большом списке (S-028), поэтому
+/// не в потоке асинхронных задач.
+async fn build_lists() -> crate::error::Result<Built> {
+    tokio::task::spawn_blocking(ListBuild::prepare)
+        .await
+        .map_err(|e| AppError::io(format!("Сборка списков оборвалась: {e}")))
+}
+
+/// Списки, пришедшие, пока ядра не было, собираются перед сборкой конфига: иначе в него
+/// не попадёт ни один `RULE-SET` на них (D-157). Несобравшийся список запуск не отменяет —
+/// он просто не войдёт в конфиг, а причина уедет в лог.
+fn lists<'a>(state: &'a AppState, _plan: &'a mut Plan) -> Job<'a> {
+    Box::pin(async move {
+        for failure in build_lists().await?.failed {
+            state
+                .mihomo
+                .log()
+                .note("warning", &format!("список не собрался — {failure}"));
+        }
+        Ok(())
+    })
 }
 
 /// Конфиг собираем здесь, а не в ядре: что в него войдёт из маршрутных документов,
@@ -120,7 +171,7 @@ impl Engine for Mihomo {
 fn config<'a>(state: &'a AppState, plan: &'a mut Plan) -> Job<'a> {
     Box::pin(async move {
         plan.effective = Some(crate::render::effective::ConfigRenderer::effective(
-            state.routing.rules(state)?.as_deref(),
+            &state.routing.document(state)?,
             Some(crate::core::Ports::free_port()?),
         )?);
         Ok(())

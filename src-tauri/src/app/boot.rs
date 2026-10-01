@@ -34,8 +34,17 @@ impl Boot {
             let config = context.config_mut();
             config.identifier = "com.umiray.client.dev".into();
             config.product_name = Some(paths::APP_NAME.into());
+            // Повышенный процесс WebView2 эту переменную не слушает (защита от правки
+            // пользователем), а флаги из кода — слушает: так проверки по CDP достают и окно
+            // от администратора (GOTCHAS). Умолчания wry при своих флагах пропадают — вернуть.
+            let flags = std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS")
+                .ok()
+                .map(|own| {
+                    format!("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection {own}")
+                });
             for window in &mut config.app.windows {
                 window.title = paths::APP_NAME.into();
+                window.additional_browser_args = flags.clone();
             }
             if let Some(updater) = config.plugins.0.get_mut("updater") {
                 updater["pubkey"] = "".into();

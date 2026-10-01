@@ -150,7 +150,7 @@ mod tests {
     /// Схемы, которых мы не знаем, проходят насквозь: разбирать их будет ядро.
     #[test]
     fn unknown_schemes_pass_through_untouched() {
-        let exotic = "tuic://uuid:pass@tuic.example:443?alpn=h3#TUIC";
+        let exotic = "juicity://uuid:pass@juicity.example:443?congestion_control=bbr#J";
         let (nodes, notices) = Subscription::links(exotic);
         assert_eq!(nodes, [exotic]);
         assert!(notices.is_empty());

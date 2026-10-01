@@ -14,6 +14,12 @@ pub async fn system_reset(app: tauri::AppHandle, state: State<'_, AppState>) -> 
     state.maintenance.reset(&app, &state).await
 }
 
+/// Настройки копией базы (D-163). Пусто — окно сохранения закрыли.
+#[tauri::command]
+pub async fn system_export(state: State<'_, AppState>) -> Result<Option<String>> {
+    state.maintenance.export().await
+}
+
 /// «Всегда от администратора» (D-087). Как и автозапуск, в настройках не хранится:
 /// это наличие задачи в планировщике, и она же — источник истины.
 ///
@@ -56,6 +62,13 @@ pub async fn system_relaunch_elevated(
 #[tauri::command]
 pub fn system_device() -> Result<String> {
     Device::hwid()
+}
+
+/// Страница rule set на GitHub — в браузере по умолчанию. Открывается только GitHub:
+/// адрес приходит из вебвью.
+#[tauri::command]
+pub fn system_open_github(url: String) -> Result<()> {
+    crate::system::browser::Browser::github(&url)
 }
 
 /// The interface language, picked from the installed keyboard layouts.

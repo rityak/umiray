@@ -1,5 +1,14 @@
 import type { ReactNode } from "react";
-import { Checkbox, Fieldset, Input, Field as KitField, Nest, PasswordInput, Select } from "rootik";
+import {
+  Checkbox,
+  Fieldset,
+  Input,
+  Field as KitField,
+  Nest,
+  PasswordInput,
+  Select,
+  Textarea,
+} from "rootik";
 import { t } from "../i18n";
 import type { Field, Values } from "./proxy";
 import { PROTOCOLS, protocol, shown } from "./proxy";
@@ -100,13 +109,25 @@ function Row({
   }
   return (
     <KitField label={t(field.label)} hint={hint} required={field.need}>
-      {field.kind === "select" ? (
+      {field.kind === "select" || field.kind === "yesno" ? (
         <Select
           clearable
           value={value === "" ? null : value}
           disabled={locked}
           onChange={(next) => onChange(next ?? "")}
           options={(field.options ?? []).map((option) => ({ value: option, label: option }))}
+        />
+      ) : field.kind === "pem" ? (
+        <Textarea
+          mono
+          autoSize
+          rows={3}
+          aria-label={t(field.label)}
+          value={value}
+          disabled={locked}
+          spellCheck={false}
+          placeholder="-----BEGIN …-----"
+          onChange={(event) => onChange(event.target.value)}
         />
       ) : field.kind === "secret" ? (
         <PasswordInput

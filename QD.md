@@ -1,6 +1,9 @@
 # qd inside umiray
 
 umiray can drive two engines: **mihomo** (as before) and **qd** (github.com/jaywehosl/qd).
+qd shows up only once it is downloaded: a `qd://` link pasted into any add field (the header "+",
+the node list "+", the setup wizard) downloads it, and so does the **qd engine** switch in Umiray
+Settings; turning that switch off deletes the binary and keeps `qd\` with its link and settings.
 The engine switch in the title bar is a view: it picks which engine the tabs show and which one the
 power button turns on. The running engine keeps running until power is pressed; the header and the
 tray always speak about the running one. Only one engine carries traffic at a time, and the client
@@ -11,25 +14,28 @@ kill switch go with it), under the same transition lock.
 
 | Tab | qd mode |
 |---|---|
-| Connection | same layout: power card (capture mode and route are hidden — qd captures per app and picks the entry node itself; +egress and ad blocking take their place), the same traffic chart, the same node list with qd entry nodes (no editing, no latency method) |
-| Sources | same layout: add a `qd://` link, subscription refresh interval, the subscription as a source card (refresh, delete = unlink, expiry and traffic) |
+| Connection | its own, denser layout — one subscription and a few nodes need no "Nodes · Sources" switch: the power card on the left (capture mode and route are hidden — qd captures per app and picks the entry node itself; +egress and ad blocking take their place); beside it the subscription card (name, refresh time, expiry and traffic; refresh, replace the link with "+", delete = unlink; auto-refresh interval and the next refresh) over the entry nodes (no editing, no latency method); the traffic chart below across the full width |
 | Groups | hidden: qd picks entry nodes itself |
 | Routing | same look as the mihomo rules: summary, numbered rule rows (app → role), MATCH at the bottom holds the default role; a new rule is picked in a dialog of running apps (grouped by path, searchable, already-ruled ones marked) or typed by process name; save/load `.qdr` through the Windows file dialogs |
 | Settings | the client document keeps only what applies to both engines (startup, window, client update, reset); the mihomo document is replaced by **qd Settings**: fixed send rate, update the qd binary |
-| Tools | unchanged |
 | Logs | qd output |
 
 ## The qd process
 
-- Needs qd 0.1.4 or newer: the first release with `-embedded` and the core build.
-- Binary: `%LOCALAPPDATA%\umiray\qd.exe` (`qd-dev.exe` in debug builds). **Download qd** fetches
-  `qd-core-windows-amd64.exe` from the newest release of github.com/jaywehosl/qd and checks it
-  against the release's `checksums.txt`.
+- Needs qd 0.1.5 or newer: 0.1.4 brought `-embedded` and the core build, 0.1.5 made qd bring a
+  lost tunnel back until it is told to disconnect (0.1.4 tries once).
+- Binary: `%LOCALAPPDATA%\umiray\qd.exe` (`qd-dev.exe` in debug builds). The download takes the
+  newest tag from `github.com/jaywehosl/qd/releases.atom` (all qd releases are pre-releases, so
+  `/releases/latest` is empty, and `api.github.com` is DNS-blocked on some networks), fetches
+  `qd-core-windows-amd64.exe` by its direct release link and checks it against `checksums.txt`.
+- A `qd://` link needs a running qd to be taken, and qd runs only elevated. Without rights the link
+  waits in `qd\pending.txt` and is imported the first time qd comes up.
   The core build has no window, tray, page or admin panel: only the tunnel and the local API.
 - Needs administrator rights: qd captures traffic with WinDivert, and its manifest asks for elevation.
   Without them qd mode shows the usual "restart as administrator" action.
 - Started lazily, the first time a qd tab needs it, inside the same job object as mihomo.
-  If it dies while the tunnel should be up, the client raises it again (three tries), and an
+  If the process dies while the tunnel should be up, the client raises it again (three tries);
+  a tunnel lost by a living qd is qd's own to bring back, and the client waits. An
   orphan left by a crashed client is killed at startup — by its full path, so a standalone qd
   client running elsewhere is left alone:
 
@@ -74,8 +80,9 @@ qd is one engine behind the client's engine contract — see `trait Engine` in
 - `src-tauri/src/app/qd.rs` — qd as the client's engine: its start hooks (process, then `connect`)
   and `impl Engine`. Capture is `Divert`: no system proxy, no kill switch.
 - `src-tauri/src/app/connect.rs` — power for any engine, one engine at a time, crash recovery.
-- `src-tauri/src/commands/qd.rs` — only what qd alone has: `qd_status`, `qd_call`, `qd_rules_export`,
-  `qd_rules_import` (native save/open dialogs from `src-tauri/src/system/pick.rs`). Power, logs and
+- `src-tauri/src/commands/qd.rs` — only what qd alone has: `qd_status`, `qd_call`, `qd_adopt`
+  (a `qd://` link: download if missing, import or hold until rights), `qd_remove`,
+  `qd_rules_export`, `qd_rules_import` (native save/open dialogs from `src-tauri/src/system/pick.rs`). Power, logs and
   install are the shared `core_start`, `core_stop`, `core_logs`, `core_install`.
 - `src/engines.tsx` — what the window knows about each engine: label, header line, sections,
   client settings it hides.

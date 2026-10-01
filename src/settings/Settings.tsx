@@ -10,7 +10,7 @@ export default function Settings({ onClose }: { onClose: () => void }) {
       <PageHeader
         title={t("Appearance")}
         description={t(
-          "rootik kit settings. Stored in this window; never sent to the client or the core.",
+          "rootik kit settings. Kept in this window, never sent to the client or core.",
         )}
         actions={<IconButton variant="ghost" icon={<X />} label={t("Close")} onClick={onClose} />}
       />

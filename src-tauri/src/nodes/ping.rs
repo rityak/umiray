@@ -57,7 +57,7 @@ impl Pinger {
     /// Список по подстроке, а не точным совпадением: имя схемы приходит от парсера ссылки
     /// и пишется по-разному («Hysteria2», «hysteria2», «wireguard»).
     pub fn udp_only(kind: &str) -> bool {
-        const MARKS: [&str; 4] = ["hysteria", "tuic", "wireguard", "juicity"];
+        const MARKS: [&str; 5] = ["hysteria", "tuic", "wireguard", "juicity", "shadowquic"];
         let lower = kind.to_lowercase();
         MARKS.iter().any(|mark| lower.contains(mark))
     }
@@ -266,7 +266,14 @@ mod tests {
     /// Кто живёт на UDP: у них TCP-порт молчит и у живого узла тоже.
     #[test]
     fn udp_protocols_are_recognised_whatever_the_spelling() {
-        for kind in ["Hysteria2", "hysteria2", "TUIC", "Wireguard", "juicity"] {
+        for kind in [
+            "Hysteria2",
+            "hysteria2",
+            "TUIC",
+            "Wireguard",
+            "juicity",
+            "Shadowquic",
+        ] {
             assert!(Pinger::udp_only(kind), "{kind}");
         }
         for kind in ["Vless", "Trojan", "Shadowsocks", "vmess", ""] {

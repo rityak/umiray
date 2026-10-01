@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 
 use crate::config::direction::SELECTOR;
+use crate::config::route::{ReadyUse, RuleSetUse, Sections};
 use crate::error::{AppError, Result};
 use crate::yaml::Yaml;
 
@@ -46,6 +47,12 @@ pub struct Routing {
     /// Цель `MATCH`. Его в документе может не быть вовсе — тогда здесь псевдоним,
     /// в который целится сборка (D-053), и при первой же записи он появится в файле.
     pub fallback: String,
+    /// Скачанные списки маршрута (D-157, D-158) — раздел `rule-sets`.
+    #[serde(default)]
+    pub rule_sets: Vec<RuleSetUse>,
+    /// Готовые наборы маршрута (D-083, D-158) — раздел `ready`.
+    #[serde(default)]
+    pub ready: Vec<ReadyUse>,
 }
 
 pub struct RulesCodec;
@@ -100,17 +107,7 @@ impl RulesCodec {
                     "Правило «{line}» не похоже на «вид,значение,куда» — поправьте кодом"
                 )));
             }
-            // Match mihomo's payload parser: regex/composite rules use the final part as target.
-            let literal_payload = matches!(
-                parts[0].as_str(),
-                "NOT"
-                    | "OR"
-                    | "AND"
-                    | "SUB-RULE"
-                    | "DOMAIN-REGEX"
-                    | "PROCESS-NAME-REGEX"
-                    | "PROCESS-PATH-REGEX"
-            );
+            let literal_payload = literal_payload(&parts[0]);
             let rule = Rule {
                 kind: parts[0].clone(),
                 values: vec![if literal_payload {
@@ -137,7 +134,13 @@ impl RulesCodec {
             }
         }
 
-        Ok(Routing { rules, fallback })
+        let sections = Sections::read(text)?;
+        Ok(Routing {
+            rules,
+            fallback,
+            rule_sets: sections.rule_sets,
+            ready: sections.ready,
+        })
     }
 
     /// Собрать документ заново с этими правилами. `MATCH` пишется последним всегда — на него
@@ -165,8 +168,47 @@ impl RulesCodec {
         };
         lines.push(Value::from(format!("{MATCH},{fallback}")));
         Yaml::set(&mut map, KEY, Value::Sequence(lines));
+        Sections::write(
+            &mut map,
+            &Sections {
+                rule_sets: routing.rule_sets.clone(),
+                ready: routing.ready.clone(),
+            },
+        )?;
         serde_yaml::to_string(&Value::Mapping(map)).map_err(|e| AppError::invalid(e.to_string()))
     }
+
+    /// Какая часть строки правила называет выход. `SUB-RULE` выхода не называет — его цель
+    /// набор `sub-rules` (D-156).
+    pub fn exit_at(parts: &[&str]) -> Option<usize> {
+        let kind = *parts.first()?;
+        if kind == MATCH {
+            return (parts.len() > 1).then_some(1);
+        }
+        if kind == "SUB-RULE" || parts.len() < 3 {
+            return None;
+        }
+        Some(if literal_payload(kind) {
+            parts.len() - 1
+        } else {
+            2
+        })
+    }
+}
+
+/// Как читает ядро: у составных и regex-правил запятые живут в значении, и цель — последняя
+/// часть строки.
+fn literal_payload(kind: &str) -> bool {
+    matches!(
+        kind,
+        "NOT"
+            | "OR"
+            | "AND"
+            | "SUB-RULE"
+            | "DOMAIN-REGEX"
+            | "PROCESS-NAME-REGEX"
+            | "PROCESS-PATH-REGEX"
+    )
 }
 
 fn same(previous: &Rule, next: &Rule) -> bool {
@@ -251,6 +293,23 @@ mod tests {
         assert_eq!(list.last().unwrap(), &Value::from("MATCH,DIRECT"));
     }
 
+    /// Граница с окном (D-158): то, что шлёт форма, разбирается и ложится в текст разделами —
+    /// приоритет словом, отсутствующие поля не пишутся.
+    #[test]
+    fn what_the_window_sends_becomes_the_route_sections() {
+        let routing: Routing = serde_json::from_str(
+            r#"{"rules":[],"fallback":"umiray",
+                "ruleSets":[{"id":"antizapret","target":"AUTO","priority":"high"}],
+                "ready":[{"id":"direct-ru","priority":"low"},{"id":"block-ads"}]}"#,
+        )
+        .unwrap();
+        let text = RulesCodec::render("rules: ['MATCH,umiray']\n", &routing).unwrap();
+        assert!(text.contains("priority: high"), "{text}");
+        assert!(text.contains("priority: low"), "{text}");
+        assert!(!text.contains("target: null"), "{text}");
+        assert_eq!(RulesCodec::parse(&text).unwrap(), routing);
+    }
+
     #[test]
     fn an_empty_value_does_not_reach_the_core() {
         let routing = Routing {
@@ -261,6 +320,8 @@ mod tests {
                 options: Vec::new(),
             }],
             fallback: "umiray".into(),
+            rule_sets: Vec::new(),
+            ready: Vec::new(),
         };
         let out = RulesCodec::render("", &routing).unwrap();
         let rules = Yaml::top_mapping(&out).unwrap()["rules"].clone();

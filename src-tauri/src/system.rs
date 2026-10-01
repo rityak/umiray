@@ -4,6 +4,7 @@
 //! на другую было видно, что именно придётся написать заново.
 
 pub mod autostart;
+pub mod browser;
 pub mod console;
 pub mod elevation;
 pub mod install;

@@ -26,6 +26,23 @@ impl Stamp {
             .map(|since| since.as_secs())
     }
 
+    /// Время UTC в RFC 3339 с миллисекундами: так Cloudflare ждёт отметку согласия
+    /// с условиями WARP (D-165).
+    #[cfg(windows)]
+    pub fn utc() -> String {
+        use windows_sys::Win32::System::SystemInformation::GetSystemTime;
+        // SAFETY: GetSystemTime только заполняет переданную структуру.
+        let t = unsafe {
+            let mut t = std::mem::zeroed();
+            GetSystemTime(&mut t);
+            t
+        };
+        format!(
+            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
+            t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond, t.wMilliseconds
+        )
+    }
+
     /// Местное время строкой, как его пишет mihomo в `time=`: `2026-09-26T17:32:55.123`.
     /// Своим строкам в логе нужно то же время, что у строк ядра, иначе колонка времени
     /// в окне дырявая ровно там, где объясняется нажатие кнопки.

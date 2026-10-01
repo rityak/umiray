@@ -4,36 +4,20 @@ import { Button, Dialog, Field, Input } from "rootik";
 import { t } from "../i18n";
 import { failure } from "../shell/Banner";
 
-/// What kind of link the dialog takes. Every engine has its own (D-154).
-export type LinkCopy = {
-  description: string;
-  label: string;
-  placeholder: string;
-  type: "url" | "text";
-};
-
 type Props = {
   /// Take the link. A refusal is thrown and shown at the field; the caller closes on success.
   onSubmit: (link: string) => Promise<void>;
   onClose: () => void;
-  /// A subscription address or a link to one server, unless said otherwise.
-  copy?: LinkCopy;
 };
 
 /**
- * Add a subscription or a link to one server (D-120). A refusal shows right here, at the
- * field being edited; success closes the dialog.
+ * Add a subscription, a link to one server or a qd:// link (D-120, D-161). A refusal shows
+ * right here, at the field being edited; success closes the dialog.
  */
-export default function LinkDialog({ onSubmit, onClose, copy }: Props) {
+export default function LinkDialog({ onSubmit, onClose }: Props) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
-  const text = copy ?? {
-    description: t("A subscription address from your provider or a link to one server."),
-    label: t("Subscription address"),
-    placeholder: t("https://… or vless://…"),
-    type: "url",
-  };
 
   const add = async () => {
     setBusy(true);
@@ -52,7 +36,9 @@ export default function LinkDialog({ onSubmit, onClose, copy }: Props) {
       open
       size="sm"
       title={t("Link")}
-      description={text.description}
+      description={t(
+        "A subscription address, a link to one server, or a qd:// link — qd is downloaded if needed.",
+      )}
       onClose={onClose}
       footer={
         <>
@@ -71,12 +57,12 @@ export default function LinkDialog({ onSubmit, onClose, copy }: Props) {
         </>
       }
     >
-      <Field label={text.label} error={failed ?? undefined}>
+      <Field label={t("Subscription address")} error={failed ?? undefined}>
         <Input
-          type={text.type}
+          type="url"
           mono
           value={input}
-          placeholder={text.placeholder}
+          placeholder={t("https://… or vless://…")}
           spellCheck={false}
           onChange={(event) => setInput(event.target.value)}
           onKeyDown={(event) => {

@@ -80,7 +80,7 @@ export default function MaskForm({ onMessage, onSaved, onUnsavedChange }: Props)
       setDisk(written);
       setDraft(written);
       onSaved();
-      onMessage(notice(t("Saved. Changes take effect on the next connection.")));
+      onMessage(notice(t("Saved. Applies on the next connection.")));
     } catch (e) {
       onMessage(failure(e));
     } finally {
@@ -143,7 +143,7 @@ export default function MaskForm({ onMessage, onSaved, onUnsavedChange }: Props)
       label: t("AmneziaWG server"),
       inline: true,
       hint: t(
-        "changes packet formats: vanilla WireGuard cannot read them and the tunnel will not connect",
+        "changes packet formats: plain WireGuard can't read them and the tunnel won't come up",
       ),
       control: (
         <Switch

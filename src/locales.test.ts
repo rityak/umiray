@@ -80,16 +80,3 @@ test("interface text and translation keys use English", () => {
   expect(russian).toEqual([]);
   expect(Object.keys(ru).filter((key) => /[А-Яа-яЁё]/.test(key))).toEqual([]);
 });
-
-test("diagnostic navigation has English keys and Russian translations", () => {
-  const registry = backend["../src-tauri/src/diag.rs"]
-    .split("pub const TOOLS:")[1]
-    .split("];", 1)[0];
-  for (const match of registry.matchAll(/(?:title|group|hint): "([^"]+)"/g)) {
-    const key = match[1];
-    expect(key, "diagnostic navigation").not.toMatch(/[А-Яа-яЁё]/);
-    if (!/^(DNS|TLS SNI|DNS spoofing|DNS leak)$/.test(key)) {
-      expect(typeof ru[key], key).toBe("string");
-    }
-  }
-});

@@ -32,6 +32,24 @@ impl Job {
         }
         unsafe { AssignProcessToJobObject(job, process) != 0 }
     }
+
+    /// Отпустить всех, кто в клетке: выход владельца их больше не убьёт. Нужно отладочному
+    /// запускателю (D-171), когда копия ушла сама: процесс, поднятый ею через UAC, Windows
+    /// сажает в клетку родителя, и без этого он умирал бы вместе с запускателем.
+    pub fn release() {
+        let Some(job) = JOB.get().map(|job| *job as HANDLE) else {
+            return;
+        };
+        unsafe {
+            let limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+            SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                &limits as *const _ as *const c_void,
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            );
+        }
+    }
 }
 
 /// Ноль — «не получилось»: клетка на этой системе не создаётся, и второй раз пробовать

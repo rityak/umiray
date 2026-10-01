@@ -3,17 +3,15 @@
 //!
 //! Документов два рода, и различие принципиальное:
 //!
-//! - **файлы клиента** — `advanced.yaml` (конфиг ядра), `client.yaml` (настройки самого
-//!   клиента, ядру не уходит) и `groups.yaml` (свои группы узлов, общие для всех
-//!   направлений). Лежат по своему пути, имеют шаблон, существуют всегда;
-//! - **часть набора** — «Маршрутизация», и она единственная. Своего файла у неё нет вовсе:
+//! - **документы клиента** — `advanced` (конфиг ядра), `client` (настройки самого
+//!   клиента, ядру не уходит) и `groups` (свои группы узлов, общие для всех направлений).
+//!   Лежат строкой в базе (D-170), имеют шаблон, существуют всегда;
+//! - **часть набора** — «Маршрутизация», и она единственная. Своего документа у неё нет:
 //!   это часть набора (D-071), и адресуется она парой «часть/набор» — `rules/<id>`.
 //!   Раздел окна при этом один, а документов в нём столько, сколько наборов.
 //!
-//! Файлы клиента **полноценные**: выключенное написано явно, а не опущено. Опущенное поле
+//! Документы клиента **полноценные**: выключенное написано явно, а не опущено. Опущенное поле
 //! означает «решает ядро», и конфиг перестаёт отвечать на вопрос «а включено ли это» (D-052).
-
-use std::path::PathBuf;
 
 use serde::Serialize;
 
@@ -23,7 +21,7 @@ use crate::error::{AppError, Result};
 /// пишет: держать число в точке сборки значило бы, что файл и сборка знают его порознь.
 pub const LOCAL_PROXY_PORT: u16 = if cfg!(debug_assertions) { 3091 } else { 3090 };
 use crate::config::presets::PresetStore;
-use crate::paths::Paths;
+use crate::db::{Db, Table};
 use crate::yaml::Yaml;
 
 /// Файл расширенных настроек. В него же пишет переключатель режима (D-052), поэтому
@@ -37,7 +35,7 @@ pub const CLIENT: &str = "client";
 /// направлений и для всех наборов правил.
 pub const GROUPS: &str = "groups";
 
-/// Файл клиента: живёт по своему пути и имеет шаблон.
+/// Документ клиента: строка базы со своим шаблоном.
 struct File {
     id: &'static str,
     label: &'static str,
@@ -45,11 +43,7 @@ struct File {
     /// Уходит ли документ ядру. Ложь — это настройки клиента: лишний ключ верхнего уровня
     /// ядро не примет, поэтому в сборку такой файл не берётся (D-068).
     core: bool,
-    path: fn() -> PathBuf,
     default: &'static str,
-    /// Ключи собранного конфига, за которые файл отвечает. Пусто — «всё, что не забрали
-    /// остальные»: так устроено «Настройки», и своего списка у него поэтому нет.
-    keys: &'static [&'static str],
 }
 
 const FILES: [File; 3] = [
@@ -58,27 +52,21 @@ const FILES: [File; 3] = [
         label: "Mihomo Settings",
         hint: "the full core config; capture controls also write here",
         core: true,
-        path: Paths::advanced,
         default: ADVANCED_DEFAULT,
-        keys: &[],
     },
     File {
         id: CLIENT,
         label: "Umiray Settings",
         hint: "client settings; this file is never sent to the core",
         core: false,
-        path: Paths::client,
         default: CLIENT_DEFAULT,
-        keys: &[],
     },
     File {
         id: GROUPS,
         label: "Groups",
-        hint: "your node groups, shared across routes; AUTO and umiray are assembled by the client",
+        hint: "your node groups, shared by all routes; the client builds AUTO and umiray itself",
         core: true,
-        path: Paths::groups,
         default: GROUPS_DEFAULT,
-        keys: &["proxy-groups"],
     },
 ];
 
@@ -89,15 +77,12 @@ struct Routing {
     id: &'static str,
     label: &'static str,
     hint: &'static str,
-    /// Ключи собранного конфига, за которые раздел отвечает.
-    keys: &'static [&'static str],
 }
 
 const ROUTING: [Routing; 1] = [Routing {
     id: "rules",
     label: "Routing",
     hint: "where traffic goes; MATCH handles everything else",
-    keys: &["rules"],
 }];
 
 /// Описание документа для окна. Содержимое не тащим: документов несколько, а открыт один.
@@ -196,7 +181,7 @@ impl Documents {
         sections
     }
 
-    /// Часть и набор, к которым ведёт документ. Пусто — это файл клиента, наборам он
+    /// Часть и набор, к которым ведёт документ. Пусто — это документ клиента, наборам он
     /// не принадлежит.
     pub fn part_and_preset(id: &str) -> Option<(&'static str, String)> {
         match find(id) {
@@ -205,18 +190,17 @@ impl Documents {
         }
     }
 
-    /// Читает документ. Файл клиента при этом заводится из шаблона, если его ещё нет;
-    /// у части набора отсутствие файла означает пустой документ.
+    /// Читает документ. Документ клиента при этом заводится из шаблона, если его ещё нет;
+    /// у части набора отсутствие значит пустой документ.
     pub fn read(id: &str) -> Result<String> {
         match find(id)? {
-            Target::Client(file) => {
-                let path = (file.path)();
-                if !path.exists() {
-                    Paths::ensure_root()?;
-                    crate::atomic::AtomicFile::write(&path, file.default)?;
+            Target::Client(file) => match Db::get(Table::Documents, file.id, "")? {
+                Some(text) => Ok(text),
+                None => {
+                    Db::put(Table::Documents, file.id, "", file.default)?;
+                    Ok(file.default.into())
                 }
-                Ok(std::fs::read_to_string(path)?)
-            }
+            },
             Target::Part { part, preset } => PresetStore::read(&preset, part),
         }
     }
@@ -226,22 +210,18 @@ impl Documents {
         // а причина будет видна только в логе при следующем запуске.
         Yaml::top_mapping(text)?;
         match find(id)? {
-            Target::Client(file) => {
-                Paths::ensure_root()?;
-                Ok(crate::atomic::AtomicFile::write((file.path)(), text)?)
-            }
+            Target::Client(file) => Db::put(Table::Documents, file.id, "", text),
             Target::Part { part, preset } => PresetStore::write(&preset, part, text),
         }
     }
 
-    /// Возвращает файл клиента к шаблону — и отдаёт его же, чтобы окно показало результат
+    /// Возвращает документ клиента к шаблону — и отдаёт его же, чтобы окно показало результат
     /// без второго чтения. Часть набора сюда не попадает: её умолчание — то, что собирает
     /// клиент, а собирает его рендер, поэтому сброс набора живёт в `crate::render::effective::ConfigRenderer::reset`.
     pub fn reset(id: &str) -> Result<String> {
         match find(id)? {
             Target::Client(file) => {
-                Paths::ensure_root()?;
-                crate::atomic::AtomicFile::write((file.path)(), file.default)?;
+                Db::put(Table::Documents, file.id, "", file.default)?;
                 Ok(file.default.into())
             }
             Target::Part { .. } => Err(AppError::invalid(
@@ -250,8 +230,7 @@ impl Documents {
         }
     }
 
-    /// Шаблон файла клиента. Нужен переезду: старый override.yaml подкладывается под него,
-    /// чтобы у обновившихся расширенное тоже стало полноценным.
+    /// Шаблон документа клиента: им заводится отсутствующий и освежается пустой.
     pub fn template(id: &str) -> Result<&'static str> {
         match find(id)? {
             Target::Client(file) => Ok(file.default),
@@ -263,33 +242,9 @@ impl Documents {
     pub fn templated() -> Vec<&'static str> {
         FILES.iter().map(|file| file.id).collect()
     }
-
-    /// Ключи собранного конфига, относящиеся к документу. Пустой ответ означает «всё, что
-    /// не забрали остальные»: у расширенного своего списка нет, потому что оно и есть остаток.
-    pub fn keys(id: &str) -> Result<&'static [&'static str]> {
-        Ok(match find(id)? {
-            Target::Client(file) => file.keys,
-            Target::Part { part, .. } => ROUTING
-                .iter()
-                .find(|routing| routing.id == part)
-                .map(|routing| routing.keys)
-                .unwrap_or(&[]),
-        })
-    }
-
-    /// Ключи, занятые **другими** документами. Нужны ровно для этого остатка.
-    pub fn keys_of_others(id: &str) -> Vec<&'static str> {
-        let mine = Documents::keys(id).unwrap_or(&[]);
-        ROUTING
-            .iter()
-            .flat_map(|routing| routing.keys.iter().copied())
-            .chain(FILES.iter().flat_map(|file| file.keys.iter().copied()))
-            .filter(|key| !mine.contains(key))
-            .collect()
-    }
 }
 
-/// Документ окна по файлу клиента. Порядок вкладок задаётся списком в `list`, а не порядком
+/// Документ окна по документу клиента. Порядок вкладок задаётся списком в `list`, а не порядком
 /// объявления файлов: «Группы» — свой раздел, «Настройки» — два документа в одном.
 fn doc(id: &str) -> Doc {
     let file = FILES.iter().find(|file| file.id == id).expect("свой файл");
@@ -303,9 +258,9 @@ fn doc(id: &str) -> Doc {
 }
 
 const CLIENT_DEFAULT: &str = r#"# Настройки самого клиента: то, чего нет в конфиге ядра (D-068).
-# Ядру этот файл не уходит — он про поведение окна, а не про то, как ходит трафик.
+# Ядру этот документ не уходит — он про поведение окна, а не про то, как ходит трафик.
 #
-# Файл и форма правят одно и то же: «Настройки» → Umiray Settings → «Форма» пишет сюда же,
+# Документ и форма правят одно и то же: «Настройки» → Umiray Settings → «Форма» пишет сюда же,
 # точечно. При записи из формы комментарии теряются — та же цена, что и в конфиге ядра.
 
 # Чем мерить, сколько до сервера (D-069):
@@ -337,7 +292,7 @@ udp-group: false
 
 # Через сколько часов перепрашивать страну узла — тот самый флаг рядом с именем (D-084).
 # Страну определяет адрес сервера: он уходит к ipinfo.io, ответ кэшируется по
-# «хост:порт» в geo.json. Ноль — не спрашивать вовсе, тогда наружу не уходит ни один адрес.
+# «хост:порт» в базе клиента. Ноль — не спрашивать вовсе, тогда наружу не уходит ни один адрес.
 geo-hours: 168
 
 # Чем маскировать рукопожатие WireGuard (D-118). На пути до сервера его узнают по самому
@@ -370,8 +325,8 @@ macro_rules! advanced_default {
     ($port:literal) => {
         concat!(r#"# Mihomo Settings — конфиг ядра целиком: всё, что не про источники, группы и маршрутизацию.
 #
-# Файл и окно правят одно и то же. Переключатель режима в шапке пишет сюда `tun.enable`
-# сам, остальное ваше. При этой записи файл пересобирается, и комментарии теряются —
+# Документ и окно правят одно и то же. Переключатель режима в шапке пишет сюда `tun.enable`
+# сам, остальное ваше. При этой записи документ пересобирается, и комментарии теряются —
 # такова цена за один документ на редактор и на переключатель.
 
 # Как ядро выбирает выход: rule — по правилам из раздела «Маршрутизация».
@@ -397,13 +352,29 @@ tun:
     - any:53
     - tcp://any:53
 
-# Своё разрешение имён клиент включает вместе с TUN: без него TUN ловит трафик,
-# но не может его разрезолвить.
+# Своё разрешение имён — во всех режимах, а не только в TUN (D-169): в Proxy и System
+# через него резолвятся прямые соединения и правила по IP, а TUN без него трафик ловит,
+# но разрезолвить не может.
 dns:
-  enable: false
+  enable: true
   enhanced-mode: fake-ip
   nameserver:
     - https://1.1.1.1/dns-query
+
+# Имя из TLS, HTTP и QUIC — для тех, кто пришёл голым адресом: браузер со своим DoH,
+# программа с вшитым IP. Без него правило по домену на них промахивается.
+sniffer:
+  enable: true
+  sniff:
+    HTTP:
+      ports: [80, 8080-8880]
+      override-destination: true
+    TLS:
+      ports: [443, 8443]
+    QUIC:
+      ports: [443, 8443]
+  skip-domain:
+    - Mijia Cloud
 
 # Выбранный узел помним сами: через перезапуск ядро его не удержало. А вот карту
 # подменных адресов ядро просим помнить: без неё после подъёма 198.18.0.4 достаётся
@@ -445,7 +416,7 @@ const GROUPS_DEFAULT: &str = r#"# Группы узлов — ваши, и он�
 # filter: — отобрать по имени узла регулярным выражением; proxies: — назвать узлы и группы
 # поимённо.
 #
-# Форма правит этот же файл. При записи из формы комментарии теряются — та же цена,
+# Форма правит этот же документ. При записи из формы комментарии теряются — та же цена,
 # что и в «Настройках».
 "#;
 
@@ -491,21 +462,6 @@ mod tests {
         }
     }
 
-    /// Остаток считается по ключам разделов маршрута: «Настройки» показывает то,
-    /// чего не забрали они.
-    #[test]
-    fn the_advanced_document_gets_everything_the_others_did_not_take() {
-        assert!(Documents::keys(ADVANCED).unwrap().is_empty());
-        let others = Documents::keys_of_others(ADVANCED);
-        assert!(others.contains(&"proxy-groups"));
-        assert!(others.contains(&"rules"));
-        assert_eq!(Documents::keys(GROUPS).unwrap(), &["proxy-groups"]);
-        assert!(
-            !Documents::keys_of_others(GROUPS).contains(&"proxy-groups"),
-            "свой ключ в чужие не попадает"
-        );
-    }
-
     #[test]
     fn every_template_is_valid_yaml() {
         for file in FILES.iter() {
@@ -523,7 +479,12 @@ mod tests {
     fn the_advanced_template_says_out_loud_what_is_off() {
         let out = Value::Mapping(Yaml::top_mapping(ADVANCED_DEFAULT).unwrap());
         assert_eq!(out["tun"]["enable"], Value::from(false));
-        assert_eq!(out["dns"]["enable"], Value::from(false));
+        assert_eq!(
+            out["dns"]["enable"],
+            Value::from(true),
+            "DNS не ждёт TUN: конфиг один на все режимы (D-169)"
+        );
+        assert_eq!(out["sniffer"]["enable"], Value::from(true));
         assert_eq!(out["allow-lan"], Value::from(false));
         assert_eq!(out["ipv6"], Value::from(false));
         assert_eq!(out["profile"]["store-selected"], Value::from(false));

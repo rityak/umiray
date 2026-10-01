@@ -1,37 +1,39 @@
 //! Коллекции: то, что клиент поставляет **данными**, а владеет ими пользователь (D-100).
 //!
-//! Списков такого рода в клиенте уже три — публичные резолверы, эталонные ресурсы
+//! Списков такого рода в клиенте три — публичные резолверы, каталог rule sets
 //! и встроенные наборы правил, — и все они устроены одинаково: образец вшит в бинарь,
-//! при первом запуске ложится на диск, дальше это обычный файл. Перекомпилировать клиент
-//! ради строки с адресом или доменом — цена, которой не должно быть.
+//! при первом запуске ложится в таблицу `collections` базы (D-170), дальше это обычный
+//! документ. Перекомпилировать клиент ради строки с адресом или доменом — цена, которой
+//! не должно быть.
 //!
-//! **Две формы.** Документ — один файл с известной схемой (`dns.yaml`, `sites.yaml`).
-//! Папка — много файлов одной схемы, которые перечисляются на лету (`rules/`): набор
+//! **Две формы.** Документ — одна строка с известной схемой (`dns`, `lists`; часть пустая).
+//! Папка — много строк одной схемы под одним именем (`rules`, часть — идентификатор): набор
 //! правил заводят и удаляют по одному, а список резолверов правят целиком.
 //!
-//! Типы здесь нарочно «широкие»: `proto` и `filter` — строки, а не перечисления. Файл
+//! Типы здесь нарочно «широкие»: `proto` и `filter` — строки, а не перечисления. Документ
 //! правит человек, и незнакомое слово не должно ронять всю коллекцию: с ним разбирается
 //! тот, кто читает (`diag::dns` не умеет DNSCrypt и говорит об этом строкой в консоли),
-//! а не разбор файла.
+//! а не разбор документа.
 
 use serde::{Deserialize, Serialize};
 
+use crate::db::{Db, Table};
 use crate::error::{AppError, Result};
-use crate::paths::Paths;
 
-/// Имена коллекций-документов — они же имена файлов без расширения.
+/// Имена коллекций-документов.
 pub const DNS: &str = "dns";
-pub const SITES: &str = "sites";
+/// Каталог rule sets, которые клиент умеет скачать (D-157).
+pub const LISTS: &str = "lists";
 
 /// Имя коллекции-папки со встроенными наборами правил (D-083).
 pub const RULES: &str = "rules";
 
 /// Образцы, вшитые в бинарь. Единственное место, где коллекции живут внутри кода,
-/// и только затем, чтобы было чем засеять пустую папку.
+/// и только затем, чтобы было чем засеять пустую таблицу.
 const DNS_SHIPPED: &str = include_str!("../../collections/dns.yaml");
-const SITES_SHIPPED: &str = include_str!("../../collections/sites.yaml");
+const LISTS_SHIPPED: &str = include_str!("../../collections/lists.yaml");
 
-/// Наборы правил — та же раздача, только папкой. Пара «имя файла, содержимое».
+/// Наборы правил — та же раздача, только папкой. Пара «идентификатор, содержимое».
 const RULES_SHIPPED: [(&str, &str); 2] = [
     (
         "direct-ru",
@@ -89,119 +91,121 @@ pub struct Server {
     pub ipv6: bool,
 }
 
-/// Эталонный ресурс: по нему видно, что именно недоступно.
+/// Каталог rule sets (D-157).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Site {
+pub struct ListCatalog {
+    pub version: u32,
+    pub lists: Vec<CatalogList>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CatalogList {
     pub id: String,
-    pub name: String,
-    pub url: String,
-    /// `base` · `blocked` · `cdn` — и что угодно ещё: слово свободное, как и `filter`
-    /// у резолверов.
+    pub title: String,
+    #[serde(default)]
+    pub title_en: Option<String>,
+    /// Часть каталога: `blocked`, `services`, `russia`. Слово свободное.
     #[serde(default)]
     pub group: String,
     #[serde(default)]
     pub note: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Sites {
-    pub version: u32,
-    pub sites: Vec<Site>,
+    #[serde(default)]
+    pub note_en: Option<String>,
+    pub urls: Vec<String>,
 }
 
 pub struct Collections;
 
 impl Collections {
-    /// Положить образцы, если коллекций ещё нет.
+    /// Положить образцы, если коллекций ещё нет вовсе.
     ///
-    /// Папку целиком, а не файл по отдельности: удалённая коллекция не должна возвращаться
-    /// сама при следующем запуске — иначе «удалить» означало бы «удалить до перезапуска».
-    /// Переезд со старой раскладки идёт **до** этого вызова и оставляет папку заполненной,
-    /// поэтому здесь она уже существует и раздача не трогает ничего (D-100).
+    /// Целиком и только в пустую таблицу: удалённая коллекция не должна возвращаться сама
+    /// при следующем запуске — иначе «удалить» означало бы «удалить до перезапуска». Переезд
+    /// с файлов идёт **до** этого вызова и оставляет таблицу заполненной (D-100, D-170).
     pub fn seed() -> Result<()> {
-        if Paths::collections_dir().exists() {
+        let empty = [DNS, LISTS, RULES]
+            .iter()
+            .all(|name| Db::parts(Table::Collections, name).is_ok_and(|rows| rows.is_empty()));
+        if !empty {
             return Ok(());
         }
-        Collections::fill_missing()
+        Db::batch(|batch| {
+            for (name, shipped) in [(DNS, DNS_SHIPPED), (LISTS, LISTS_SHIPPED)] {
+                batch.put(Table::Collections, name, "", shipped)?;
+            }
+            for (id, shipped) in RULES_SHIPPED {
+                batch.put(Table::Collections, RULES, id, shipped)?;
+            }
+            Ok(())
+        })
     }
 
-    /// Дописать то, чего в коллекциях нет. Нужен переезду: старая установка приносит
-    /// `catalog/` и `rulesets/` порознь, и любой из них мог отсутствовать.
-    pub fn fill_missing() -> Result<()> {
-        std::fs::create_dir_all(Paths::collections_dir())?;
-        for (name, shipped) in [(DNS, DNS_SHIPPED), (SITES, SITES_SHIPPED)] {
-            let path = Paths::collection_file(name);
-            if !path.exists() {
-                crate::atomic::AtomicFile::write(path, shipped)?;
-            }
-        }
-        let rules = Paths::collection_folder(RULES);
-        std::fs::create_dir_all(&rules)?;
-        for (id, shipped) in RULES_SHIPPED {
-            let path = rules.join(format!("{id}.yaml"));
-            if !path.exists() {
-                crate::atomic::AtomicFile::write(path, shipped)?;
-            }
-        }
-        Ok(())
-    }
-
-    /// Добавить перевод прежним стандартным наборам один раз; правки владельца сохраняются.
-    pub fn adopt_rule_titles() -> Result<()> {
-        let marker = Paths::collections_dir().join(".rule-titles-v1");
-        if marker.exists() {
-            return Ok(());
-        }
-        for (id, shipped) in RULES_SHIPPED {
-            let path = Paths::collection_folder(RULES).join(format!("{id}.yaml"));
-            if path.exists() {
-                let text = std::fs::read_to_string(&path)?;
+    /// Доучить коллекции, перенесённые с файлов (D-170), тому, что новые получают образцом:
+    /// перевод названий наборов, каталог rule sets, провайдеры DNS под категории (S-033).
+    /// Каждое — один раз: `done` отвечает, стояла ли у старой папки метка этого шага.
+    /// Правки владельца сохраняются, удалённое им не возвращается (D-100).
+    pub fn upgrade(done: impl Fn(&str) -> bool) -> Result<()> {
+        if !done(".rule-titles-v1") {
+            for (id, shipped) in RULES_SHIPPED {
+                let Some(text) = Db::get(Table::Collections, RULES, id)? else {
+                    continue;
+                };
                 if let Some(updated) = translated_title(&text, shipped) {
-                    crate::atomic::AtomicFile::write(path, updated)?;
+                    Db::put(Table::Collections, RULES, id, &updated)?;
                 }
             }
         }
-        crate::atomic::AtomicFile::write(marker, "1\n")?;
+        if !done(".lists-v1") && Db::get(Table::Collections, LISTS, "")?.is_none() {
+            Db::put(Table::Collections, LISTS, "", LISTS_SHIPPED)?;
+        }
+        if !done(".dns-v2") {
+            if let Some(text) = Db::get(Table::Collections, DNS, "")? {
+                if let Some(updated) = with_providers(&text, DNS_SHIPPED, &DNS_ADDED_V2) {
+                    Db::put(Table::Collections, DNS, "", &updated)?;
+                }
+            }
+        }
         Ok(())
     }
 
-    /// Прочитать коллекцию резолверов. Файла нет — читаем вшитый образец: она нужна окну
-    /// и без диска, а первый запуск не должен показывать пустой список.
+    /// Прочитать коллекцию резолверов. Строки нет — читаем вшитый образец: она нужна окну
+    /// всегда, а первый запуск не должен показывать пустой список.
     pub fn dns() -> Result<Resolvers> {
         parse_named(DNS, DNS_SHIPPED)
     }
 
-    /// Прочитать список эталонных ресурсов.
-    pub fn sites() -> Result<Sites> {
-        parse_named(SITES, SITES_SHIPPED)
+    /// Прочитать каталог rule sets (D-157).
+    pub fn lists() -> Result<ListCatalog> {
+        parse_named(LISTS, LISTS_SHIPPED)
     }
 
-    /// Файл коллекции-папки по идентификатору. Раскладку `collections/` знает только
-    /// это место (D-155); проверять идентификатор — дело того, кто его принёс.
-    pub fn file(folder: &str, id: &str) -> std::path::PathBuf {
-        Paths::collection_folder(folder).join(format!("{id}.yaml"))
+    /// Вшитый образец резолверов — тестам, которым нужна поставка, а не копия на машине.
+    #[cfg(test)]
+    pub fn shipped_dns() -> Resolvers {
+        read(DNS_SHIPPED, DNS).expect("образец резолверов читается")
     }
 
-    /// Файлы коллекции-папки: `(идентификатор, содержимое)`, по алфавиту.
+    /// Положить элемент коллекции-папки. Проверять идентификатор — дело того, кто его принёс.
+    pub fn put(folder: &str, id: &str, text: &str) -> Result<()> {
+        Db::put(Table::Collections, folder, id, text)
+    }
+
+    /// Убрать элемент коллекции-папки.
+    pub fn remove(folder: &str, id: &str) -> Result<()> {
+        Db::remove(Table::Collections, folder, id)
+    }
+
+    /// Элементы коллекции-папки: `(идентификатор, содержимое)`, по алфавиту.
     ///
-    /// Порядок задаётся здесь, а не тем, как файлы легли на диск: у наборов правил от него
-    /// зависит порядок строк в собранном конфиге.
+    /// Порядок задаётся здесь: у наборов правил от него зависит порядок строк в собранном
+    /// конфиге.
     pub fn folder(name: &str) -> Vec<(String, String)> {
-        let Ok(entries) = std::fs::read_dir(Paths::collection_folder(name)) else {
-            return Vec::new();
-        };
-        let mut items: Vec<(String, String)> = entries
-            .flatten()
-            .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "yaml"))
-            .filter_map(|entry| {
-                let id = entry.path().file_stem()?.to_str()?.to_string();
-                Some((id, std::fs::read_to_string(entry.path()).ok()?))
-            })
-            .collect();
-        items.sort_by(|a, b| a.0.cmp(&b.0));
-        items
+        Db::parts(Table::Collections, name)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|(id, _)| !id.is_empty())
+            .collect()
     }
 }
 
@@ -220,20 +224,62 @@ fn translated_title(text: &str, shipped: &str) -> Option<String> {
     Some(updated)
 }
 
-/// Общее чтение документа: файл с диска, а нет его — вшитый образец.
+/// Провайдеры, добавленные в образец под выбор категории DNS (S-033).
+const DNS_ADDED_V2: [&str; 4] = ["controld", "mullvad", "dnsforge", "libredns"];
+
+/// Документ резолверов с дописанными блоками образца для тех `ids`, которых в нём нет.
+/// `None` — дописывать нечего или итог не читается так, как ждём (например, `providers:`
+/// у владельца не последний ключ): тогда файл не трогаем.
+fn with_providers(text: &str, shipped: &str, ids: &[&str]) -> Option<String> {
+    let own: Resolvers = serde_yaml::from_str(text).ok()?;
+    let missing: Vec<&str> = ids
+        .iter()
+        .copied()
+        .filter(|id| !own.providers.iter().any(|provider| provider.id == *id))
+        .collect();
+    if missing.is_empty() {
+        return None;
+    }
+    let mut out = text.trim_end().to_string();
+    out.push('\n');
+    for id in &missing {
+        out.push('\n');
+        out.push_str(&provider_block(shipped, id)?);
+    }
+    let after: Resolvers = serde_yaml::from_str(&out).ok()?;
+    let complete = missing
+        .iter()
+        .all(|id| after.providers.iter().any(|provider| provider.id == *id));
+    (complete && after.providers.len() == own.providers.len() + missing.len()).then_some(out)
+}
+
+/// Текст одного провайдера образца: от его `  - id:` до следующего провайдера
+/// или комментария над ним.
+fn provider_block(shipped: &str, id: &str) -> Option<String> {
+    let head = format!("  - id: {id}");
+    let mut lines = shipped.lines().skip_while(|line| line.trim_end() != head);
+    let first = lines.next()?;
+    let mut block = vec![first];
+    block
+        .extend(lines.take_while(|line| !line.starts_with("  - id: ") && !line.starts_with("  #")));
+    while block.last().is_some_and(|line| line.trim().is_empty()) {
+        block.pop();
+    }
+    Some(block.join("\n") + "\n")
+}
+
+/// Общее чтение документа: строка из базы, а нет её — вшитый образец.
 fn parse_named<T: serde::de::DeserializeOwned>(name: &str, shipped: &str) -> Result<T> {
-    let text = std::fs::read_to_string(Paths::collection_file(name))
-        .unwrap_or_else(|_| shipped.to_string());
+    let text = Db::get(Table::Collections, name, "")
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| shipped.to_string());
     read(&text, name)
 }
 
 fn read<T: serde::de::DeserializeOwned>(text: &str, name: &str) -> Result<T> {
-    serde_yaml::from_str(text).map_err(|e| {
-        AppError::invalid(format!(
-            "Коллекция «{name}» не читается: {e}. Файл — {}",
-            Paths::collection_file(name).display()
-        ))
-    })
+    serde_yaml::from_str(text)
+        .map_err(|e| AppError::invalid(format!("Коллекция «{name}» не читается: {e}")))
 }
 
 #[cfg(test)]
@@ -245,7 +291,16 @@ mod tests {
     #[test]
     fn the_shipped_samples_parse() {
         read::<Resolvers>(DNS_SHIPPED, DNS).expect("резолверы");
-        read::<Sites>(SITES_SHIPPED, SITES).expect("ресурсы");
+        let lists = read::<ListCatalog>(LISTS_SHIPPED, LISTS).expect("rule sets");
+        for list in &lists.lists {
+            assert_eq!(
+                crate::slug::Slug::of(&list.id, ""),
+                list.id,
+                "{}: имя уходит в правило и в путь",
+                list.id
+            );
+            assert!(!list.urls.is_empty(), "{}: неоткуда качать", list.id);
+        }
         for (id, text) in RULES_SHIPPED {
             let value: serde_yaml::Value = serde_yaml::from_str(text).expect(id);
             assert!(value.get("title").is_some(), "{id}: нет заголовка");
@@ -255,6 +310,27 @@ mod tests {
             );
             assert!(value.get("rules").is_some(), "{id}: нет правил");
         }
+    }
+
+    /// Дописываются только недостающие из названных, текст владельца остаётся как был,
+    /// а второй проход ничего не меняет.
+    #[test]
+    fn new_providers_are_appended_without_touching_the_rest() {
+        let own = "# мой комментарий\nversion: 1\nproviders:\n  - id: mine\n    name: Мой\n    variants: []\n  - id: dnsforge\n    name: свой\n    variants: []\n";
+        let updated = with_providers(own, DNS_SHIPPED, &DNS_ADDED_V2).unwrap();
+        assert!(updated.starts_with(own.trim_end()), "своё переписано");
+        let after: Resolvers = serde_yaml::from_str(&updated).unwrap();
+        let ids: Vec<&str> = after.providers.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, ["mine", "dnsforge", "controld", "mullvad", "libredns"]);
+        assert_eq!(after.providers[1].name, "свой", "свой dnsforge не заменён");
+        assert!(with_providers(&updated, DNS_SHIPPED, &DNS_ADDED_V2).is_none());
+    }
+
+    /// Если `providers:` не последний ключ, дописанное ушло бы не туда — тогда не трогаем.
+    #[test]
+    fn providers_not_last_means_hands_off() {
+        let own = "providers:\n  - id: mine\n    name: Мой\n    variants: []\nversion: 1\n";
+        assert!(with_providers(own, DNS_SHIPPED, &DNS_ADDED_V2).is_none());
     }
 
     #[test]

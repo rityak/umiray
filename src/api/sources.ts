@@ -54,3 +54,6 @@ export const sourcesProxyYaml = (entry: Record<string, unknown>) =>
   call(z.string(), "sources_proxy_yaml", { entry });
 /// Системное окно выбора файла и разбор того, что выбрали. `null` — закрыли окно.
 export const sourcesAddFile = () => call(Import.nullable(), "sources_add_file");
+/// Cloudflare WARP, выпущенный самим клиентом (D-165): регистрация у Cloudflare и узел.
+export type WarpTunnel = "masque" | "wireguard";
+export const sourcesAddWarp = (tunnel: WarpTunnel) => call(Import, "sources_add_warp", { tunnel });

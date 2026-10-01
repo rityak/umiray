@@ -10,11 +10,10 @@
 //! Цена, которую платим осознанно: секундная точность заголовка плюс время ответа в пути.
 //! На фоне двухминутного окна это шум, и порог «хорошо» взят с запасом на него.
 //!
-//! Два слоя, как у всех (D-097): `epoch` разбирает заголовок, `tell` превращает расхождение
-//! в вердикт — обе чистые и проверяются без сети; отчёт собран поверх них.
+//! `epoch` разбирает заголовок, `tell` превращает расхождение в вердикт — обе чистые
+//! и проверяются без сети. Зовёт шаг «после пробуждения» (D-115).
 
-use crate::diag::report::{Report, Tone, Verdict};
-use crate::error::Result;
+use crate::diag::report::Verdict;
 
 /// Куда идём за эталоном: 204 без тела — самый дешёвый ответ, какой бывает,
 /// и тот же адрес уже служит замером узлов (`nodes::ping`).
@@ -33,36 +32,13 @@ pub struct ClockProbe;
 impl ClockProbe {
     /// Замер: насколько часы машины разошлись с эталоном. Плюс — спешат, пусто — сверять
     /// не с чем (эталон молчит или ответ не разобрался).
-    ///
-    /// Типизированный слой поверх той же пробы (D-097): его спрашивает код, которому нужно
-    /// решение, — например шаг «после пробуждения» (D-115). Отчёт для окна собран поверх него.
     pub async fn skew() -> Option<i64> {
-        measure().await.skew
-    }
-
-    pub async fn check() -> Result<Report> {
-        let mut report = Report::new("clock");
-        report.say(Tone::Dim, format!("эталон: {REFERENCE}"));
-
-        let shot = measure().await;
-        let Some(date) = shot.date else {
-            return Ok(report.finish(
-                Verdict::Idle,
-                "Эталон времени не ответил — сверять не с чем",
-                shot.ms,
-            ));
-        };
-        report.say(Tone::Dim, format!("ответ: {date}"));
-
-        let Some(skew) = shot.skew else {
-            return Ok(report.finish(
-                Verdict::Bad,
-                format!("Не разобрали время ответа: {date}"),
-                shot.ms,
-            ));
-        };
-        let (verdict, headline) = tell(skew);
-        Ok(report.finish(verdict, headline, shot.ms))
+        // Мимо системного прокси: часы сверяют с интернетом, а не с нашим туннелем.
+        let request = crate::http::Http::direct().ok()?.head(REFERENCE).send();
+        let response = request.await.ok()?;
+        let date = response.headers().get("date")?.to_str().ok()?;
+        let ours = crate::stamp::Stamp::now()?;
+        Some(ours as i64 - epoch(date)? as i64)
     }
 
     /// Жалоба для окна: пусто — часы в порядке или сверить не удалось. Порог тот же,
@@ -70,35 +46,6 @@ impl ClockProbe {
     pub fn complaint(skew: i64) -> Option<String> {
         (skew.abs() > TOLERATED).then(|| tell(skew).1)
     }
-}
-
-/// Что увидели: расхождение, сам заголовок и сколько шёл ответ.
-struct Shot {
-    skew: Option<i64>,
-    date: Option<String>,
-    ms: u64,
-}
-
-async fn measure() -> Shot {
-    let began = std::time::Instant::now();
-    // Мимо системного прокси: часы сверяют с интернетом, а не с нашим туннелем.
-    let date = crate::http::Http::direct()
-        .ok()
-        .map(|client| client.head(REFERENCE).send());
-    let date = match date {
-        Some(request) => request
-            .await
-            .ok()
-            .and_then(|response| Some(response.headers().get("date")?.to_str().ok()?.to_string())),
-        None => None,
-    };
-    let ms = began.elapsed().as_millis() as u64;
-    let skew = date
-        .as_deref()
-        .and_then(epoch)
-        .zip(crate::stamp::Stamp::now())
-        .map(|(theirs, ours)| ours as i64 - theirs as i64);
-    Shot { skew, date, ms }
 }
 
 /// Вердикт по расхождению. Знак наш: плюс — часы машины впереди эталона.

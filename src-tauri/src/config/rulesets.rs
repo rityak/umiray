@@ -1,41 +1,37 @@
-//! Встроенные наборы правил: коллекция-папка, тумблер в `client.yaml`, строки в сборку
-//! (D-083, D-100).
+//! Готовые наборы правил: коллекция-папка и строки в сборку (D-083, D-100, D-158).
 //!
-//! Не набор маршрутизации (D-071) и не документ пользователя: набор задаёт маршрут целиком,
-//! а эти включаются вместе и **поверх любого направления**. В документ пользователя отсюда
-//! не пишется ничего — включённое подмешивается при сборке, между его правилами и `MATCH`.
+//! Какие наборы участвуют в маршруте и куда ведут, решает документ набора маршрутизации —
+//! раздел `ready` (D-158). Здесь остаётся то, что знает только про сами наборы: разбор,
+//! правка и строки с подставленным выходом.
 //!
-//! Сами файлы — коллекция `rules` (D-100): их раздаёт и перечисляет `collections`, здесь
-//! остаётся то, что знает только про наборы: разбор файла, тумблер и строки в сборку.
+//! Сами наборы — коллекция `rules` (D-100): их раздаёт и перечисляет `collections`.
 //!
-//! Что включено, живёт одним полем `rulesets:` в `client.yaml`: файл клиентский, ядру
-//! не уходит (D-068), и у поля один хозяин (D-052). Поле не переименовано вместе
-//! с коллекцией намеренно: оно называет **что включено**, а не где оно лежит.
+//! **Выход набора** отдельным полем не хранится: это общий выход его строк. У `direct-ru`
+//! все строки ведут в `DIRECT` — это и есть его выход по умолчанию. У набора со строками
+//! в разные выходы общего нет, и переопределить его нельзя — только поправить строки.
 
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 
 use crate::collections;
 use crate::collections::Collections;
-use crate::config::files::Documents;
-use crate::config::files::CLIENT;
+use crate::config::rules::RulesCodec;
 use crate::error::{AppError, Result};
+use crate::slug::Slug;
 use crate::yaml::Yaml;
-
-/// Поле `client.yaml`, в котором лежит список включённых.
-const KEY: &str = "rulesets";
 
 /// Набор так, как его видит окно.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Ruleset {
-    /// Имя файла без расширения. Оно же то, что записано в `client.yaml`.
+    /// Идентификатор в коллекции. Он же имя в разделе `ready` документа.
     pub id: String,
     /// Человеческие имена набора: перевод выбирает окно (D-151).
     pub title: String,
     #[serde(default)]
     pub title_en: Option<String>,
-    pub on: bool,
+    /// Общий выход строк набора. Пусто — строки ведут в разные выходы (D-158).
+    pub target: Option<String>,
     /// Строки правил как есть — окно показывает их, когда набор раскрывают.
     pub rules: Vec<String>,
 }
@@ -46,27 +42,24 @@ impl RulesetStore {
     /// Все наборы коллекции, по алфавиту: порядок в окне не должен зависеть от того,
     /// как файлы легли на диск.
     pub fn list() -> Vec<Ruleset> {
-        let on = enabled();
         Collections::folder(collections::RULES)
             .into_iter()
-            .filter_map(|(id, text)| {
-                let mut set = parse(&id, &text)?;
-                set.on = on.contains(&set.id);
-                Some(set)
-            })
+            .filter_map(|(id, text)| parse(&id, &text))
             .collect()
     }
 
-    /// Строки включённых наборов — то, что уходит в сборку.
+    /// Строки набора для сборки, с выходом `target` вместо своего (D-158). `None` — выход
+    /// самого набора. Набора нет — `None`: документ мог сослаться на удалённый мимо нас,
+    /// и VPN из-за этого не должен остаться без маршрута.
     ///
-    /// Порядок между наборами — тот же алфавитный: два набора редко спорят за один домен,
-    /// а стабильный порядок важнее, чем возможность их переставлять.
-    pub fn enabled_rules() -> Vec<String> {
-        RulesetStore::list()
-            .into_iter()
-            .filter(|set| set.on)
-            .flat_map(|set| set.rules)
-            .collect()
+    /// Выход подставляется только набору с общим выходом: у разнородного подмена стёрла бы
+    /// то, что человек развёл по разным выходам намеренно.
+    pub fn lines(id: &str, target: Option<&str>) -> Option<Vec<String>> {
+        let set = RulesetStore::list().into_iter().find(|set| set.id == id)?;
+        let Some(target) = target.filter(|_| set.target.is_some()) else {
+            return Some(set.rules);
+        };
+        Some(set.rules.iter().map(|line| aimed(line, target)).collect())
     }
 
     /// Текст набора как есть — тот же файл, что правят руками (D-104).
@@ -85,37 +78,39 @@ impl RulesetStore {
     ///
     /// Файл сразу с правилом-примером: набор без правил не показывается вовсе (`parse`),
     /// и заведённый из окна пропал бы у пользователя на глазах. Правило выбрано заведомо
-    /// безобидное — новый набор ещё и выключен, так что в сборку оно не попадёт.
+    /// безобидное — и в маршрут новый набор не входит, пока его не выберут.
     pub fn create(title: &str) -> Result<String> {
         let title = title.trim();
         if title.is_empty() {
             return Err(AppError::invalid("У набора должно быть имя"));
         }
-        let id = free(&slug(title));
+        let taken: Vec<String> = Collections::folder(collections::RULES)
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        let id = Slug::free(&Slug::of(title, "nabor"), &taken);
         let text = format!(
             "title: {title}
 rules:
   - DOMAIN-SUFFIX,example.com,DIRECT
 "
         );
-        crate::atomic::AtomicFile::write(path(&id), text)?;
+        Collections::put(collections::RULES, &id, &text)?;
         Ok(id)
     }
 
-    /// Удалить набор вместе с файлом. Включённый сначала выключается: иначе он остался бы
-    /// в `client.yaml` именем, которому больше ничего не соответствует.
+    /// Удалить набор вместе с файлом. Документы, которые его выбрали, не падают: сборка
+    /// пропустит набор, которого нет, а при следующей записи документ попросит убрать ссылку.
     ///
     /// Удаляем и поставляемый тоже — коллекция принадлежит пользователю (D-100), и
     /// «этот трогать нельзя» было бы враньём: файл всё равно правится руками.
     pub fn delete(id: &str) -> Result<()> {
         RulesetStore::read(id)?;
-        RulesetStore::toggle(id, false)?;
-        std::fs::remove_file(path(id))?;
-        Ok(())
+        Collections::remove(collections::RULES, id)
     }
 
     /// Записать правку. Перед записью — разбор: файл, который не читается, означал бы набор,
-    /// молча выпавший из сборки, а окно показывало бы тумблер включённым.
+    /// молча выпавший из сборки.
     ///
     /// Заводить новые файлы этим нельзя: правится то, что уже лежит в папке — для нового
     /// есть `create`.
@@ -126,115 +121,33 @@ rules:
                 "Набор должен быть YAML со списком `rules:` — и хотя бы одним правилом",
             ));
         }
-        crate::atomic::AtomicFile::write(path(id), text)?;
-        Ok(())
+        Collections::put(collections::RULES, id, text)
     }
+}
 
-    /// Включить или выключить. Пишем точечно, как режим перехвата (D-052): остальное
-    /// в `client.yaml` не наше.
-    pub fn toggle(id: &str, on: bool) -> Result<()> {
-        // Идентификатор приходит из вебвью. Путь из него не строится, но в `client.yaml`
-        // он попадает — а туда пишем только то, что правда лежит в папке.
-        if on && !RulesetStore::list().iter().any(|set| set.id == id) {
-            return Err(AppError::invalid(format!("Неизвестный набор правил: {id}")));
+/// Строка правила с другим выходом. Режем без обрезки пробелов: в regex-значении они
+/// могут быть смыслом, и собирать строку надо ровно такой, какой она была.
+fn aimed(line: &str, target: &str) -> String {
+    let mut parts: Vec<&str> = line.split(',').collect();
+    let trimmed: Vec<&str> = parts.iter().map(|part| part.trim()).collect();
+    match RulesCodec::exit_at(&trimmed) {
+        Some(at) => {
+            parts[at] = target;
+            parts.join(",")
         }
-        let mut names = enabled();
-        names.retain(|name| name != id);
-        if on {
-            names.push(id.to_string());
-        }
-        names.sort();
-        let mut map = Yaml::top_mapping(&Documents::read(CLIENT)?)?;
-        Yaml::set(
-            &mut map,
-            KEY,
-            Value::Sequence(names.into_iter().map(Value::from).collect()),
-        );
-        let text = serde_yaml::to_string(&Value::Mapping(map))
-            .map_err(|e| AppError::invalid(e.to_string()))?;
-        Documents::write(CLIENT, &text)
+        None => line.to_string(),
     }
 }
 
-/// Путь к файлу набора. Одно место на весь модуль: идентификатор приходит из вебвью,
-/// и склеивать его с путём где попало — способ однажды склеить непроверенный.
-fn path(id: &str) -> std::path::PathBuf {
-    Collections::file(collections::RULES, id)
-}
-
-/// Имя файла из имени набора. Всё, что не буква, не цифра и не дефис, становится дефисом:
-/// идентификатор уходит и в путь, и в `client.yaml`, и оставлять там точки и косые черты
-/// нельзя. Буквы любые — кириллица в имени файла законна, а переводить её в латиницу
-/// значило бы тащить таблицу транслитерации ради имени, которое видит один человек.
-fn slug(title: &str) -> String {
-    let cut: String = title
-        .to_lowercase()
-        .chars()
-        .map(|letter| {
-            if letter.is_alphanumeric() {
-                letter
-            } else {
-                '-'
-            }
-        })
-        .collect();
-    // Подряд идущие дефисы схлопываем: «C:\Windows» иначе даёт `c--windows`.
-    let mut trimmed = String::with_capacity(cut.len());
-    for letter in cut.chars() {
-        if letter != '-' || !trimmed.ends_with('-') {
-            trimmed.push(letter);
-        }
-    }
-    let trimmed = trimmed.trim_matches('-').to_string();
-    // Длинное имя файла — это длинный путь, а он на Windows кончается отказом записи.
-    let short: String = trimmed.chars().take(40).collect();
-    let short = short.trim_matches('-').to_string();
-    if short.is_empty() {
-        "nabor".to_string()
-    } else {
-        short
-    }
-}
-
-/// Свободное имя рядом с занятым: `свой`, `свой-2`, `свой-3`. Второй набор с тем же
-/// именем — обычное дело, а молча перезаписать чужой файл нельзя.
-fn free(wanted: &str) -> String {
-    let taken: Vec<String> = Collections::folder(collections::RULES)
-        .into_iter()
-        .map(|(id, _)| id)
-        .collect();
-    if !taken.iter().any(|id| id == wanted) {
-        return wanted.to_string();
-    }
-    (2..)
-        .map(|number| format!("{wanted}-{number}"))
-        .find(|candidate| !taken.iter().any(|id| id == candidate))
-        .unwrap_or_else(|| wanted.to_string())
-}
-
-/// Что включено по мнению `client.yaml`. Файл правится руками, поэтому мусор здесь —
-/// это «ничего не включено», а не отказ собрать конфиг: правила не та вещь, ради которой
-/// стоит не поднять VPN.
-fn enabled() -> Vec<String> {
-    let Ok(text) = Documents::read(CLIENT) else {
-        return Vec::new();
-    };
-    let Ok(map) = Yaml::top_mapping(&text) else {
-        return Vec::new();
-    };
-    names(map.get(Value::from(KEY)))
-}
-
-fn names(value: Option<&Value>) -> Vec<String> {
-    value
-        .and_then(Value::as_sequence)
-        .map(|list| {
-            list.iter()
-                .filter_map(Value::as_str)
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
+/// Общий выход строк. Строка без выхода (`SUB-RULE`) общего не нарушает — её подмена
+/// не касается.
+fn common_target(rules: &[String]) -> Option<String> {
+    let mut targets = rules.iter().filter_map(|line| {
+        let parts: Vec<&str> = line.split(',').map(str::trim).collect();
+        RulesCodec::exit_at(&parts).map(|at| parts[at].to_string())
+    });
+    let first = targets.next()?;
+    targets.all(|target| target == first).then_some(first)
 }
 
 /// Файл набора: наш `title` и правила ядра. Без правил набор бессмыслен — такой файл
@@ -263,7 +176,7 @@ fn parse(id: &str, text: &str) -> Option<Ruleset> {
             .unwrap_or(id)
             .to_string(),
         id: id.to_string(),
-        on: false,
+        target: common_target(&rules),
         rules,
     })
 }
@@ -291,15 +204,47 @@ mod tests {
         assert_eq!(parse("block-ads", BLOCK_ADS).unwrap().rules.len(), 1);
     }
 
+    /// Выход набора — общий выход его строк (D-158): у поставляемых он один на весь файл.
+    #[test]
+    fn a_set_s_exit_is_the_one_its_lines_share() {
+        assert_eq!(
+            parse("direct-ru", DIRECT_RU).unwrap().target.as_deref(),
+            Some("DIRECT")
+        );
+        assert_eq!(
+            parse("block-ads", BLOCK_ADS).unwrap().target.as_deref(),
+            Some("REJECT")
+        );
+        let mixed = "rules: ['DOMAIN,a.ru,DIRECT', 'DOMAIN,b.ru,REJECT']";
+        assert_eq!(parse("mixed", mixed).unwrap().target, None);
+    }
+
+    /// Подмена ставит выход туда, где его читает ядро, и не трогает хвост и regex.
+    #[test]
+    fn the_exit_goes_where_the_core_reads_it() {
+        assert_eq!(
+            aimed("GEOIP,RU,DIRECT,no-resolve", "AUTO"),
+            "GEOIP,RU,AUTO,no-resolve"
+        );
+        assert_eq!(
+            aimed(r"DOMAIN-REGEX,^(.+\.)?a\.(ru|by)$,DIRECT", "umiray"),
+            r"DOMAIN-REGEX,^(.+\.)?a\.(ru|by)$,umiray"
+        );
+        assert_eq!(
+            aimed("AND,((DOMAIN,x.ru),(NETWORK,UDP)),DIRECT", "REJECT"),
+            "AND,((DOMAIN,x.ru),(NETWORK,UDP)),REJECT"
+        );
+    }
+
     /// Без имени набор всё равно показывается — под именем файла. Без правил не показывается
     /// вовсе: включать в нём нечего.
     #[test]
     fn a_set_without_a_title_is_shown_and_one_without_rules_is_not() {
-        let named = parse("свой", "rules: [MATCH,DIRECT]").unwrap();
+        let named = parse("свой", "rules: ['MATCH,DIRECT']").unwrap();
         assert_eq!(named.title, "свой");
         assert_eq!(named.title_en, None);
         assert_eq!(
-            parse("blank", "title_en: '  '\nrules: [MATCH,DIRECT]")
+            parse("blank", "title_en: '  '\nrules: ['MATCH,DIRECT']")
                 .unwrap()
                 .title_en,
             None
@@ -307,38 +252,5 @@ mod tests {
         assert!(parse("пустой", "title: Пусто\nrules: []").is_none());
         assert!(parse("никакой", "title: Пусто\n").is_none());
         assert!(parse("сломанный", "%%%").is_none());
-    }
-
-    /// Идентификатор уходит и в путь, и в `client.yaml`: всё, что могло бы вывести
-    /// из папки, обязано превратиться в дефис ещё здесь.
-    #[test]
-    fn a_name_becomes_a_file_name_that_cannot_leave_the_folder() {
-        assert_eq!(slug("Мой набор"), "мой-набор");
-        assert_eq!(slug("Block Ads!"), "block-ads");
-        assert_eq!(slug("../../etc/passwd"), "etc-passwd");
-        assert_eq!(slug(r"C:\Windows"), "c-windows");
-        assert_eq!(slug("..."), "nabor", "пустое имя — тоже имя файла");
-        assert_eq!(slug("---"), "nabor");
-        assert!(slug(&"я".repeat(80)).chars().count() <= 40);
-    }
-
-    /// Поле правится руками, и мусор в нём — это «ничего не включено», а не отказ
-    /// собрать конфиг.
-    #[test]
-    fn nonsense_in_the_field_turns_off_everything_instead_of_breaking_the_vpn() {
-        let map = Yaml::top_mapping("rulesets: [direct-ru, block-ads]").unwrap();
-        assert_eq!(names(map.get(Value::from(KEY))), ["direct-ru", "block-ads"]);
-        assert!(names(
-            Yaml::top_mapping("rulesets: 12")
-                .unwrap()
-                .get(Value::from(KEY))
-        )
-        .is_empty());
-        assert!(names(
-            Yaml::top_mapping("ping: tcp")
-                .unwrap()
-                .get(Value::from(KEY))
-        )
-        .is_empty());
     }
 }

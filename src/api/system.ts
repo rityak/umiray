@@ -21,4 +21,8 @@ export const systemKillSwitchSet = (on: boolean) => call(Status, "system_kill_sw
 /// Идентификатор устройства — справочно, в настройках. Отдельным запросом, а не полем
 /// статуса: он не меняется никогда, а статус опрашивается каждую секунду.
 export const systemDevice = () => call(z.string(), "system_device");
+/// Настройки копией базы через окно сохранения (D-163). Путь к файлу; `null` — окно закрыли.
+export const systemExport = () => call(z.string().nullable(), "system_export");
 export const systemLanguage = () => call(z.enum(["en", "ru"]), "system_language");
+/// Страница на GitHub в браузере по умолчанию. Другие адреса бэкенд не откроет.
+export const systemOpenGithub = (url: string) => call(done, "system_open_github", { url });

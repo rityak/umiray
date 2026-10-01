@@ -148,7 +148,12 @@ fn write_registry(on: bool) -> Result<()> {
     if !on {
         return Registry::delete_value(RUN, NAME);
     }
-    Registry::write_string(RUN, NAME, &command(&std::env::current_exe()?))
+    // Запись указывает на место клиента (D-171), а не на того, кто её пишет.
+    Registry::write_string(
+        RUN,
+        NAME,
+        &command(&crate::system::install::Installation::installed_exe()),
+    )
 }
 
 #[cfg(test)]

@@ -1,7 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { fieldsOf, fromEntry, missing, PROTOCOLS, shown, toEntry } from "./proxy";
+import { fieldsOf, fromEntry, missing, PROTOCOLS, shown, toEntry, wrong } from "./proxy";
 
 describe("a node assembled by hand", () => {
+  it("a value the core would take but never connect with is called out", () => {
+    const fine = { name: "N", server: "a.example", port: "443", uuid: "u" };
+    expect(wrong("vless", fine)).toEqual([]);
+    // The core accepts port 99999 and an address with spaces silently (live, 01.10.2026):
+    // the node is there and never comes up.
+    expect(wrong("vless", { ...fine, port: "99999" })).toEqual(["Port"]);
+    expect(wrong("vless", { ...fine, port: "0" })).toEqual(["Port"]);
+    expect(wrong("vless", { ...fine, port: "44.3" })).toEqual(["Port"]);
+    expect(wrong("vless", { ...fine, server: "not a host" })).toEqual(["Address"]);
+    // An empty field is `missing`'s business, not a wrong value.
+    expect(wrong("vless", { ...fine, port: "" })).toEqual([]);
+  });
+
   it("empty fields stay out of the entry", () => {
     const entry = toEntry("vless", { name: "Mine", server: "a.example", port: "443", uuid: "u" });
     expect(entry).toEqual({
@@ -133,8 +146,21 @@ describe("a node assembled by hand", () => {
       "vmess",
       "trojan",
       "hysteria2",
+      "shadowquic",
+      "tuic",
+      "anytls",
+      "trusttunnel",
+      "snell",
+      "sudoku",
+      "ssh",
+      "openvpn",
+      "tailscale",
+      "zerotier",
+      "masque",
       "wireguard",
       "ss",
+      "mieru",
+      "ssr",
       "socks5",
       "http",
     ]);
@@ -148,6 +174,244 @@ describe("a node assembled by hand", () => {
         expect(keys, `${common} missing from ${item.id}`).toContain(common);
       }
     }
+  });
+
+  /// What the link converter writes for a protocol, the form reads back whole: a node from a
+  /// subscription opens in the form and saves unchanged.
+  it("a tuic entry opens and saves unchanged, v4 token included", () => {
+    const entry = {
+      name: "T",
+      type: "tuic",
+      server: "a.example",
+      port: 443,
+      uuid: "u",
+      password: "p",
+      "congestion-controller": "bbr",
+      "udp-relay-mode": "native",
+      sni: "b.example",
+      alpn: ["h3"],
+      "skip-cert-verify": true,
+      "disable-sni": true,
+    };
+    const { kind, values, extra } = fromEntry(entry);
+    expect(extra).toEqual({});
+    expect(toEntry(kind, values, extra)).toEqual(entry);
+
+    const v4 = { name: "T", type: "tuic", server: "a", port: 443, token: "t" };
+    const back = fromEntry(v4);
+    expect(back.extra).toEqual({ token: "t" });
+    expect(toEntry(back.kind, back.values, back.extra)).toEqual(v4);
+  });
+
+  /// The core takes `port` or `port-range`, never both.
+  it("mieru writes a port or a range, whichever is filled", () => {
+    const base = {
+      name: "M",
+      server: "a",
+      transport: "TCP",
+      username: "u",
+      password: "p",
+    };
+    expect(missing("mieru", base)).toEqual(["Port"]);
+    expect(missing("mieru", { ...base, "port-range": "2090-2099" })).toEqual([]);
+    const ranged = toEntry("mieru", { ...base, "port-range": "2090-2099" });
+    expect(ranged["port-range"]).toBe("2090-2099");
+    expect(ranged.port).toBeUndefined();
+
+    const entry = {
+      name: "M",
+      type: "mieru",
+      server: "a",
+      "port-range": "2090-2099",
+      udp: true,
+      transport: "UDP",
+      username: "u",
+      password: "p",
+      multiplexing: "MULTIPLEXING_LOW",
+    };
+    const { kind, values, extra } = fromEntry(entry);
+    expect(extra).toEqual({});
+    expect(toEntry(kind, values, extra)).toEqual(entry);
+  });
+
+  /// sudoku's pure downlink defaults to true in the core and must match the server: the form
+  /// has to be able to write an explicit no.
+  it("a yes-or-no field writes false, not nothing", () => {
+    const base = { name: "S", server: "a", port: "443", key: "k" };
+    expect(toEntry("sudoku", { ...base, "enable-pure-downlink": "false" })).toEqual({
+      name: "S",
+      type: "sudoku",
+      server: "a",
+      port: 443,
+      key: "k",
+      "enable-pure-downlink": false,
+    });
+    const entry = {
+      name: "S",
+      type: "sudoku",
+      server: "a",
+      port: 443,
+      key: "k",
+      "padding-min": 1,
+      "enable-pure-downlink": false,
+      httpmask: { mode: "stream", tls: true, host: "cdn.example" },
+    };
+    const { kind, values, extra } = fromEntry(entry);
+    expect(extra).toEqual({});
+    expect(toEntry(kind, values, extra)).toEqual(entry);
+  });
+
+  it("snell asks for the obfuscation password only where the mode has one", () => {
+    const base = { name: "N", server: "a", port: "1", psk: "k" };
+    expect(missing("snell", { ...base, "obfs-opts.mode": "http" })).toEqual([]);
+    expect(missing("snell", { ...base, "obfs-opts.mode": "shadow-tls" })).toEqual([
+      "Obfuscation password",
+    ]);
+    const entry = toEntry("snell", { ...base, version: "4", "obfs-opts.mode": "tls" });
+    expect(entry).toEqual({
+      name: "N",
+      type: "snell",
+      server: "a",
+      port: 1,
+      psk: "k",
+      version: 4,
+      "obfs-opts": { mode: "tls" },
+    });
+  });
+
+  it("a pinned ssh key brings its algorithm, or the server picks another type", () => {
+    const base = { name: "S", server: "a", port: "22", username: "u" };
+    const pinned = toEntry("ssh", {
+      ...base,
+      "host-key": "ssh-ed25519 AAAA, ssh-rsa BBBB",
+    });
+    expect(pinned["host-key-algorithms"]).toEqual(["ssh-ed25519", "rsa-sha2-512", "rsa-sha2-256"]);
+    const chosen = toEntry("ssh", {
+      ...base,
+      "host-key": "ssh-ed25519 AAAA",
+      "host-key-algorithms": "ssh-ed25519",
+    });
+    expect(chosen["host-key-algorithms"]).toEqual(["ssh-ed25519"]);
+    expect(toEntry("ssh", base)["host-key-algorithms"]).toBeUndefined();
+  });
+
+  /// An .ovpn file lands as an entry with PEM blocks; the form must open and save it whole.
+  it("an openvpn entry keeps its certificates line by line", () => {
+    const pem = "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----";
+    const entry = {
+      name: "O",
+      type: "openvpn",
+      server: "a.example",
+      port: 1194,
+      udp: true,
+      proto: "udp",
+      cipher: "AES-256-GCM",
+      "data-ciphers": ["AES-256-GCM", "AES-128-GCM"],
+      ca: pem,
+      cert: pem,
+      key: pem,
+      "tls-auth": pem,
+      "key-direction": "1",
+    };
+    const { kind, values, extra } = fromEntry(entry);
+    expect(extra).toEqual({});
+    expect(values.ca).toContain("\n");
+    expect(toEntry(kind, values, extra)).toEqual(entry);
+    expect(missing("openvpn", { name: "O", server: "a", port: "1" })).toEqual(["Server CA"]);
+  });
+
+  it("tailscale has no address, and each node gets its own state folder", () => {
+    expect(missing("tailscale", { name: "T" })).toEqual([]);
+    const entry = toEntry("tailscale", { name: "Дом / exit", "exit-node": "100.64.0.1" });
+    expect(entry).toEqual({
+      name: "Дом / exit",
+      type: "tailscale",
+      "exit-node": "100.64.0.1",
+      "state-dir": "tailscale/Дом-exit",
+    });
+    const { kind, values, extra } = fromEntry(entry);
+    expect(extra).toEqual({});
+    expect(toEntry(kind, values, extra)).toEqual(entry);
+  });
+
+  it("zerotier needs only a network", () => {
+    expect(missing("zerotier", { name: "Z" })).toEqual(["Network ID"]);
+    const entry = { name: "Z", type: "zerotier", udp: true, network: "ca7d185721bcb634" };
+    const { kind, values, extra } = fromEntry(entry);
+    expect(extra).toEqual({});
+    expect(toEntry(kind, values, extra)).toEqual(entry);
+  });
+
+  it("a masque entry from usque opens and saves unchanged", () => {
+    const entry = {
+      name: "W",
+      type: "masque",
+      server: "162.159.198.1",
+      port: 443,
+      udp: true,
+      "private-key": "PRIV",
+      "public-key": "MFkwEwYH",
+      ip: "172.16.0.2/32",
+      ipv6: "2606:4700:110:8::2/128",
+    };
+    const { kind, values, extra } = fromEntry(entry);
+    expect(extra).toEqual({});
+    expect(toEntry(kind, values, extra)).toEqual(entry);
+    expect(missing("masque", { name: "W", server: "a", port: "443" })).toEqual([
+      "Own key",
+      "Server key",
+    ]);
+  });
+
+  it("an ssr entry opens and saves unchanged", () => {
+    const entry = {
+      name: "R",
+      type: "ssr",
+      server: "a.example",
+      port: 8388,
+      udp: true,
+      cipher: "aes-256-cfb",
+      password: "p",
+      protocol: "auth_aes128_sha1",
+      "protocol-param": "1:key",
+      obfs: "tls1.2_ticket_auth",
+      "obfs-param": "cdn.example",
+    };
+    const { kind, values, extra } = fromEntry(entry);
+    expect(extra).toEqual({});
+    expect(toEntry(kind, values, extra)).toEqual(entry);
+    expect(missing("ssr", { name: "R", server: "a", port: "1" })).toEqual([
+      "Cipher",
+      "Password",
+      "Protocol",
+      "Obfuscation",
+    ]);
+  });
+
+  it("an anytls entry opens and saves unchanged", () => {
+    const entry = {
+      name: "A",
+      type: "anytls",
+      server: "a.example",
+      port: 443,
+      udp: true,
+      password: "p",
+      sni: "b.example",
+      "client-fingerprint": "chrome",
+      "skip-cert-verify": true,
+      "idle-session-timeout": 30,
+    };
+    const { kind, values, extra } = fromEntry(entry);
+    expect(extra).toEqual({ "idle-session-timeout": 30 });
+    expect(toEntry(kind, values, extra)).toEqual(entry);
+  });
+
+  /// Over QUIC there is no browser to pretend to be: the core has no such field there.
+  it("QUIC protocols do not offer a TLS fingerprint", () => {
+    for (const id of ["hysteria2", "tuic"]) {
+      expect(fieldsOf(id).map((field) => field.key)).not.toContain("client-fingerprint");
+    }
+    expect(fieldsOf("trojan").map((field) => field.key)).toContain("client-fingerprint");
   });
 
   /// wireguard `reserved` is exactly three **numbers**: the core will not take it as a string.

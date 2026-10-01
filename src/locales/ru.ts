@@ -10,34 +10,38 @@ const ru: Record<string, Entry> = {
   Window: "Окно",
   "Launch with Windows": "Запускать вместе с Windows",
   "via Windows Task Scheduler": "через задачу в «Планировщике заданий»",
-  "via a startup entry visible in Task Manager": "через автозагрузку, видно в «Диспетчере задач»",
+  "via a startup entry visible in Task Manager":
+    "через автозагрузку, её видно в «Диспетчере задач»",
   "Always run as administrator": "Всегда от имени администратора",
-  "The task is installed: no UAC prompt, TUN is ready to start.":
+  "Task installed: no UAC prompt, TUN starts right away.":
     "задача создана: UAC не спрашивает, TUN запускается сразу",
-  "TUN needs administrator rights. Creating the task requires elevation now.":
-    "TUN требует прав администратора; чтобы создать задачу, права нужны сейчас",
+  "TUN needs admin rights. Creating the task asks for them now.":
+    "для TUN нужны права администратора; чтобы создать задачу, их нужно дать сейчас",
   "Connect on launch": "Подключаться при запуске",
-  "Use the same route and mode as last time.": "с тем же перехватом и маршрутом, что в прошлый раз",
+  "Same route and mode as last time.": "с тем же перехватом и маршрутом, что в прошлый раз",
   Automatic: "Автоматически",
-  "Automatic uses Russian when a Russian keyboard layout is installed, otherwise English.":
-    "Автоматически: русский, если установлена русская раскладка, иначе английский.",
+  "Automatic picks Russian if a Russian keyboard layout is installed, English otherwise.":
+    "Автоматически — русский, если есть русская раскладка, иначе английский.",
   "Save or discard your edits before changing the language.":
     "Сохраните или отмените правки перед сменой языка.",
-  "automatic refresh is off": "автоматическое обновление выключено",
-  "no subscriptions to refresh": "нет подписок для обновления",
+  "automatic refresh is off": "автообновление выключено",
+  "no subscriptions to refresh": "обновлять нечего — подписок нет",
   "next refresh is due now": "следующее — сейчас",
   "next refresh in {n} min": "следующее — через {n} мин",
   "next refresh in {hours} h {minutes} min": "следующее — через {hours} ч {minutes} мин",
-  "The original provider response. Edits use the same name normalization as refreshed subscriptions.":
-    "Исходный ответ провайдера. Правки проходят ту же обработку имён, что и обновление подписки.",
+  "The provider's response as is. Names in your edits are cleaned up the same way a refresh does.":
+    "Ответ провайдера как есть. Имена в правках обрабатываются так же, как при обновлении подписки.",
   "From file": "Из файла",
   Manually: "Вручную",
-  "Subscriptions create separate sources; individual links go to My links. Supported protocols are normalized into core records.":
-    "Подписка становится отдельным источником, одиночная ссылка попадает в «Мои ссылки». Поддерживаемые протоколы переводятся в формат ядра.",
-  "Subscription refresh": "Обновление подписок",
+  "Subscription or link": "Подписка или ссылка",
+  "https://, vless://, qd://…": "https://, vless://, qd://…",
+  "WireGuard .conf, OpenVPN .ovpn or usque config.json":
+    "WireGuard .conf, OpenVPN .ovpn или config.json от usque",
+  "A node field by field": "Узел по полям",
+  "Nodes or sources": "Узлы или источники",
+  "Source code": "Код источника",
   "Subscription refresh schedule": "Как часто обновлять подписки",
   "Custom…": "Своё…",
-  Every: "Каждые",
   "Refresh interval": "Период обновления",
   "Interval unit": "Единица периода",
   minutes: "минут",
@@ -49,40 +53,25 @@ const ru: Record<string, Entry> = {
   "Every 6 hours": "Раз в 6 часов",
   "Every day": "Раз в сутки",
   Rules: "Правила",
-  "config lines: {n}": "строк в конфиге: {n}",
   "Through VPN": "Через VPN",
-  "Bypass VPN": "Мимо VPN",
+  "Bypass VPN": "Без VPN",
   Block: "Блокировать",
-  "Filter rules by target": "Фильтр правил по назначению",
+  "Filter rules by target": "Фильтр правил по цели",
   All: "Все",
   "no rules — all traffic goes to MATCH below": "правил нет — весь трафик уходит в MATCH ниже",
   "only → {target}; order and numbering are shared": "только → {target}; порядок и номера общие",
   Rule: "Правило",
-  "below your rules — built-in sets and MATCH": "ниже ваших правил — готовые наборы и MATCH",
-  "everything that did not match above": "всё, что не совпало выше",
   "Where to send everything else": "Куда отправить всё остальное",
   "Choose running process": "Выбрать запущенный процесс",
   "Search by name": "Поиск по имени",
   Domain: "Домен",
-  Utilities: "Список утилит",
-  Config: "Конфиг",
-  "Write the selected values to your document and apply them":
-    "записать отмеченное в конфиг и применить",
-  "Apply selected values": "Записать отмеченное",
-  Run: "Запустить",
-  "comma-separated": "через запятую",
-  Target: "Куда",
-  Timeout: "Таймаут",
-  ms: "мс",
-  "encrypted resolvers through the core": "шифрованные через ядро",
-  "entire resolver catalog": "весь каталог",
   Groups: "Группы",
   Routing: "Маршрутизация",
   Settings: "Настройки",
   "the full core config; capture controls also write here":
     "полный конфиг ядра; переключатель перехвата пишет сюда же",
   "client settings; this file is never sent to the core": "настройки клиента; ядру не передаются",
-  "your node groups, shared across routes; AUTO and umiray are assembled by the client":
+  "your node groups, shared by all routes; the client builds AUTO and umiray itself":
     "ваши группы узлов, общие для всех маршрутов; AUTO и umiray клиент собирает сам",
   "where traffic goes; MATCH handles everything else":
     "куда идёт трафик; всё остальное решает MATCH",
@@ -100,8 +89,8 @@ const ru: Record<string, Entry> = {
   "nothing selected": "ничего не выбрано",
   "{n} members": "в составе: {n}",
   "Group name": "Имя группы",
-  "This name is reserved for a client group. Replacing it breaks route switching in Connection. Choose another name.":
-    "Это имя занято группой клиента. Ваша группа заменит её, и переключение маршрута в «Соединении» перестанет работать. Выберите другое имя.",
+  "The client uses this name for its own group. Yours would replace it and break exit selection in Connection. Pick another name.":
+    "Это имя занято группой клиента. Ваша группа её заменит, и выбор выхода в «Соединении» сломается. Выберите другое имя.",
   "Node selection": "Выбор узла",
   "How the group selects a node": "Как группа выбирает узел",
   "Health check": "Проверка доступности",
@@ -115,22 +104,21 @@ const ru: Record<string, Entry> = {
   "The group uses this URL to check node availability":
     "по этому адресу группа проверяет доступность узла",
   Members: "Состав",
-  "Other members: {names}. These are groups, direct connections or manually entered names; edit them in Code view.":
+  "Also in the group: {names} — other groups, DIRECT or names typed by hand. Edit them in Code.":
     "Ещё в группе: {names}. Это другие группы, прямое соединение или имена, введённые вручную; правятся в коде.",
-  "Keep only nodes whose names contain this text":
-    "Оставить только узлы, у которых это есть в имени",
+  "Keep only nodes whose names contain this text": "Только узлы, в имени которых есть этот текст",
   "e.g. Poland — leave empty to include all": "например Poland — или пусто, чтобы взять все",
   "The group includes {n} of {total}": "В группу попадёт {n} из {total}",
   "live list": "живой список",
   "fixed list": "фиксированный список",
   "No nodes matched — the core will reject this group.":
     "Ни один узел не подошёл — ядро такую группу не примет.",
-  "This subset stores exact names. New subscription nodes will not join automatically; select the whole source to keep the list live.":
+  "Part of a source is saved as exact names, so new subscription nodes won't join. Check the whole source to keep the list live.":
     "Выбрана часть источника, поэтому в файле записаны точные имена: новые узлы подписки в группу не попадут. Отметьте источник целиком, чтобы список обновлялся сам.",
-  "The form preserves unknown fields: {fields}. Edit them in Code view.":
+  "The form doesn't know these fields and keeps them as is: {fields}. Edit them in Code.":
     "Форма не знает полей: {fields}. Они сохранятся как есть; правятся в коде.",
-  "This group becomes a member of umiray and can be used as a rule target.":
-    "Группа появится внутри umiray, её можно выбрать целью правила.",
+  "The group joins umiray and can be a rule target.":
+    "Группа появится в umiray — её можно выбрать целью правила.",
   "Delete group": "Удалить группу",
   Find: "Найти",
   Replace: "Заменить",
@@ -152,40 +140,37 @@ const ru: Record<string, Entry> = {
   "replaced $ matches": "заменено совпадений: $",
   "Control character": "Управляющий символ",
   "Server country: {code}": "Страна сервера: {code}",
-  "Saved to preset «{name}». Another preset controls the route; choose Use to switch.":
+  "Saved to preset «{name}». Another preset is in use; press Use to switch.":
     "Сохранено в набор «{name}». Сейчас используется другой набор; нажмите «Использовать», чтобы переключиться.",
   "Saved.": "Сохранено.",
   "Saved and applied to the running VPN.": "Сохранено и применено к работающему VPN.",
-  "Saved. Changes take effect when you connect.":
-    "Сохранено. Изменения вступят в силу при подключении.",
-  "Preset «{name}» is now in use. The running core was restarted to apply it.":
-    "Набор «{name}» используется. Ядро перезапущено.",
-  "Preset «{name}» is now in use and takes effect when you connect.":
-    "Набор «{name}» теперь используется и вступит в силу при подключении.",
+  "Saved. Applies when you connect.": "Сохранено. Применится при подключении.",
+  "Now using preset «{name}». The core was restarted.":
+    "Теперь работает набор «{name}». Ядро перезапущено.",
+  "Preset «{name}» selected; it applies when you connect.":
+    "Набор «{name}» выбран и заработает при подключении.",
   "Settings document": "Документ настроек",
   "«{name}» as a form": "«{name}» формой",
   "This document can only be edited as text — select Code.":
     "Этот документ правится только текстом — выберите «Код».",
-  "Something went wrong inside the client.": "Что-то пошло не так внутри клиента.",
+  "Internal client error.": "Внутренняя ошибка клиента.",
   "settings and sources": "настройки и источники",
   "Mihomo core": "Ядро mihomo",
   Client: "Клиент",
-  "downloading mihomo — once on first launch":
-    "скачивание ядра mihomo — один раз при первом запуске",
-  "The core could not be downloaded automatically — VPN cannot start without it.":
-    "Ядро не скачалось автоматически — без него VPN не запустится.",
+  "downloading mihomo": "скачиваю mihomo",
+  "Couldn't download the core — VPN can't start without it.":
+    "Ядро не скачалось само — без него VPN не запустится.",
   Sources: "Источники",
-  Tools: "Инструменты",
   Logs: "Логи",
-  "System proxy is already set to {proxy}. Switch to System to take over, or check which app configured it.":
-    "Системный прокси уже задан: {proxy}. Включите System, чтобы заменить его, или проверьте, какая программа его установила.",
-  "The client will launch as administrator without a UAC prompt. The task is named umiray in Task Scheduler.":
+  "System proxy is already set to {proxy}. Switch to System to replace it, or find the app that set it.":
+    "Системный прокси уже занят: {proxy}. Включите System, чтобы заменить его, или найдите программу, которая его поставила.",
+  "The client will start as administrator with no UAC prompt. The task is called umiray in Task Scheduler.":
     "Клиент будет запускаться от администратора без запроса UAC. Задача umiray создана в «Планировщике заданий».",
-  "Defaults restored. The core and device identifier were kept.":
-    "Сброшено до умолчаний. Ядро и идентификатор устройства сохранены.",
-  "Could not set the Windows proxy — enter the address in your browser manually.":
+  "Settings reset. The core and device ID were kept.":
+    "Настройки сброшены. Ядро и идентификатор устройства остались.",
+  "Couldn't set the Windows proxy — enter the address in your browser.":
     "Не удалось задать прокси в Windows — укажите адрес в браузере вручную.",
-  "System proxy was {proxy} — it will be replaced on connection and restored on disconnect.":
+  "System proxy was {proxy} — it's replaced while connected and restored after.":
     "Системный прокси был {proxy}: при подключении он будет заменён, при отключении — восстановлен.",
   "unsaved changes": "есть несохранённые изменения",
   Sections: "Разделы",
@@ -193,7 +178,7 @@ const ru: Record<string, Entry> = {
     "оба стека — работает почти везде; выберите, если не уверены",
   "Windows stack: fastest, but not supported on every machine":
     "стек Windows: самый быстрый, но работает не везде",
-  "core stack: broadly compatible, but slightly slower":
+  "core stack: works almost everywhere, a bit slower":
     "стек ядра: работает везде, но чуть медленнее",
   "route by domain name — faster and more precise": "маршрут по имени домена — быстрее и точнее",
   "real addresses — more compatible, but domain rules are less reliable":
@@ -202,7 +187,7 @@ const ru: Record<string, Entry> = {
   "one port for HTTP and SOCKS5 — enter it in your browser in Proxy mode.":
     "один порт для HTTP и SOCKS5 — его указывают в браузере в режиме Proxy.",
   Level: "Уровень",
-  "changing this requires reconnection": "смена требует переподключения",
+  "takes effect after reconnecting": "применится после переподключения",
   "Local proxy port": "Порт локального прокси",
   "Virtual adapter": "Виртуальный адаптер",
   "carries all device traffic. Enable TUN in Connection; configure it here.":
@@ -213,51 +198,54 @@ const ru: Record<string, Entry> = {
     "видно в «Сетевых подключениях». Пусто — ядро назовёт его Meta",
   "0 lets the core decide; otherwise 576–9000. Use the path MTU tool to measure":
     "0 — ядро решит само, иначе 576…9000. Подобрать поможет «MTU пути»",
-  "the core blocks routes outside the adapter. Similar purpose to kill-switch, different mechanism":
+  "the core blocks routes that skip the adapter — like kill-switch, but a different mechanism":
     "ядро блокирует маршруты в обход адаптера; похоже на kill-switch, но работает иначе",
-  "capture other DNS requests so apps with their own resolvers do not bypass the tunnel. Empty disables interception":
+  "catch other DNS queries so apps with their own resolver don't skip the tunnel. Empty — no interception":
     "перехватывать чужие DNS-запросы, чтобы приложения со своим резолвером не шли в обход туннеля. Пусто — не перехватывать",
   "DNS interception targets": "Перехват DNS-запросов",
   Names: "Имена",
   "Name resolution": "Разрешение имён",
-  "the core resolves names without relying on system DNS.":
+  "the core resolves names itself, without system DNS.":
     "ядро разрешает имена само, без системного DNS.",
   "Core DNS resolver": "DNS ядра",
-  "always enabled in TUN mode regardless of this setting": "в режиме TUN включён всегда",
+  "needed in every mode; TUN doesn't work without it":
+    "нужен в любом режиме, а без него не работает TUN",
+  "games, calls and torrents connect directly more easily; the adapter does a little more work":
+    "играм, звонкам и торрентам проще соединиться напрямую; адаптеру чуть больше работы",
+  "faster where QUIC gets through; where it's blocked, the first lookup waits and falls back":
+    "быстрее, если провайдер пропускает QUIC; если режет, первый запрос подождёт и пойдёт обычным путём",
   "Address resolution mode": "Режим адресов",
   "one server per line": "один сервер на строку",
   "Name servers": "Серверы имён",
   "Connection inspection": "Разбор соединений",
-  "extracts the domain from connections made directly to an IP address.":
+  "finds the site name in connections opened straight to an IP.":
     "определяет имя сайта в соединениях, открытых сразу по IP.",
-  "extract names from TLS and HTTP so domain rules can match externally resolved connections":
+  "reads names from TLS and HTTP so domain rules work even when a name was resolved outside the core":
     "читает имя из TLS и HTTP, чтобы доменные правила срабатывали и там, где имя разрешено в обход ядра",
   Logging: "Журнал",
   Verbosity: "Подробность",
   "how much detail the core writes to Logs.": "сколько подробностей ядро пишет в раздел «Логи».",
-  "debug is for troubleshooting and produces many lines":
+  "debug is for troubleshooting and writes a lot":
     "debug — для поиска неполадок, строк будет много",
   "Log verbosity": "Подробность журнала",
   "address unknown": "адрес неизвестен",
   "Remove for sure?": "Точно убрать?",
   Remove: "Убрать",
-  "Restore the node exactly as supplied by its source":
-    "Вернуть узел ровно к тому, что прислал источник",
+  "Restore the node as its source sent it": "Вернуть узел таким, каким его прислал источник",
   Revert: "Откатить",
   "Reading node config…": "Загрузка конфига узла…",
-  "Edit the whole config here. Only overrides are stored, so fresh subscription keys still arrive after your edits.":
-    "Здесь правится весь конфиг, включая то, чего нет в форме. Хранятся только отличия, поэтому новые ключи из подписки доходят и поверх правки.",
+  "Edit the whole config here. Only your changes are stored, so new keys from the subscription still come through.":
+    "Здесь правится весь конфиг, даже то, чего нет в форме. Хранятся только отличия, поэтому новые ключи из подписки не теряются.",
   "Read-only.": "Только для чтения.",
-  "groups, rules and routing identify this node by name — it cannot be renamed here":
+  "groups, rules and the exit choice find this node by name — it can't be renamed here":
     "по имени узел находят группы, правила и выбор маршрута — здесь его не изменить",
-  "{n} fields are not shown: {fields}. They are preserved as-is and can be edited in Code view.":
-    "Форма не показывает ещё {n}: {fields}. Они сохранятся как есть; правятся в коде.",
-  "All existing fields are shown. Add other settings in Code view.":
+  "{n} fields aren't shown: {fields}. They're kept as is; edit them in Code.":
+    "Форма не показывает полей: {n} — {fields}. Они сохранятся как есть; правятся в коде.",
+  "All the node's fields are shown. Add others in Code.":
     "Все поля узла показаны. Другие параметры добавляются в коде.",
   "Reading node…": "Загрузка узла…",
   "Reading settings…": "Загрузка настроек…",
-  "Saved. Changes take effect on the next connection.":
-    "Сохранено. Изменения вступят в силу при следующем подключении.",
+  "Saved. Applies on the next connection.": "Сохранено. Применится при следующем подключении.",
   "Junk packets before handshake": "Junk-пакеты перед рукопожатием",
   "works with any WireGuard server — no server changes needed":
     "работает с любым сервером WireGuard — менять на нём ничего не надо",
@@ -268,18 +256,18 @@ const ru: Record<string, Entry> = {
   "random size within the range; a fixed size would become a fingerprint":
     "размер случайный в этих пределах: одинаковый стал бы отпечатком",
   "AmneziaWG server": "Сервер с AmneziaWG",
-  "changes packet formats: vanilla WireGuard cannot read them and the tunnel will not connect":
+  "changes packet formats: plain WireGuard can't read them and the tunnel won't come up":
     "меняет формат пакетов: обычный WireGuard их не поймёт, и туннель не поднимется",
   "bytes added to each packet.": "сколько байт добавить к каждому пакету.",
   "packet tags: all four must be distinct numbers greater than four.":
     "метки пакетов: четыре разных числа больше 4.",
   "Generate headers": "Сгенерировать заголовки",
   Apply: "Применить",
-  "Some subscriptions could not be refreshed.": "Обновились не все подписки.",
-  "Switch to Manual first — the route has not changed.":
-    "Сначала включите Manual — маршрут не изменён.",
+  "Some subscriptions didn't refresh.": "Обновились не все подписки.",
+  "Everything your rules don't catch goes to {target}. The choice here only affects rules that point to umiray.":
+    "Всё, что не попало под правила, идёт в {target}. Выбор здесь влияет только на правила с целью umiray.",
   "No nodes": "Узлов нет",
-  "Add a subscription or a link — the core will load it.": "Добавьте подписку или ссылку.",
+  "Add a subscription or a link.": "Добавьте подписку или ссылку.",
   "Add source": "Добавить источник",
   Nodes: "Узлы",
   "Node order": "Порядок узлов",
@@ -295,14 +283,12 @@ const ru: Record<string, Entry> = {
   "Latency to each server: {method}. Change the method in Settings":
     "Задержка до каждого сервера: {method}. Способ — в «Настройках»",
   "Check latency": "Проверить задержку",
-  "Choose manually": "Выбрать вручную",
-  "In Rules mode, your rules assign the exits.": "В Rules выходы назначают ваши правила.",
   "ICMP: regular ping to the host": "ICMP: обычный ping до хоста",
-  "TCP: time to connect to the node's port": "TCP: время установления соединения с портом узла",
+  "TCP: time to connect to the node's port": "TCP: за сколько открывается соединение с портом узла",
   "through the node: best of two requests": "через сам узел: лучший из двух запросов",
   "through the node: second request over an established tunnel":
     "через сам узел: второй запрос в уже поднятом туннеле",
-  "Unexpected backend response — update the whole client.":
+  "Unexpected response from the backend — reinstall the client.":
     "Неожиданный ответ бэкенда — переустановите клиент.",
   "Starting…": "Запуск…",
   "Core not found": "Ядро не найдено",
@@ -316,7 +302,7 @@ const ru: Record<string, Entry> = {
   TB: "ТБ",
   "never refreshed": "не обновлялся",
   "{n} ms": "{n} мс",
-  "not measured or the server did not respond": "не измерено или сервер не ответил",
+  "not measured, or the server didn't answer": "не измерено или сервер не ответил",
   "This protocol has no TCP response — measured through the node: {method}":
     "у этого протокола нет TCP-ответа — измерено через узел: {method}",
   "The selected check gave no result, but the host is reachable — {method}":
@@ -324,24 +310,28 @@ const ru: Record<string, Entry> = {
   "set the address in your app": "адрес указывается в приложении",
   "Windows proxy": "прокси Windows",
   "all device traffic": "весь трафик устройства",
-  "best available node": "лучший доступный узел",
-  "selected node": "выбранный узел",
+  "Only apps where you enter the umiray address go through VPN. Everything else goes direct.":
+    "Через VPN идут только программы, в которых вы указали адрес umiray. Остальное работает напрямую.",
+  "umiray becomes the Windows proxy. Browsers and most apps pick it up, but games and some programs don't.":
+    "umiray становится прокси Windows. Браузеры и большинство программ подхватят его сами, а игры и часть приложений — нет.",
+  "All traffic on this computer goes through VPN, games and UDP included. No setup in apps.":
+    "Через VPN идёт весь трафик компьютера, включая игры и UDP. В программах ничего настраивать не нужно.",
+  "spread across working nodes": "по всем рабочим узлам",
   "assigned by your rules": "назначен вашими правилами",
-  "bypass VPN — no server is used": "мимо VPN — сервер не используется",
-  "the core will choose the best server": "лучший сервер выберет ядро",
+  "bypass VPN — no server": "в обход VPN, сервер не нужен",
+  "the core spreads sites across working servers": "ядро раскладывает сайты по рабочим серверам",
   "select a node from the list": "выберите узел в списке",
-  "your rules assign the server": "сервер назначают ваши правила",
   "selected automatically": "выбран автоматически",
   "selected manually": "выбран вручную",
   "core missing — download it in Settings": "ядра нет — скачайте его в «Настройках»",
-  "{mode} selected, but VPN is off": "выбран {mode}, VPN выключен",
+  "{mode} turns on with VPN": "{mode} включится вместе с VPN",
   "all device traffic goes through the adapter": "весь трафик устройства идёт через адаптер",
-  "proxy configured in Windows settings": "прокси прописан в настройках Windows",
+  "proxy set in Windows settings": "прокси прописан в настройках Windows",
   "enter the address below in your browser or app": "укажите адрес ниже в браузере или приложении",
   "Connecting…": "Подключение…",
   "Core missing": "Нет ядра",
-  Connected: "Подключено",
-  Disconnected: "Отключено",
+  Connected: "Подключён",
+  Disconnected: "Отключён",
   "out of {n}": "из {n}",
   "core is not running": "ядро не запущено",
   "Direct connection": "Напрямую",
@@ -355,42 +345,28 @@ const ru: Record<string, Entry> = {
   unsupported: "не поддерживается",
   "{rate}/s": "{rate}/с",
   connected: "активен",
-  "built-in set · {n} lines": "готовый набор · строк {n}",
   ", measured by the fallback method": ", измерено запасным способом",
   Appearance: "Оформление",
-  "rootik kit settings. Stored in this window; never sent to the client or the core.":
+  "rootik kit settings. Kept in this window, never sent to the client or core.":
     "Настройки набора rootik. Хранятся в этом окне, клиенту и ядру не уходят.",
   Close: "Закрыть",
-  ok: "ок",
-  caveat: "оговорка",
-  failed: "не прошло",
-  "not run": "не запускалось",
   "building the window": "загрузка окна",
-  "No sources — nowhere to take nodes from. Add a subscription or a link.":
+  "No sources, so no nodes. Add a subscription or a link.":
     "Нет источников узлов. Добавьте подписку или ссылку.",
   "Group nodes": "Узлы группы",
-  "Utility output": "Вывод утилит",
-  "Running {tool}": "Выполняется {tool}",
   Clear: "Очистить",
   View: "Вид",
   List: "Список",
   Form: "Форма",
   Code: "Код",
-  "Assembled config": "Собранный конфиг",
-  "What the core receives: your files plus sources, AUTO and umiray. Edited in the sections.":
-    "Что получает ядро: ваши файлы, источники, AUTO и umiray. Правится в разделах.",
-  "Assemble again": "Собрать заново",
-  Assembling: "Сборка",
-  Verdict: "Вердикт",
-  take: "взять",
   "Always run umiray as administrator?": "Всегда запускать umiray от администратора?",
-  "Don't pin": "Не закреплять",
-  Pin: "Закрепить",
-  "The rights are here now — the scheduler task can be created right from here. After that TUN comes up at once, and UAC asks neither at launch nor at sign-in. Remove it in Settings → Umiray Settings.":
+  "Not now": "Не надо",
+  "Create task": "Создать задачу",
+  "You have admin rights now, so the scheduler task can be created right away. Then TUN starts at once, with no UAC prompt at launch or sign-in. Remove it in Settings → Umiray Settings.":
     "Права администратора сейчас есть — можно создать задачу в планировщике. Тогда TUN будет запускаться сразу, без запроса UAC. Отключается в «Настройках» → «Настройки клиента».",
   Link: "Ссылка",
-  "A subscription address from your provider or a link to one server.":
-    "Адрес подписки от провайдера или ссылка на один сервер.",
+  "A subscription address, a link to one server, or a qd:// link — qd is downloaded if needed.":
+    "Адрес подписки, ссылка на один сервер или ссылка qd:// — qd скачается, если его нет.",
   Cancel: "Отмена",
   Add: "Добавить",
   "Subscription address": "Адрес подписки",
@@ -417,7 +393,7 @@ const ru: Record<string, Entry> = {
   "reality is the same TLS, but with someone else's certificate and the server's key":
     "reality — это тот же TLS, но с чужим сертификатом и ключом сервера",
   "tls or http": "tls или http",
-  "x25519mlkem768: enabled on recent servers": "x25519mlkem768: есть на новых серверах",
+  "x25519mlkem768: on newer servers": "x25519mlkem768: есть на новых серверах",
   "IPv6 address": "Адрес IPv6",
   "Tunnel address": "Адрес в туннеле",
   Address: "Адрес",
@@ -434,7 +410,7 @@ const ru: Record<string, Entry> = {
   Access: "Доступ",
   Padding: "Заполнение",
   "Service name": "Имя службы",
-  "Hop interval, s": "Интервал прыжка, с",
+  "Port hop interval, s": "Период смены порта, с",
   "Server key": "Ключ сервера",
   Keys: "Ключи",
   Username: "Логин",
@@ -447,6 +423,98 @@ const ru: Record<string, Entry> = {
   Obfuscation: "Обфускация",
   "Pre-shared key (PSK)": "Общий ключ (PSK)",
   "Congestion window": "Окно перегрузки",
+  "Congestion control": "Управление перегрузкой",
+  "UDP relay": "Передача UDP",
+  "Do not send SNI": "Не отправлять SNI",
+  "Protocol parameter": "Параметр протокола",
+  "Obfuscation parameter": "Параметр обфускации",
+  Handshake: "Рукопожатие",
+  "UDP in streams": "UDP в потоках",
+  "no losses, but a lost packet delays everything behind it":
+    "без потерь, но потерянный пакет задерживает всё, что за ним",
+  "QUIC versions": "Версии QUIC",
+  "the site the handshake pretends to reach": "сайт, к которому якобы идёт рукопожатие",
+  "over QUIC instead of HTTP/2; the server must listen on UDP too":
+    "поверх QUIC вместо HTTP/2; сервер должен слушать и UDP",
+  "Server health check": "Проверка сервера",
+  Version: "Версия",
+  "1 to 5; UDP from 3": "от 1 до 5; UDP — с 3",
+  "Reuse connections": "Повторно использовать соединения",
+  "v4 and newer": "v4 и новее",
+  "ShadowTLS version": "Версия ShadowTLS",
+  Key: "Ключ",
+  "the private key of a sudoku pair, or the server's UUID":
+    "приватный ключ пары sudoku или UUID сервера",
+  "Padding, min %": "Заполнение, от %",
+  "Padding, max %": "Заполнение, до %",
+  "Custom table": "Своя таблица",
+  "Pure downlink": "Чистый нисходящий поток",
+  "must match the server; empty — true": "должно совпадать с сервером; пусто — true",
+  "HTTP mask": "HTTP-маска",
+  "Disable the mask": "Отключить маску",
+  "all but legacy go through a CDN or a reverse proxy":
+    "все, кроме legacy, проходят через CDN или обратный прокси",
+  "Path prefix": "Префикс пути",
+  "Private key": "Приватный ключ",
+  "the key itself or a path to its file": "сам ключ или путь к его файлу",
+  "Key passphrase": "Пароль ключа",
+  "Key algorithms": "Алгоритмы ключа",
+  "A free node: MASQUE or WireGuard": "бесплатный узел: MASQUE или WireGuard",
+  "A free Cloudflare node: the client registers a device and adds it to your nodes.":
+    "Бесплатный узел Cloudflare: клиент регистрирует устройство и добавляет его к вашим узлам.",
+  Issue: "Выпустить",
+  "QUIC that looks like ordinary HTTP/3 — harder to single out":
+    "QUIC, похожий на обычный HTTP/3 — его труднее выделить",
+  "classic WARP; the handshake is masked": "классический WARP; рукопожатие маскируется",
+  "Issuing creates a WARP account at Cloudflare and accepts its terms":
+    "Выпуск заводит аккаунт WARP у Cloudflare и принимает его условия",
+  "Offered ciphers": "Предлагаемые шифры",
+  Digest: "Хеш",
+  "only for CBC; GCM and ChaCha ignore it": "только для CBC; GCM и ChaCha его не используют",
+  Certificates: "Сертификаты",
+  "Server CA": "CA сервера",
+  "Client certificate": "Сертификат клиента",
+  "Client key": "Ключ клиента",
+  "Key direction": "Направление ключа",
+  "Auth key": "Ключ входа",
+  "empty — a login link appears in the core log on the first start":
+    "пусто — ссылка для входа появится в логе ядра при первом запуске",
+  "Control server": "Сервер управления",
+  "empty — Tailscale itself; for headscale — its address":
+    "пусто — сам Tailscale; для headscale — его адрес",
+  "100.64.0.1 or auto:any": "100.64.0.1 или auto:any",
+  "without it only the tailnet is reachable, not the internet":
+    "без него доступна только сеть tailnet, а не интернет",
+  "Local network past the exit node": "Локальная сеть в обход выходного узла",
+  "Accept subnet routes": "Принимать маршруты подсетей",
+  "Device name": "Имя устройства",
+  "Ephemeral device": "Временное устройство",
+  "the tailnet forgets it once it goes offline": "сеть забудет его, как только оно отключится",
+  "State folder": "Папка состояния",
+  "Network ID": "ID сети",
+  "base64 without the BEGIN and END lines": "base64 без строк BEGIN и END",
+  "h2 where UDP is blocked; h3-l4proxy carries no UDP":
+    "h2 — где закрыт UDP; h3-l4proxy не передаёт UDP",
+  "the device ID to authorize appears in the core log on the first start":
+    "ID устройства для разрешения появится в логе ядра при первом запуске",
+  "TCP relay": "TCP-ретранслятор",
+  "where UDP is blocked, traffic goes through ZeroTier's TCP relay":
+    "где UDP закрыт, трафик идёт через TCP-ретранслятор ZeroTier",
+  "Low bandwidth": "Экономия трафика",
+  "Own planet file": "Свой файл planet",
+  "empty — the servers the controller gives": "пусто — серверы, которые даёт контроллер",
+  "empty — its own folder by the node name; one folder is one device":
+    "пусто — своя папка по имени узла; одна папка — одно устройство",
+  "empty — taken from the pinned keys": "пусто — берутся из закреплённых ключей",
+  "empty — any server is trusted, including an impostor":
+    "пусто — доверяем любому серверу, в том числе подменному",
+  "Traffic pattern": "Шаблон трафика",
+  "NO_WAIT sends data without waiting for the handshake: faster, 0-RTT":
+    "NO_WAIT шлёт данные, не дожидаясь рукопожатия: быстрее, 0-RTT",
+  "native — datagrams, losses stay losses; quic — streams, nothing is lost":
+    "native — датаграммы, потеря остаётся потерей; quic — потоки, без потерь",
+  "faster reconnects, but a recorded handshake can be replayed":
+    "быстрее переподключение, но записанное рукопожатие можно повторить",
   Basics: "Основное",
   Upload: "Отдача",
   "TLS fingerprint": "Отпечаток TLS",
@@ -477,10 +545,10 @@ const ru: Record<string, Entry> = {
   "Via node": "Через узел",
   Cipher: "Шифр",
   Encryption: "Шифрование",
-  "without it games and calls bypass the tunnel": "без него игры и звонки идут мимо туннеля",
+  "without it games and calls bypass the tunnel": "без него игры и звонки идут в обход туннеля",
   "all streams in one connection: saves handshakes, but a big download chokes the rest":
     "все потоки в одном соединении: меньше рукопожатий, но большая загрузка тормозит остальные",
-  "go out exactly through it, not through the one the system picks":
+  "leave through this adapter, not the one the system picks":
     "выходить через этот адаптер, а не через выбранный системой",
   "the name in the handshake; empty — the address is used":
     "имя в рукопожатии; пусто — берётся адрес",
@@ -503,12 +571,6 @@ const ru: Record<string, Entry> = {
   "Download the core": "Скачать ядро",
   "Restart as admin": "Перезапустить от администратора",
   "Restart VPN": "Перезапустить VPN",
-  "Resolver catalog": "Справочник резолверов",
-  "collections/dns.yaml — whom the race picks from":
-    "collections/dns.yaml — из кого выбирает гонка",
-  "{n} addresses": ["{n} адрес", "{n} адреса", "{n} адресов"],
-  Provider: "Провайдер",
-  Variant: "Вариант",
   Protocol: "Протокол",
   "Reset to default": "Сбросить к умолчанию",
   "Reset for sure?": "Точно сбросить?",
@@ -518,7 +580,7 @@ const ru: Record<string, Entry> = {
   "Turn off private mode: lines may contain node addresses and names.":
     "Выключите скрытие адресов: в строках могут быть адреса и имена узлов.",
   Empty: "Пусто",
-  "The core has not run — nothing to write.": "Ядро ещё не запускалось.",
+  "The core hasn't run yet.": "Ядро ещё не запускалось.",
   "Core log": "Лог ядра",
   "Copy log": "Копировать лог",
   "manual choice": "выбор вручную",
@@ -526,7 +588,7 @@ const ru: Record<string, Entry> = {
   "first alive": "первый доступный",
   "load balancing": "распределение",
   "no type": "без типа",
-  "bypass VPN": "мимо VPN",
+  "bypass VPN": "без VPN",
   block: "блокировать",
   "through VPN": "через VPN",
   "node · through VPN": "узел · через VPN",
@@ -536,14 +598,14 @@ const ru: Record<string, Entry> = {
   Source: "Источник",
   Now: "Сейчас",
   "No sources": "Источников нет",
-  "Add a subscription or a link — what the panel sent will show up here.":
+  "Add a subscription or a link — the provider's response will show up here.":
     "Добавьте подписку или ссылку — здесь появится ответ провайдера.",
   "Code hidden": "Код скрыт",
   "Turn off private mode to see the source's links and credentials.":
     "Выключите скрытие адресов, чтобы увидеть ссылки и учётные данные источника.",
   "Reading the source": "Загрузка источника",
   "{n} nodes": ["{n} узел", "{n} узла", "{n} узлов"],
-  "Your links — nobody overwrites them.": "Ваши ссылки — обновление их не перезапишет.",
+  "Your links — refreshes never overwrite them.": "Ваши ссылки — обновление их не перезапишет.",
   "Will be overwritten on the next subscription refresh.":
     "Перезапишется при следующем обновлении подписки.",
   "Rule {no} kind": "Вид правила {no}",
@@ -553,14 +615,21 @@ const ru: Record<string, Entry> = {
   "Move rule {no} down": "Опустить правило {no}",
   "Delete rule {no}": "Удалить правило {no}",
   "Custom node": "Свой узел",
-  "Fields are named the way mihomo names them. Empty ones are not written.":
+  "Fields use mihomo's names. Empty ones aren't written.":
     "Поля названы как в mihomo. Пустые не записываются.",
   Fields: "Поля",
   "Missing: {fields}": "Не хватает: {fields}",
-  "What is written here will be added. You can go back to the fields, but what you typed in code is lost then — the form assembles the node again.":
+  "What's written here gets added. Going back to the fields drops what you typed — the form rebuilds the node.":
     "Будет добавлено то, что написано здесь. При возврате к полям набранный код пропадёт — форма соберёт узел заново.",
-  "The node will not come up without: {fields}.": "Без этого узел не поднимется: {fields}.",
-  "The core has more fields than shown here — add the rest in code: a node added this way is editable as a whole config.":
+  "The node won't come up without: {fields}.": "Без этого узел не поднимется: {fields}.",
+  "The node won't come up with these values: {fields}.":
+    "С такими значениями узел не поднимется: {fields}.",
+  "Check: {fields}": "Проверьте: {fields}",
+  "Drop code changes?": "Сбросить правку кода?",
+  "Drop your changes?": "Сбросить ваши правки?",
+  "What was already picked stays saved. Change it in Mihomo Settings.":
+    "Уже подобранное останется. Поменять его можно в «Настройках mihomo».",
+  "The core has more fields than the form — add the rest in code. A node added this way can be edited as a whole config.":
     "У ядра больше полей, чем в форме; остальные добавляются в коде — у такого узла правится весь конфиг.",
   "all nodes of all sources · {n}": "все узлы всех источников · {n}",
   type: "тип",
@@ -571,18 +640,18 @@ const ru: Record<string, Entry> = {
   "{url} · every 300 s": "{url} · каждые 300 с",
   members: "состав",
   "all nodes of all sources, as a live list": "все узлы всех источников, живым списком",
-  "The name is taken by the client. Create your own group named AUTO and yours stays: your own outranks ours.":
+  "The client uses this name. Create your own group called AUTO and yours wins.":
     "Имя занято клиентом. Если создать свою группу AUTO, будет использоваться ваша.",
   "the exit MATCH points at": "выход, на который указывает MATCH",
   "who picks": "кто выбирает",
-  "the route in the Connection section — it is what points this group":
-    "маршрут в разделе «Соединение» — он определяет эту группу",
+  "the choice in Connection — it points this group":
+    "выбор в «Соединении» — он и наводит эту группу",
   why: "зачем",
-  "the only target of the final MATCH rule: all uncaught traffic goes here":
-    "цель финального правила MATCH: сюда идёт весь несовпавший трафик",
+  "the target of the final MATCH rule: whatever nothing else caught goes here":
+    "цель последнего правила MATCH: сюда идёт всё, что не совпало выше",
   "nodes of «{source}»": "узлы «{source}»",
-  "Your groups sit here as items — in the same order as in the list above.":
-    "Ваши группы стоят здесь пунктами — в том же порядке, что в списке выше.",
+  "Your groups, in the same order as the list above.":
+    "Здесь ваши группы — в том же порядке, что в списке выше.",
   "names taken by the client": "имена, занятые клиентом",
   "assembled by the client": "собирает клиент",
   "Settings sections": "Разделы настроек",
@@ -590,43 +659,41 @@ const ru: Record<string, Entry> = {
   "New set name": "Имя нового набора",
   "Set name": "Название набора",
   Create: "Создать",
-  "The folder": "Папка",
-  "is empty. A set is a file with the fields": "пуста. Набор — это файл с полями",
+  "No ready-made sets yet. A set is a document with the fields":
+    "Готовых наборов пока нет. Набор — это документ с полями",
   and: "и",
   "{n} rules": ["{n} правило", "{n} правила", "{n} правил"],
-  "applying…": "применение…",
   "Delete for sure?": "Точно удалить?",
   "Delete set {title}": "Удалить набор {title}",
   Delete: "Удалить",
   "What is inside": "Что внутри",
-  "Reading the file": "Загрузка файла",
+  "Reading the set": "Загрузка набора",
   "Routing preset": "Набор маршрутизации",
   "in use": "используется",
   "Preset name": "Имя набора",
   "Preset actions": "Действия с набором",
   Rename: "Переименовать",
-  "a copy of what the client assembles itself": "копия того, что клиент собирает сам",
+  "a copy of what the client builds itself": "копия того, что клиент собирает сам",
   "New preset": "Новый набор",
   "Delete preset": "Удалить набор",
-  "The route in Rules will be decided by this preset's rules; the route switches to Rules":
-    "Маршрут переключится на Rules и будет определяться правилами этого набора",
+  "Turns routing on and follows this preset": "Маршрутизация включится и пойдёт по этому набору",
   Use: "Использовать",
   subscription: "подписка",
   "custom nodes": "свои узлы",
   "my links": "мои ссылки",
   "added here manually or from a file": "добавлены вручную или из файла",
   "collected from individual links": "собран из отдельных ссылок",
-  "No nodes — refresh the source or inspect its response in Code view.":
-    "Узлов нет — обновите источник или проверьте ответ провайдера в режиме «Код».",
+  "No nodes — refresh the source or check its response in Code.":
+    "Узлов нет — обновите источник или проверьте ответ провайдера в его коде.",
   "Remove node": "Убрать узел",
   "Remove node {name}": "Убрать узел {name}",
   "New group": "Новая группа",
   "This document can only be edited as code": "Этот документ правится только кодом",
-  "Open Code view to edit the original document without losing anything.":
+  "Open Code to edit the document without losing anything.":
     "Откройте «Код», чтобы править документ без потерь.",
   "No custom groups": "Своих групп нет",
   "Add a subscription or a link in Sources first.": "Добавьте подписку или ссылку в «Источниках».",
-  "AUTO already includes every source. Create a group to select a subset, such as one country.":
+  "AUTO already covers every source. Create a group to pick a subset, like one country.":
     "Клиент уже собрал AUTO из всех источников. Своя группа нужна, чтобы отделить часть узлов — например одну страну.",
   "connections {n}": "соединений {n}",
   "session {size}": "за сеанс {size}",
@@ -634,13 +701,13 @@ const ru: Record<string, Entry> = {
   "VPN is off": "VPN выключен",
   Traffic: "Трафик",
   "Speed over the last 90 seconds": "Скорость за последние 90 секунд",
-  "The chart appears after connecting.": "График появится после подключения.",
+  "The chart shows up once you connect.": "График появится после подключения.",
   Expressions: "Выражения",
   Domains: "Домены",
   Processes: "Процессы",
   "IP ranges": "Диапазоны IP",
   "Countries and categories": "Страны и категории",
-  "Rule sets": "Наборы правил",
+  "Rule sets": "Rule sets",
   Values: "Значения",
   "{n} expressions": ["{n} выражение", "{n} выражения", "{n} выражений"],
   "{n} domains": ["{n} домен", "{n} домена", "{n} доменов"],
@@ -652,13 +719,14 @@ const ru: Record<string, Entry> = {
   "Edit rule {no} values": "Изменить значения правила {no}",
   "Rule {no} actions": "Действия с правилом {no}",
   "Delete this rule?": "Удалить это правило?",
-  "One value per line. Paste a whole list.":
+  "don't look up a site's address just for this rule: a connection that came with a name skips it and goes to the next rule":
+    "не узнавать адрес сайта ради этого правила: соединение, пришедшее с именем, пропускает его и идёт к следующему правилу",
+  "One value per line. You can paste a whole list.":
     "Одно значение на строку. Можно вставить список целиком.",
   "Fastest, but many ISPs block it": "самый быстрый, но многие провайдеры его блокируют",
   "Also checks whether the port is open": "заодно проверяет, открыт ли порт",
-  "Closest to real use. Requires a running VPN":
-    "ближе всего к реальной работе; нужен включённый VPN",
-  "Excludes handshake time. Requires a running VPN": "без учёта рукопожатия; нужен включённый VPN",
+  "Closest to real use. Needs VPN on": "ближе всего к реальной работе; нужен включённый VPN",
+  "Leaves out the handshake. Needs VPN on": "без учёта рукопожатия; нужен включённый VPN",
   "Never check": "Не определять",
   "Every week": "Раз в неделю",
   "Every month": "Раз в месяц",
@@ -676,11 +744,11 @@ const ru: Record<string, Entry> = {
   Firewall: "Брандмауэр",
   "Active: all traffic outside the tunnel is blocked":
     "работает: трафик в обход туннеля заблокирован",
-  "Enabled but inactive: requires TUN mode and a running VPN":
+  "On but idle: works only in TUN mode with VPN on":
     "включён, но не действует — работает только в режиме TUN при включённом VPN",
   "Blocks traffic outside VPN. If the client crashes, internet stays blocked until restart":
     "блокирует трафик в обход VPN. Если клиент упадёт, интернета не будет до перезапуска",
-  "WireGuard can be identified and blocked by its first packet. Junk packets obscure the handshake.":
+  "WireGuard can be spotted and blocked by its first packet. Junk packets before the handshake hide it.":
     "WireGuard распознают и блокируют по первому пакету. Мусорные пакеты перед рукопожатием мешают распознаванию.",
   "Latency check": "Замер задержки",
   "If the selected check fails, ICMP is tried. Fallback results appear in blue with an icon.":
@@ -688,7 +756,7 @@ const ru: Record<string, Entry> = {
   "Latency check method": "Чем мерить задержку",
   "Availability check": "Проверка доступности",
   "Health check URL": "Адрес проверки",
-  "Groups use this URL to check availability. Only HTTP 204 counts as a successful response":
+  "Groups check availability at this URL. Only HTTP 204 counts as success":
     "по нему группы проверяют доступность сервера; успешным считается только ответ 204",
   "Availability check URL": "Адрес проверки доступности",
   "Custom URL": "Свой адрес",
@@ -699,25 +767,22 @@ const ru: Record<string, Entry> = {
     "нет узлов hysteria2, tuic или wireguard",
   "Country flag": "Флаг страны",
   "Look up server country": "Определять страну сервера",
-  "Off: no addresses are shared; nodes have no country flags":
+  "Off: no addresses are sent anywhere, so no flags":
     "выключено: адреса никуда не отправляются, флагов не будет",
   "Only the server address is sent to ipinfo.io, at most once per selected interval":
     "на ipinfo.io отправляется только адрес сервера, не чаще выбранного интервала",
   "Country lookup interval": "Как часто спрашивать страну узла",
   Maintenance: "Обслуживание",
-  "Built-in rule sets": "Готовые правила",
-  "Domain lists placed below your rules. Your own rules always take priority.":
-    "готовые списки доменов под вашими правилами; ваши правила всегда важнее.",
   "Update core": "Обновить ядро",
-  "Downloads the official GitHub release. Disconnect before replacing the running core":
+  "From the official GitHub release. Disconnect before replacing the core":
     "из официального релиза на GitHub; перед заменой отключите VPN",
   "Client version": "Версия клиента",
   "Device ID": "Идентификатор устройства",
-  "HWID identifies this device to your provider. Each new ID uses a subscription device slot":
+  "HWID is how your provider knows this device. Each new one takes a device slot in the subscription":
     "HWID: по нему провайдер узнаёт устройство; каждый новый занимает место в подписке",
   Data: "Данные",
   "Clear fake-IP mappings": "Сбросить fake-IP",
-  "Reassigns addresses. Apps caching an old address may follow the wrong routing rule":
+  "Hands out addresses again. An app holding an old one may hit the wrong rule":
     "адреса будут выданы заново; приложение со старым адресом может попасть под другое правило",
   "Nothing to clear: domain-to-address mappings exist only while the core is running":
     "сбрасывать нечего: соответствия «домен — адрес» хранит только работающее ядро",
@@ -725,7 +790,7 @@ const ru: Record<string, Entry> = {
   "Deletes sources, rules, groups and settings. The core and HWID are kept":
     "удаляет источники, правила, группы и настройки; ядро и HWID сохраняются",
   "Reset everything?": "Точно сбросить?",
-  "Calls, games and QUIC use hysteria2, tuic or wireguard ({n} nodes). With vless and trojan, UDP uses TCP; a lost packet delays everything behind it.":
+  "Calls, games and QUIC go through hysteria2, tuic or wireguard ({n} nodes). Over vless and trojan, UDP rides inside TCP, and one lost packet holds up the rest.":
     "звонки, игры и QUIC пойдут через hysteria2, tuic или wireguard (сейчас таких узлов {n}). Через vless и trojan UDP идёт внутри TCP, и одна потеря задерживает всё остальное",
   Update: "Обновить",
   Reset: "Сбросить",
@@ -735,69 +800,19 @@ const ru: Record<string, Entry> = {
   "Restart reason": "причина перезапуска",
   none: "нет",
   "Administrator rights": "права администратора",
-  "Unsupported nodes": "неподдерживаемых",
-  "Edited nodes": "изменённых",
+  "Unsupported nodes": "узлов без поддержки",
+  "Edited nodes": "изменённых узлов",
   "Lifecycle hooks": "Хуки жизненного цикла",
   Follow: "Следить",
   "No steps yet": "Шагов пока нет",
-  "Connect VPN to see core startup, shutdown and periodic steps":
+  "Steps show up when the core starts and stops — turn VPN on":
     "шаги появятся при запуске и остановке ядра — включите VPN",
   Phase: "фаза",
   Step: "шаг",
   Time: "время",
-  Outcome: "исход",
+  Outcome: "результат",
   "Client state": "Состояние клиента",
   "{n} steps": "шагов {n}",
-  "DNS: fastest resolver": "DNS: самый быстрый",
-  "Queries public resolvers in parallel to compare responses and latency":
-    "опрашивает публичные резолверы параллельно и сравнивает ответы и задержку",
-  "Compares plain and encrypted DNS. Different answers may indicate DNS interception":
-    "сравнивает обычный и шифрованный DNS; разные ответы — признак подмены",
-  "System DNS": "DNS системы",
-  "Shows the DNS servers configured in Windows and used by other applications":
-    "DNS-серверы, заданные в Windows и используемые другими программами",
-  "Checks whether DNS requests bypass the tunnel using a nonexistent domain":
-    "проверяет несуществующим доменом, не уходят ли DNS-запросы в обход туннеля",
-  "External IP": "Внешний IP",
-  "Compares direct and tunneled public IP addresses. Matching addresses may indicate a VPN bypass":
-    "сравнивает внешний IP напрямую и через туннель; совпадение означает обход VPN",
-  "Outbound UDP": "UDP наружу",
-  "Checks UDP connectivity, required by hysteria2, tuic and wireguard":
-    "проверяет UDP; он нужен hysteria2, tuic и wireguard",
-  "Checks TLS connections to specific hostnames, which can be blocked independently of their IP addresses":
-    "проверяет TLS-соединения до конкретных имён: их могут блокировать отдельно от IP",
-  "Path MTU": "MTU пути",
-  "Finds the largest packet that reaches its destination without fragmentation":
-    "находит наибольший пакет, который доходит без фрагментации",
-  Speed: "Скорость",
-  Shaping: "Шейпинг",
-  "Compares direct and proxied download speeds. Downloads 12 MB per run":
-    "сравнивает скорость напрямую и через прокси; 12 МБ на прогон",
-  "Site availability": "Доступность сайтов",
-  Resources: "Ресурсы",
-  "Checks which sites require VPN. Edit the site list in its collection file":
-    "какие сайты открываются только через VPN; список правится в файле коллекции",
-  "Windows Firewall": "Брандмауэр Windows",
-  System: "Система",
-  "Checks whether Windows Firewall is enabled. Kill-switch cannot work without it":
-    "проверяет, включён ли брандмауэр; без него kill-switch не работает",
-  "System proxy": "Системный прокси",
-  "Shows the Windows proxy settings. Another proxy may divert traffic unexpectedly":
-    "показывает прокси в настройках Windows; чужой прокси может увести трафик",
-  "System clock": "Часы системы",
-  "Checks clock drift. VMess and VLESS with AEAD reject connections when the clock differs too much":
-    "проверяет расхождение часов; VMess и VLESS с AEAD отклоняют соединение при большой разнице",
-  Routes: "Маршруты",
-  "Shows the default route and other tunnels. A route with a lower metric can divert traffic":
-    "маршрут по умолчанию и другие туннели; маршрут с меньшей метрикой может увести трафик",
-  "Configuration tuning": "Подбор настроек",
-  "Compares DNS and sniffer combinations using a separate core instance":
-    "сравнивает сочетания DNS и сниффера на отдельном ядре, не трогая VPN",
-  "Checks system, gvisor and mixed stacks without capturing routes or interrupting internet access":
-    "проверяет стеки system, gvisor и mixed без захвата маршрутов; интернет не прерывается",
-  "Config check": "Проверка конфига",
-  "Checks whether the core accepts the generated config without starting VPN":
-    "проверяет, примет ли ядро собранный конфиг, без запуска VPN",
   "Client updates": "Обновления клиента",
   "Save or discard your edits before updating the client.":
     "Сохраните или отмените правки перед обновлением клиента.",
@@ -806,27 +821,31 @@ const ru: Record<string, Entry> = {
   "Downloading update…": "Скачивание обновления…",
   "Updates are unavailable in this build.": "В этой сборке обновления недоступны.",
   "You have the latest version.": "У вас последняя версия.",
-  "Checks on launch. Installation requires your confirmation.":
-    "Проверка при запуске. Установка — по вашему подтверждению.",
+  "Checks on launch; installs only when you say so.":
+    "Проверяется при запуске; установка — только с вашего согласия.",
   "Check for updates": "Проверить обновления",
   "Disconnect VPN and install?": "Отключить VPN и установить?",
   "Install update": "Установить обновление",
   "Mbit/s": "Мбит/с",
-  "qd is not downloaded yet": "qd ещё не скачан",
-  "It is fetched from the qd releases on GitHub and checked against the published checksum.":
-    "Скачивается из релизов qd на GitHub и сверяется с опубликованной контрольной суммой.",
-  "Download qd": "Скачать qd",
+  "qd engine": "Ядро qd",
+  "Turning it off deletes the qd program; its link and settings stay":
+    "Выключение удалит программу qd; ссылка и настройки останутся",
+  "Downloads qd from GitHub and shows the engine switch in the header":
+    "Скачивает qd с GitHub и показывает переключатель ядер в шапке",
+  "Downloading qd…": "Скачиваю qd…",
   "qd needs administrator rights": "qd нужны права администратора",
-  "It captures traffic through WinDivert, which only works for an elevated process.":
+  "It captures traffic with WinDivert, which only works with admin rights.":
     "Он перехватывает трафик через WinDivert, а это работает только с правами администратора.",
   "Restart as administrator": "Перезапустить от администратора",
   "{engine} is running now": "Сейчас работает {engine}",
   "Turning qd on stops {engine} first.": "Включение qd сначала остановит {engine}.",
-  "qd link imported": "Ссылка qd импортирована",
-  "Replace the qd link": "Заменить ссылку qd",
-  "One qd:// link from your provider. It carries the entry nodes and the network key.":
-    "Одна ссылка qd:// от провайдера: в ней узлы входа и ключ сети.",
+  "Adding the qd link…": "Добавляю ссылку qd…",
+  "qd link added": "Ссылка qd добавлена",
+  "qd takes the link once the client runs as administrator.":
+    "qd примет ссылку, когда клиент запустится от администратора.",
+  "qd link": "ссылка qd",
   "Subscription refreshed": "Подписка обновлена",
+  "Auto-refresh": "Автообновление",
   "qd link removed": "Ссылка qd удалена",
   "qd is not running": "qd не запущен",
   "Routing loads once qd is up.": "Маршрутизация загрузится, когда qd поднимется.",
@@ -849,7 +868,6 @@ const ru: Record<string, Entry> = {
     "не запущено — правило сработает по имени процесса",
   "Exit node": "Выходной узел",
   "traffic leaves through the exit node": "трафик выходит через выходной узел",
-  "qd stopped": "qd остановлен",
   "Umiray Settings": "Настройки клиента",
   "Mihomo Settings": "Настройки mihomo",
   Smart: "Авто",
@@ -858,12 +876,13 @@ const ru: Record<string, Entry> = {
     "при подключении самый быстрый из {n} узлов выиграет гонку",
   Exit: "Выход",
   "Entry node": "Входной узел",
+  "Entry nodes": "Входные узлы",
   "traffic leaves through the entry node": "трафик выходит через входной узел",
   Ads: "Реклама",
   Allow: "Показывать",
   Delay: "Задержка",
-  "Add the qd:// link in Sources.": "Добавьте ссылку qd:// в «Источниках».",
-  "Refresh the qd subscription": "Обновить подписку qd",
+  "Add the qd:// link from your provider. A new link replaces the current one.":
+    "Добавьте ссылку qd:// от провайдера. Новая ссылка заменяет текущую.",
   "qd picks the entry node itself.": "Входной узел qd выбирает сам.",
   "through the exit node": "через выходной узел",
   "through VPN, never the exit node": "через VPN, но не через выходной узел",
@@ -874,18 +893,160 @@ const ru: Record<string, Entry> = {
   "apps without a rule and traffic Windows sends on its own behalf":
     "приложения без правила и трафик, который Windows отправляет от своего имени",
   "until {date}": "до {date}",
-  "qd takes one link: a new one replaces the current subscription.":
-    "У qd одна ссылка: новая заменяет текущую подписку.",
-  "Add the qd:// link from your provider.": "Добавьте ссылку qd:// от провайдера.",
+  // Мастер первого запуска (D-162).
+  setup: "мастер настройки",
+  "umiray setup": "Настройка umiray",
+  Setup: "Способ",
+  Subscription: "Подписка",
+  "How to set up": "Как настроить",
+  Recommended: "Рекомендованная",
+  "I'll set it up myself": "Настрою сам",
+  "https://, vless://, hysteria2://… or qd:// — several can be added":
+    "https://, vless://, hysteria2://… или qd:// — можно несколько",
+  "No sources yet. You can skip this step and add them later with +.":
+    "Источников пока нет. Шаг можно пропустить и добавить их потом кнопкой +.",
+  "Needs administrator rights": "Нужны права администратора",
+  "Add a source first — then AUTO and nodes can be chosen.":
+    "Сначала добавьте источник — тогда можно выбрать AUTO и узлы.",
+  "Measuring resolvers…": "Меряю резолверы…",
+  "Measuring MTU…": "Меряю MTU…",
+  "Saving…": "Сохраняю…",
+  "Skip setup": "Пропустить",
+  Back: "Назад",
+  Next: "Далее",
+  Connect: "Подключить",
+  Done: "Готово",
+  "Setup wizard": "Мастер настройки",
+  "Settings picked": "Настройки подобраны",
+  "Not everything was picked": "Подобрано не всё",
+  "Sets up the core for every mode and picks DNS and MTU for this computer.":
+    "Настроит ядро сразу для всех режимов и подберёт DNS и MTU под этот компьютер.",
+  "Changes nothing. You can set everything up later in Settings.":
+    "Ничего не меняет. Всё можно настроить позже в «Настройках».",
+  "Checks public DNS servers and keeps the four fastest. The core asks all of them at once and takes the first answer.":
+    "Проверит публичные DNS-серверы и оставит четыре самых быстрых. Ядро спрашивает их все сразу и берёт первый ответ.",
+  "DNS filtering": "Фильтрация DNS",
+  "No filtering": "Без фильтров",
+  "Block ads": "Блокировка рекламы",
+  Any: "Любой",
+  "Servers that answer as is: nothing is blocked or replaced.":
+    "Серверы, которые отвечают как есть: ничего не блокируют и не подменяют.",
+  "Ad and tracker addresses don't resolve, so ads don't load in any app.":
+    "Адреса рекламы и трекеров не находятся — реклама не грузится ни в одном приложении.",
+  "The fastest of all, including ones that block ads or dangerous sites.":
+    "Самые быстрые из всех, в том числе те, что блокируют рекламу или опасные сайты.",
+  "Pick automatically": "Подобрать автоматически",
+  "measures public DNS servers and writes the four fastest; the core asks them all at once":
+    "опросит публичные DNS-серверы и запишет четыре самых быстрых — ядро спрашивает их все сразу",
+  Pick: "Подобрать",
+  "Finds the largest packet that gets through whole and leaves room for the tunnel header.":
+    "Найдёт самый крупный пакет, который проходит без дробления, и оставит место под заголовок туннеля.",
+  "What Recommended does": "Что сделает «Рекомендованная»",
+  "Sets up the core the same way for Proxy, System and TUN.":
+    "Настроит ядро одинаково для Proxy, System и TUN.",
+  "Ads and trackers won't load in the browser or in apps. DNS is picked only from servers that block ads, and the ad-blocking rules are turned on.":
+    "Реклама и трекеры не загрузятся ни в браузере, ни в программах. DNS подберётся только из серверов, которые режут рекламу, и включатся правила блокировки.",
+  "Ads are blocked": "Реклама блокируется",
+  "Ad blocking is off": "Блокировка рекламы выключена",
+  "Fine-tuning": "Тонкости",
+  "Each of these usually helps, but not on every computer. All of them stay in Mihomo Settings.":
+    "Обычно каждая из этих опций помогает, но не на любом компьютере. Все они потом есть в «Настройках mihomo».",
+  "Recognize sites by connection": "Узнавать сайт по соединению",
+  "Site rules also work for apps that connect by address, not by name. Rarely, an app stops working with it — then turn it off.":
+    "Правила для сайтов срабатывают и для программ, которые подключаются по адресу, а не по имени. Изредка какая-нибудь программа с этим не работает — тогда выключите.",
+  "DNS over HTTP/3": "DNS по HTTP/3",
+  "Names resolve faster if your provider lets QUIC through. If it blocks QUIC, the first lookup waits a moment and then goes the usual way.":
+    "Адреса находятся быстрее, если провайдер пропускает QUIC. Если не пропускает, первый запрос немного подождёт и пойдёт обычным путём.",
+  "Open NAT": "Открытый NAT",
+  "Games, calls and torrents connect to other people more easily. Works in TUN mode and adds a little load.":
+    "Играм, звонкам и торрентам проще соединяться с другими людьми. Работает в режиме TUN и немного добавляет нагрузки.",
+  "Writing the core config…": "Пишу конфиг ядра…",
+  "Everything is saved to Mihomo Settings, where you can change it.":
+    "Всё запишется в «Настройки mihomo» — там же можно поменять.",
+  "Subscription, capture and route, step by step. Your sources stay":
+    "Подписка, перехват и маршрут по шагам. Добавленные источники остаются",
+  Open: "Открыть",
+  "Export settings": "Экспорт настроек",
+  "A copy of the database with documents, sources and presets. Subscription addresses are inside; HWID is not":
+    "Копия базы с документами, источниками и наборами. Адреса подписок внутри, HWID — нет",
+  Export: "Экспорт",
+  "Settings saved to {path}": "Настройки сохранены в {path}",
   "qd Settings": "Настройки qd",
   "qd client settings": "скорость передачи и обновление qd",
   "Update qd": "Обновить qd",
   "Downloads the latest qd release and checks it against the published checksum. The connection drops for a moment.":
     "Скачивает последний релиз qd и сверяет контрольную сумму. Подключение на мгновение прервётся.",
   "qd updated": "qd обновлён",
-  "qd connection failed": "qd не подключился",
   Engine: "Ядро",
   "{engine} {version} downloaded": "{engine} {version} скачан",
+  // Rule sets (D-157)
+  "Rule set": "Rule set",
+  "A list of domains and subnets. Use it in a rule as RULE-SET.":
+    "Список доменов и подсетей. В правило он встаёт как RULE-SET.",
+  "Where from": "Откуда",
+  Catalog: "Каталог",
+  "By address": "По адресу",
+  "Blocked in Russia": "Заблокированное в России",
+  Services: "Сервисы",
+  "Russia — direct": "Россия — напрямую",
+  Other: "Прочее",
+  "already added": "уже добавлен",
+  "The catalog did not open": "Каталог не открылся",
+  "Everything is already added": "Всё уже добавлено",
+  "Empty — the file name from the address.": "Пусто — имя файла из адреса.",
+  "fetched {date}": "скачан {date}",
+  "Refresh all": "Обновить все",
+  "antizapret, antifilter, Telegram and more — from the catalog or by address.":
+    "antizapret, antifilter, Telegram и другие — из каталога или по адресу.",
+  "not refreshed": "не обновился",
+  "The source itself was last updated {date}.": "Сам источник обновлялся {date}.",
+  "Refresh «{name}»": "Обновить «{name}»",
+  "Open «{name}» on GitHub": "Открыть «{name}» на GitHub",
+  "The core downloads them from its geox-url.": "Ядро скачает их по своим geox-url.",
+  "Turn the VPN on — the core updates its databases itself.":
+    "Включите VPN — базы обновляет само ядро.",
+  "{n} subnets": ["{n} подсеть", "{n} подсети", "{n} подсетей"],
+  "Ready-made sets": "Готовые наборы",
+  "ready rules, each with its own exit you can change":
+    "подобранные правила — у каждого свой выход, его можно сменить",
+  "Where to send «{name}»": "Куда отправлять «{name}»",
+  "exits are set in its lines": "выходы заданы в его строках",
+  "«{name}» added to the route — save to apply.":
+    "«{name}» добавлен в маршрут — сохраните, чтобы применить.",
+  "downloaded lists of domains and subnets": "скачанные списки доменов и подсетей",
+  "No rule sets in this route": "В этом маршруте rule sets нет",
+  "not downloaded yet — press refresh": "ещё не скачан — нажмите «Обновить»",
+  "not downloaded": "не скачан",
+  "Remove «{name}» from the route": "Убрать «{name}» из маршрута",
+  "Routing page": "Страница маршрутизации",
+  "rule sets, ready-made sets and MATCH": "rule sets, готовые наборы и MATCH",
+  "Custom rules": "Свои правила",
+  "{n} above everything else": "{n} — выше всего остального",
+  "build-in — what the client adds itself": "build-in — то, что клиент ставит сам",
+  "core databases": "базы ядра",
+  "what GEOIP and GEOSITE rules read": "их читают правила GEOIP и GEOSITE",
+  "everything not matched above · umiray is the exit chosen in Connection":
+    "всё, что не совпало выше · umiray — выход, выбранный в «Соединении»",
+  "above rule sets and ready-made sets": "выше rule sets и готовых наборов",
+  "Routing is off: all traffic goes to the exit chosen in Connection.":
+    "Маршрутизация выключена: весь трафик идёт в выход, выбранный в «Соединении».",
+  "No custom rules": "Своих правил нет",
+  "Everything goes by the route: rule sets, ready-made sets and MATCH.":
+    "Всё идёт по маршруту: rule sets, готовые наборы и MATCH.",
+  "{n} lists": ["{n} список", "{n} списка", "{n} списков"],
+  High: "Высокий",
+  Medium: "Средний",
+  Low: "Низкий",
+  "above everything but your rules": "выше всего, кроме своих правил",
+  "rule sets above ready-made sets": "rule sets выше готовых наборов",
+  "just above MATCH": "сразу над MATCH",
+  "Priority of «{name}»": "Приоритет «{name}»",
+  "Top to bottom: your rules → high → medium → low → MATCH. Within a level, rule sets go before ready-made sets.":
+    "Сверху вниз: свои правила → высокий → средний → низкий → MATCH. На одном уровне rule sets выше готовых наборов.",
+  "Updated: {names}": "Обновлено: {names}",
+  "The databases are up to date — nothing new at the source.":
+    "Базы уже свежие — у источника нового нет.",
+  "{n} days old": ["{n} день", "{n} дня", "{n} дней"],
 };
 
 export default ru;

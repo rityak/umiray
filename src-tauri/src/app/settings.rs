@@ -9,10 +9,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::config::direction::Direction;
-use crate::config::mode::Mode;
 use crate::core::EngineId;
+use crate::db::{Db, Table};
 use crate::error::{AppError, Result};
-use crate::paths::Paths;
 
 /// Версия схемы. Растёт, когда меняется **смысл** существующего поля. Добавление нового поля
 /// с `#[serde(default)]` версию не двигает: старый файл читается как есть.
@@ -97,8 +96,14 @@ pub struct Settings {
     /// и меняет набор конфигов, поэтому у него своя команда.
     #[serde(default)]
     pub direction: Direction,
-    /// Ваш набор конфигов, активный в направлении `rules` (D-056). Пусто — своего набора
-    /// ещё нет: он заведётся при первой правке «Групп» или «Маршрутизации».
+    /// Работает ли маршрутизация (D-166): правила, rule sets и готовые наборы набора. Выключена —
+    /// всё уходит в выбранный выход. Включена по умолчанию: прежние версии держали списки
+    /// набора в любом направлении, и переезд не должен их молча погасить. В `Patch` её нет:
+    /// переключение доводится до ядра, у него своя команда.
+    #[serde(default = "enabled")]
+    pub routing: bool,
+    /// Набор маршрута, который действует при включённой маршрутизации (D-071). Пусто
+    /// или удалён — первый.
     #[serde(default)]
     pub preset: Option<String>,
     /// Какой узел выбран для направления `manual`. Помним сами: `profile.store-selected`
@@ -164,6 +169,10 @@ pub struct Settings {
     #[serde(default)]
     /// Какое ядро показывают разделы и поднимет кнопка питания (D-154).
     pub engine: EngineId,
+    /// Пройден ли мастер первого запуска (D-162). Закрытый мастер — тоже пройден: сам
+    /// он больше не откроется, вызывают его из настроек.
+    #[serde(default)]
+    pub setup: bool,
 }
 
 /// Что меняем в настройках. Ровно одна команда на все опции: с ростом их числа отдельная
@@ -186,11 +195,15 @@ pub struct Patch {
     pub auto_connect: Option<bool>,
     pub launch: Option<Launch>,
     pub admin_offer: Option<bool>,
+    pub setup: Option<bool>,
 }
 
 impl Patch {
     /// Накладывает только то, что пришло: отсутствующее поле остаётся прежним.
     pub fn apply(self, settings: &mut Settings) {
+        if let Some(setup) = self.setup {
+            settings.setup = setup;
+        }
         if let Some(engine) = self.engine {
             settings.engine = engine;
         }
@@ -235,6 +248,7 @@ impl Default for Settings {
         Self {
             version: VERSION,
             direction: Direction::default(),
+            routing: true,
             preset: None,
             refresh: Refresh::default(),
             selected: None,
@@ -251,41 +265,35 @@ impl Default for Settings {
             launch: Launch::default(),
             admin_offer: true,
             engine: EngineId::default(),
+            setup: false,
         }
     }
 }
 
+/// Строка настроек в таблице состояния (D-170).
+const ROW: &str = "settings";
+
 impl SettingsStore {
-    /// Читает настройки с диска. **Не падает никогда**: настройки — это поведение, и битый файл
-    /// должен стоить сброса к умолчаниям, а не неработающего приложения.
+    /// Читает настройки из базы. **Не падает никогда**: настройки — это поведение, и битая
+    /// запись должна стоить сброса к умолчаниям, а не неработающего приложения.
     pub fn load() -> Settings {
-        match std::fs::read_to_string(Paths::settings()) {
-            Ok(text) => decode(&text),
-            Err(_) => Settings::default(),
+        match Db::get(Table::State, ROW, "") {
+            Ok(Some(text)) => decode(&text),
+            _ => Settings::default(),
         }
     }
 
     pub fn save(settings: &Settings) -> Result<()> {
-        Paths::ensure_root()?;
         let text = serde_json::to_string_pretty(settings)
             .map_err(|e| AppError::Io(format!("Не удалось записать настройки: {e}")))?;
-        Ok(crate::atomic::AtomicFile::write(Paths::settings(), text)?)
-    }
-
-    pub fn load_v1() -> Option<V1> {
-        let text = std::fs::read_to_string(Paths::settings()).ok()?;
-        let value: serde_json::Value = serde_json::from_str(&text).ok()?;
-        if value.get("version")?.as_u64()? != 1 {
-            return None;
-        }
-        serde_json::from_value(value).ok()
+        Db::put(Table::State, ROW, "", &text)
     }
 }
 
-/// Хранилище настроек клиента (D-155): единственный, кто знает, где они лежат на диске.
+/// Хранилище настроек клиента (D-155): единственный, кто знает, где они лежат.
 ///
-/// В памяти, а не чтением файла на каждый вызов: статус опрашивается раз в 1.5 с,
-/// а меняются настройки только по действию пользователя. Диск читается один раз при старте.
+/// В памяти, а не чтением базы на каждый вызов: статус опрашивается раз в 1.5 с,
+/// а меняются настройки только по действию пользователя. База читается один раз при старте.
 pub struct SettingsStore(std::sync::Mutex<Settings>);
 
 impl SettingsStore {
@@ -301,13 +309,13 @@ impl SettingsStore {
         self.update(|settings| patch.apply(settings))
     }
 
-    /// Перечитать с диска. Нужно после сброса: файл переписали мимо `update`, и копия
+    /// Перечитать из базы. Нужно после сброса: запись переписали мимо `update`, и копия
     /// в памяти иначе осталась бы от прошлой жизни.
     pub fn reload(&self) {
         *self.0.lock().unwrap() = SettingsStore::load();
     }
 
-    /// Сначала диск, потом память: если запись не удалась, они не должны разъехаться.
+    /// Сначала база, потом память: если запись не удалась, они не должны разъехаться.
     ///
     /// Замок держится и на время записи: импорт подписки — асинхронная команда, и переключение
     /// режима во время неё выполнится параллельно. Читать-менять-писать без замка означало бы
@@ -322,17 +330,7 @@ impl SettingsStore {
     }
 }
 
-/// Настройки версии 1: адрес подписки лежал здесь, пока не было профилей.
-/// Читает только миграция — обычному чтению файл прошлой версии виден как «сбросить».
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct V1 {
-    pub mode: Mode,
-    #[serde(default)]
-    pub subscription: Option<String>,
-}
-
-/// Разбор отделён от чтения файла, чтобы правила проверялись обычным `cargo test`,
+/// Разбор отделён от чтения базы, чтобы правила проверялись обычным `cargo test`,
 /// не трогая настоящий `%LOCALAPPDATA%` пользователя.
 fn decode(text: &str) -> Settings {
     match serde_json::from_str::<Settings>(text) {
@@ -354,11 +352,22 @@ mod tests {
         assert!(json.contains("\"version\":2"), "{json}");
     }
 
+    /// D-166: файл, где выбран `rules`, не сбрасывается к умолчаниям — это `auto`
+    /// с включённой маршрутизацией, ровно как оно и работало.
+    #[test]
+    fn the_rules_direction_of_older_files_keeps_its_meaning() {
+        let settings = decode(r#"{"version":2,"direction":"rules","theme":"purple"}"#);
+        assert_eq!(settings.direction, Direction::Auto);
+        assert!(settings.routing);
+        assert_eq!(settings.theme, Theme::Purple, "остальное не сброшено");
+    }
+
     #[test]
     fn saved_settings_read_back_the_same() {
         let settings = Settings {
             version: VERSION,
             direction: Direction::Manual,
+            routing: false,
             preset: Some("0123456789abcdef".into()),
             refresh: Refresh {
                 on_start: false,
@@ -378,6 +387,7 @@ mod tests {
             launch: Launch::Tray,
             admin_offer: false,
             engine: EngineId::Qd,
+            setup: true,
         };
         let json = serde_json::to_string_pretty(&settings).unwrap();
         assert_eq!(decode(&json), settings);
@@ -408,6 +418,10 @@ mod tests {
         assert!(
             settings.admin_offer,
             "файл прошлой сборки об отказе не знает"
+        );
+        assert!(
+            !settings.setup,
+            "мастер не пройден; откроется он, только если нет источников (D-162)"
         );
     }
 
@@ -442,6 +456,14 @@ mod tests {
         assert_eq!(settings.theme, Theme::Purple);
         assert!(settings.effects, "чего не прислали, то не тронуто");
         assert_eq!(settings.refresh, Refresh::default());
+
+        let patch: Patch = serde_json::from_str(r#"{"setup":true}"#).unwrap();
+        patch.apply(&mut settings);
+        assert!(
+            settings.setup,
+            "мастер отмечается пройденным из окна (D-162)"
+        );
+        assert_eq!(settings.theme, Theme::Purple);
     }
 
     /// Размытие приходит из вебвью, и число оттуда — недоверенное: больше предела не пишем,

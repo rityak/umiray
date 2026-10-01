@@ -33,13 +33,9 @@
 /* Touches of our own styling (D-142): only the kit's roles, no colours of our own.
    The design language lives in the style guide. */
 @layer components {
-  /* Cards own scrolling; reserve the actual dock height in both shell layouts. */
+  /* Cards own scrolling. */
   .um-shell .rk-shell-content {
     overflow: hidden;
-  }
-
-  .um-shell[data-variant="inset"] .rk-shell-content[data-dock] {
-    padding-bottom: calc(var(--rk-dock-height) + var(--rk-shell-gap) * 2);
   }
 
   .um-rate.rk-stat {
@@ -68,21 +64,36 @@
     animation: um-enter var(--rk-dur) var(--rk-ease-out);
   }
 
+  /* Engine switch (D-154): the window crossfades as a whole, at the pace of the kit's
+     sliding indicators, instead of the section fading in from zero (it is not remounted).
+     Dock items slide to their new places; the title bar is shown live — its thumb slides
+     by itself, and a fading copy of it would trail behind. */
+  ::view-transition-group(*) {
+    animation-duration: var(--rk-dur-slow);
+    animation-timing-function: var(--rk-ease-out);
+  }
+
+  .um-shell .rk-dock-item {
+    view-transition-name: match-element;
+  }
+
+  .um-shell .rk-titlebar {
+    view-transition-name: um-titlebar;
+  }
+
+  ::view-transition-old(um-titlebar) {
+    display: none;
+  }
+
+  ::view-transition-new(um-titlebar) {
+    animation: none;
+  }
+
   @keyframes um-enter {
     from {
       opacity: 0;
       transform: translateY(4px);
     }
-  }
-
-  .um-shell .rk-dock-item[aria-selected="true"]:hover {
-    background: transparent;
-    color: var(--rk-on-inverse);
-  }
-
-  /* Multi-line fields must not clip their text with the pill preset. */
-  .rk-textarea {
-    border-radius: min(var(--rk-radius-control), calc(var(--rk-h-md) / 2));
   }
 
   .um-rule-values {

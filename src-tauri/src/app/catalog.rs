@@ -62,16 +62,34 @@ impl Catalog {
         if method == Method::ProxyKeepalive {
             self.pings.lock().unwrap().clear();
         }
-        let table =
-            crate::app::measure::Measure::run(&nodes, &state.mihomo, method, &|address, reply| {
-                self.pings
-                    .lock()
-                    .unwrap()
-                    .insert(address.to_string(), reply);
-            })
-            .await?;
+        let table = self.sweep(state, &nodes, method).await?;
         *self.pings.lock().unwrap() = table;
         Ok(())
+    }
+
+    /// Померить узлы одного источника — только что добавленного — и дописать к таблице:
+    /// остальные числа никто не просил перемерять.
+    pub async fn measure_source(&self, state: &AppState, source: &str) -> Result<()> {
+        let method = crate::app::client::ClientConfig::ping()?;
+        let nodes: Vec<Node> = self
+            .nodes()
+            .into_iter()
+            .filter(|node| node.source == source)
+            .collect();
+        let table = self.sweep(state, &nodes, method).await?;
+        self.pings.lock().unwrap().extend(table);
+        Ok(())
+    }
+
+    /// Замер с выдачей по ходу: последовательный способ кладёт числа в таблицу сразу.
+    async fn sweep(&self, state: &AppState, nodes: &[Node], method: Method) -> Result<ping::Table> {
+        crate::app::measure::Measure::run(nodes, &state.mihomo, method, &|address, reply| {
+            self.pings
+                .lock()
+                .unwrap()
+                .insert(address.to_string(), reply);
+        })
+        .await
     }
 
     /// Сколько часов помнить страну узла (D-084). Записать срок и сразу же спросить о том,

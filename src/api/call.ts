@@ -24,7 +24,7 @@ export function asAppError(raw: unknown): AppError {
   // баннере. Сырую строку кладём в `details`, где ей и место (D-028).
   return {
     kind: "unknown",
-    message: t("Something went wrong inside the client."),
+    message: t("Internal client error."),
     details: [String(raw)],
   };
 }
@@ -48,7 +48,7 @@ export async function call<T extends z.ZodType>(
   if (parsed.success) return parsed.data;
   throw {
     kind: "unexpected",
-    message: t("Unexpected backend response — update the whole client."),
+    message: t("Unexpected response from the backend — reinstall the client."),
     details: [command, z.prettifyError(parsed.error)],
   } satisfies AppError;
 }

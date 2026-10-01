@@ -6,6 +6,7 @@ mod collections;
 mod commands;
 mod config;
 mod core;
+mod db;
 mod diag;
 mod error;
 mod http;
@@ -13,11 +14,13 @@ mod http;
 #[cfg(test)]
 mod layers;
 // Живые проверки: настоящий каталог, настоящее ядро, настоящая сеть. В сборку не входят.
+mod lists;
 #[cfg(test)]
 mod live;
 mod nodes;
 mod paths;
 mod render;
+mod slug;
 mod stamp;
 mod system;
 mod yaml;
@@ -28,9 +31,11 @@ use app::state::AppState;
 use app::tray;
 
 fn main() {
-    // Stable runs from its installation directory. A build launched elsewhere hands off
-    // before the scheduled task and the single-instance plugin see the wrong binary.
-    if system::install::Installation::handoff() {
+    // Клиент работает только из каталога данных (D-171): сборка из другого места кладёт
+    // себя туда и запускает копию — до того, как задача и плагин одиночного запуска
+    // увидели бы не тот бинарь.
+    let context = app::boot::Boot::context();
+    if system::install::Installation::handoff(&context.config().identifier) {
         return;
     }
     // Клиент должен работать с правами, а работает без них — поднимаем себя задачей
@@ -45,7 +50,12 @@ fn main() {
         .manage(app::updates::Updates::default())
         // Вторая копия не поднимается: она показывает окно уже работающей. Без этого
         // трей ломает обычный сценарий — «закрыл окно, запустил ярлык снова» (D-046).
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // Новая версия просит уступить место (B-027): выход штатный, как из трея.
+            if system::install::Installation::asked_to_leave(&args) {
+                app.exit(0);
+                return;
+            }
             tray::Tray::show(app);
         }))
         .setup(|app| {
@@ -87,10 +97,7 @@ fn main() {
             commands::client::client_mask_set,
             commands::client::client_health_get,
             commands::client::client_health_set,
-            commands::diag::diag_tools,
-            commands::diag::diag_run,
             commands::diag::diag_apply,
-            commands::diag::diag_providers,
             commands::advanced::advanced_get,
             commands::advanced::advanced_set,
             commands::config::config_list,
@@ -108,7 +115,14 @@ fn main() {
             commands::udp::udp_get,
             commands::udp::udp_set,
             commands::rulesets::rulesets_write,
-            commands::rulesets::rulesets_set,
+            commands::lists::lists_list,
+            commands::lists::lists_catalog,
+            commands::lists::lists_fetch,
+            commands::lists::lists_add_url,
+            commands::lists::lists_refresh,
+            commands::lists::lists_ensure,
+            commands::lists::geo_files,
+            commands::lists::geo_update,
             commands::rules::rules_parse,
             commands::rules::rules_render,
             commands::rules::rules_processes,
@@ -119,6 +133,7 @@ fn main() {
             commands::sources::sources_add_proxy_text,
             commands::sources::sources_proxy_yaml,
             commands::sources::sources_add_file,
+            commands::sources::sources_add_warp,
             commands::sources::sources_refresh,
             commands::sources::sources_refresh_all,
             commands::sources::sources_delete,
@@ -127,6 +142,8 @@ fn main() {
             commands::nodes::nodes_list,
             commands::nodes::nodes_ping,
             commands::direction::direction_set,
+            commands::direction::routing_set,
+            commands::direction::routing_ads_set,
             commands::connection::connection_snapshot,
             commands::presets::presets_list,
             commands::presets::presets_create,
@@ -143,21 +160,25 @@ fn main() {
             commands::system::system_autostart_set,
             commands::system::system_always_admin_set,
             commands::system::system_reset,
+            commands::system::system_export,
             commands::system::system_device,
             commands::system::system_language,
+            commands::system::system_open_github,
             commands::updates::updates_check,
             commands::updates::updates_install,
             commands::core::core_start,
             commands::core::core_stop,
             commands::qd::qd_status,
             commands::qd::qd_call,
+            commands::qd::qd_adopt,
+            commands::qd::qd_remove,
             commands::qd::qd_rules_export,
             commands::qd::qd_rules_import,
             commands::core::core_restart,
             commands::core::core_traffic,
             commands::core::core_flush_fake_ip
         ])
-        .build(app::boot::Boot::context())
+        .build(context)
         .expect("не удалось собрать приложение")
         .run(|app, event| {
             // Гасим ядро сами и снимаем системный прокси. Клетка (D-058) прибила бы его

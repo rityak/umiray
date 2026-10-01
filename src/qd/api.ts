@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { type Node as AppNode, call } from "../api";
+import { type Node as AppNode, call, done } from "../api";
 
 export const Node = z.object({
   id: z.number(),
@@ -112,6 +112,23 @@ const ask = <T extends z.ZodType>(
 ) => call(schema, "qd_call", { method, path, body: body ?? null });
 
 export const status = () => call(Status, "qd_status");
+
+/// Ссылка qd — та, что отдаёт `adopt`. Остальное в поле добавления — источник mihomo.
+/// Схема ссылки регистра не различает (RFC 3986): `QD://` — тоже ссылка qd, а не узел mihomo.
+export const isLink = (input: string) => input.trim().toLowerCase().startsWith("qd://");
+
+export const Adopted = z.object({
+  /// Версия qd, если его пришлось скачать ради ссылки.
+  downloaded: z.string().nullable(),
+  /// Прав нет: ссылка ждёт первого подъёма qd (D-161).
+  pending: z.boolean(),
+});
+export type Adopted = z.infer<typeof Adopted>;
+
+/// Ссылка `qd://` из любого поля добавления: qd скачивается, если его нет (D-161).
+export const adopt = (link: string) => call(Adopted, "qd_adopt", { link });
+/// Выключить qd — удалить бинарь. Работающий не удаляется.
+export const remove = () => call(done, "qd_remove");
 
 export const nodes = () => ask(z.array(Node), "GET", "/client/api/nodes");
 export const toggle = (patch: { egress?: boolean; adblock?: boolean }) =>

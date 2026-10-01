@@ -3,16 +3,16 @@ import * as api from "../api";
 import { QD_SETTINGS } from "../engines";
 import { t } from "../i18n";
 import { failure, type Message, notice } from "../shell/Banner";
+import type { AddKind } from "../sources/AddMenu";
 import QdConnection from "./QdConnection";
 import QdRouting from "./QdRouting";
 import QdSettings from "./QdSettings";
-import QdSource from "./QdSource";
 import type { Qd } from "./useQd";
 
 type Own = { id: string; render: (start: React.ReactNode) => React.ReactNode };
 
 type Props = {
-  /// The open section: a fixed one (`connection`, `sources`) or a config section.
+  /// The open section: `connection` or a config section.
   tab: string;
   section: api.ConfigSection | undefined;
   qd: Qd;
@@ -21,9 +21,7 @@ type Props = {
   onPower: () => void;
   hidden: boolean;
   onHidden: () => void;
-  focus: boolean;
-  onFocused: () => void;
-  onAdd: () => void;
+  onAdd: (kind: AddKind) => void;
   onElevate: () => void;
   onMessage: (message: Message | null) => void;
   /// The shared config editor (client settings live there for every engine), with qd's own
@@ -42,14 +40,13 @@ export default function QdSection({
   onPower,
   hidden,
   onHidden,
-  focus,
-  onFocused,
   onAdd,
   onElevate,
   onMessage,
   config,
 }: Props) {
-  const install = useCallback(async () => {
+  /// Обновить qd — из его настроек. Скачивают его ссылка и тумблер (D-161), не этот раздел.
+  const update = useCallback(async () => {
     onMessage(null);
     try {
       const version = await api.coreInstall("qd");
@@ -72,22 +69,10 @@ export default function QdSection({
         powering={powering}
         onPower={onPower}
         onChanged={qd.reload}
-        onInstall={install}
         onElevate={onElevate}
         onAdd={onAdd}
-        onMessage={onMessage}
-      />
-    );
-  }
-  if (tab === "sources") {
-    return (
-      <QdSource
-        state={qd.status?.state ?? null}
         hidden={hidden}
         onHidden={onHidden}
-        focus={focus}
-        onFocused={onFocused}
-        onChanged={qd.reload}
         onMessage={onMessage}
       />
     );
@@ -97,7 +82,7 @@ export default function QdSection({
     return config({
       id: QD_SETTINGS,
       render: (start) => (
-        <QdSettings live={live} start={start} onInstall={install} onMessage={onMessage} />
+        <QdSettings live={live} start={start} onInstall={update} onMessage={onMessage} />
       ),
     });
   }

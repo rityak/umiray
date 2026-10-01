@@ -1,14 +1,19 @@
 import { CornerDownRight, Plus } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Button, Card, ChipGroup, Divider, EmptyState, Stat, Text } from "rootik";
+import { Button, Card, ChipGroup, Divider, EmptyState, SegmentedControl, Text } from "rootik";
 import * as api from "../api";
 import { useCached } from "../hooks/useCached";
 import { t } from "../i18n";
 import { failure, type Message } from "../shell/Banner";
-import BuiltinRules from "./BuiltinRules";
+import GeoBases from "./GeoBases";
 import { targetLook } from "./kinds";
+import ReadySets from "./ReadySets";
 import RuleRow from "./RuleRow";
+import RuleSets from "./RuleSets";
 import TargetPicker from "./TargetPicker";
+
+/// Две страницы одного документа (D-158): маршрут над своими правилами и сами правила.
+type Page = "route" | "custom";
 
 type Props = {
   /// Черновик документа — тот же, что открыт в коде (D-074).
@@ -16,6 +21,8 @@ type Props = {
   onDraft: (text: string) => void;
   onMessage: (message: Message | null) => void;
   onPending: (pending: boolean) => void;
+  /// The core is running — rule sets need it to update the core's geo databases.
+  running: boolean;
 };
 
 /// Виды правил в списке. Не весь список ядра — распространённое; чего здесь нет, форма
@@ -36,7 +43,7 @@ const KINDS = [
 /// и в никуда.
 const TARGETS = ["umiray", "AUTO", "DIRECT", "REJECT"];
 
-const EMPTY: api.Routing = { rules: [], fallback: "umiray" };
+const EMPTY: api.Routing = { rules: [], fallback: "umiray", ruleSets: [], ready: [] };
 
 let kept: { text: string; routing: api.Routing } | null = null;
 
@@ -46,13 +53,15 @@ function unique(items: string[]): string[] {
 }
 
 /**
- * Раздел «Маршрутизация» формой.
+ * Раздел «Маршрутизация» формой — две страницы одного документа (D-158). «Маршрут»:
+ * rule sets, готовые наборы и build-in (MATCH). «Свои правила»: строки над ними. Всё это
+ * действует, пока маршрутизация включена (D-166). Код у страниц общий.
  *
  * Порядок здесь — это и есть смысл: побеждает первое совпавшее сверху. Поэтому фишки
  * назначений сверху **фильтруют**, а не перекладывают: номера остаются общими для всего
  * списка, и по ним видно, что выше и что ниже спрятанного.
  */
-export default function RulesForm({ text, onDraft, onMessage, onPending }: Props) {
+export default function RulesForm({ text, onDraft, onMessage, onPending, running }: Props) {
   const [routing, setRouting] = useState<api.Routing>(() =>
     kept?.text === text ? kept.routing : EMPTY,
   );
@@ -61,6 +70,9 @@ export default function RulesForm({ text, onDraft, onMessage, onPending }: Props
   /// Узлы как второй список «куда» (D-082). Спрашиваем у бэкенда, а не считаем из групп:
   /// состав узлов знает каталог источников, а не документ.
   const [nodes, setNodes] = useCached<string[]>("rules.nodes", []);
+  /// Downloaded rule sets by name — what a hand-written `RULE-SET` rule can point at (D-157).
+  const [lists, setLists] = useCached<string[]>("rules.lists", []);
+  const [page, setPage] = useCached<Page>("rules.page", "route");
   const [filter, setFilter] = useState("all");
   const [refused, setRefused] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
@@ -90,6 +102,10 @@ export default function RulesForm({ text, onDraft, onMessage, onPending }: Props
     api.nodesList().then(
       (list) => setNodes(list.filter((node) => node.supported).map((node) => node.name)),
       () => setNodes([]),
+    );
+    api.listsList().then(
+      (list) => setLists(list.map((item) => item.id)),
+      () => setLists([]),
     );
   }, []);
 
@@ -151,7 +167,7 @@ export default function RulesForm({ text, onDraft, onMessage, onPending }: Props
         <EmptyState
           tone="warn"
           title={t("This document can only be edited as code")}
-          hint={`${refused} ${t("Open Code view to edit the original document without losing anything.")}`}
+          hint={`${refused} ${t("Open Code to edit the document without losing anything.")}`}
         />
       </Card>
     );
@@ -163,9 +179,10 @@ export default function RulesForm({ text, onDraft, onMessage, onPending }: Props
     ...TARGETS,
     ...groups,
     ...routing.rules.map((rule) => rule.target),
+    ...routing.ruleSets.map((set) => set.target),
+    ...routing.ready.flatMap((set) => (set.target ? [set.target] : [])),
   ]).filter((target) => !nodes.includes(target));
   const kinds = unique([...KINDS, ...routing.rules.map((rule) => rule.kind)]);
-  const lines = routing.rules.reduce((sum, rule) => sum + rule.values.length, 0);
   const seen = unique(routing.rules.map((rule) => rule.target));
   const shown = routing.rules
     .map((rule, index) => ({ rule, index }))
@@ -182,134 +199,164 @@ export default function RulesForm({ text, onDraft, onMessage, onPending }: Props
     commit({ ...routing, rules: next });
   };
 
-  const through = routing.rules.filter(
-    (rule) => targetLook(rule.target, nodes).tone !== "neutral" && rule.target !== "REJECT",
-  ).length;
-  const past = routing.rules.filter((rule) => rule.target === "DIRECT").length;
-  const blocked = routing.rules.filter((rule) => rule.target === "REJECT").length;
   const fallback = targetLook(routing.fallback, nodes);
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Сводка: сколько правил куда ведёт — ответ на «что вообще настроено» одним взглядом. */}
-      <Card padding="sm">
-        <div className="grid grid-cols-4 gap-3 max-[640px]:grid-cols-2">
-          <Stat
-            size="sm"
-            label={t("Rules")}
-            value={routing.rules.length}
-            hint={t("config lines: {n}", { n: lines })}
-          />
-          <Stat size="sm" label={t("Through VPN")} value={through} />
-          <Stat size="sm" label={t("Bypass VPN")} value={past} />
-          <Stat size="sm" label={t("Block")} value={blocked} />
-        </div>
-      </Card>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <ChipGroup
-          single
-          size="sm"
-          aria-label={t("Filter rules by target")}
-          value={[filter]}
-          onChange={(next) => setFilter(next[0] ?? "all")}
-          options={[
-            { value: "all", label: t("All"), count: routing.rules.length },
-            ...seen.map((id) => ({
-              value: id,
-              label: id,
-              icon: (() => {
-                const { Icon } = targetLook(id, nodes);
-                return <Icon />;
-              })(),
-              count: routing.rules.filter((rule) => rule.target === id).length,
-            })),
-          ]}
-        />
-        <span className="flex-1" />
-        {/* «Сверху вниз» уже сказано в полосе набора; здесь — только то, что зависит от фильтра. */}
-        {(routing.rules.length === 0 || filter !== "all") && (
-          <Text tone="muted" size="xs" className="block">
-            {routing.rules.length === 0
-              ? t("no rules — all traffic goes to MATCH below")
-              : t("only → {target}; order and numbering are shared", { target: filter })}
-          </Text>
-        )}
-      </div>
-
-      {shown.map((row) => (
-        <RuleRow
-          // Ключ по месту: правила не имеют своего имени, а перестановка меняет место.
-          key={row.index}
-          rule={row.rule}
-          no={row.index + 1}
-          kinds={kinds}
-          targets={targets}
-          nodes={nodes}
-          first={row.index === 0}
-          last={row.index === routing.rules.length - 1}
-          open={expanded === row.index}
-          onToggle={() => setExpanded((was) => (was === row.index ? null : row.index))}
-          onChange={(rule) =>
-            commit({
-              ...routing,
-              rules: routing.rules.map((item, at) => (at === row.index ? rule : item)),
-            })
-          }
-          onMove={(delta) => move(row.index, delta)}
-          onRemove={() => {
-            setExpanded((was) =>
-              was === null || was < row.index ? was : was === row.index ? null : was - 1,
-            );
-            commit({
-              ...routing,
-              rules: routing.rules.filter((_, at) => at !== row.index),
-            });
-          }}
-        />
-      ))}
-
-      <Button
-        className="self-start"
-        icon={<Plus />}
-        onClick={() => {
-          setFilter("all");
-          setExpanded(routing.rules.length);
-          commit({
-            ...routing,
-            rules: [
-              ...routing.rules,
-              { kind: KINDS[0], values: [], target: targets[0], options: [] },
-            ],
-          });
-        }}
-      >
-        {t("Rule")}
-      </Button>
-
-      {/* Готовые наборы стоят там, куда попадут: ниже ваших правил и выше MATCH (D-083). */}
-      <Divider label={t("below your rules — built-in sets and MATCH")} />
-      <BuiltinRules />
-
-      {/* MATCH — дно списка, а не его строка: не двигается и не удаляется. */}
-      <Card
-        padding="sm"
-        iconTone={fallback.tone}
-        icon={<CornerDownRight />}
-        title="MATCH"
-        description={t("everything that did not match above")}
-        actions={
-          <div className="w-[230px]">
-            <TargetPicker
-              value={routing.fallback}
-              groups={targets}
-              nodes={nodes}
-              label={t("Where to send everything else")}
-              onChange={(fallback) => commit({ ...routing, fallback })}
-            />
-          </div>
-        }
+      <SegmentedControl
+        aria-label={t("Routing page")}
+        fill
+        options={[
+          { value: "route", label: t("Route"), hint: t("rule sets, ready-made sets and MATCH") },
+          {
+            value: "custom",
+            label: t("Custom rules"),
+            hint: t("{n} above everything else", { n: routing.rules.length }),
+          },
+        ]}
+        value={page}
+        onChange={(next) => setPage(next as Page)}
       />
+
+      {page === "route" ? (
+        <>
+          <Text tone="muted" size="xs" className="block">
+            {t(
+              "Top to bottom: your rules → high → medium → low → MATCH. Within a level, rule sets go before ready-made sets.",
+            )}
+          </Text>
+          <RuleSets
+            entries={routing.ruleSets}
+            onChange={(ruleSets) => commit({ ...routing, ruleSets })}
+            targets={targets}
+            nodes={nodes}
+            onMessage={onMessage}
+          />
+          <ReadySets
+            ready={routing.ready}
+            onChange={(ready) => commit({ ...routing, ready })}
+            targets={targets}
+            nodes={nodes}
+            onMessage={onMessage}
+          />
+
+          {/* Build-in — то, что клиент ставит сам (D-158): дно маршрута и базы ядра. */}
+          <Divider label={t("build-in — what the client adds itself")} />
+          {/* MATCH — дно списка, а не его строка: не двигается и не удаляется. */}
+          <Card
+            padding="sm"
+            iconTone={fallback.tone}
+            icon={<CornerDownRight />}
+            title="MATCH"
+            description={t(
+              "everything not matched above · umiray is the exit chosen in Connection",
+            )}
+            actions={
+              <div className="w-[230px]">
+                <TargetPicker
+                  value={routing.fallback}
+                  groups={targets}
+                  nodes={nodes}
+                  label={t("Where to send everything else")}
+                  onChange={(fallback) => commit({ ...routing, fallback })}
+                />
+              </div>
+            }
+          />
+          {/* Базы ядра — не строка маршрута: отдельно от build-in, последними. */}
+          <Divider label={t("core databases")} />
+          <GeoBases running={running} onMessage={onMessage} />
+        </>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <ChipGroup
+              single
+              size="sm"
+              aria-label={t("Filter rules by target")}
+              value={[filter]}
+              onChange={(next) => setFilter(next[0] ?? "all")}
+              options={[
+                { value: "all", label: t("All"), count: routing.rules.length },
+                ...seen.map((id) => ({
+                  value: id,
+                  label: id,
+                  icon: (() => {
+                    const { Icon } = targetLook(id, nodes);
+                    return <Icon />;
+                  })(),
+                  count: routing.rules.filter((rule) => rule.target === id).length,
+                })),
+              ]}
+            />
+            <span className="flex-1" />
+            <Text tone="muted" size="xs" className="block">
+              {filter !== "all"
+                ? t("only → {target}; order and numbering are shared", { target: filter })
+                : t("above rule sets and ready-made sets")}
+            </Text>
+          </div>
+
+          {shown.map((row) => (
+            <RuleRow
+              // Ключ по месту: правила не имеют своего имени, а перестановка меняет место.
+              key={row.index}
+              rule={row.rule}
+              no={row.index + 1}
+              kinds={kinds}
+              targets={targets}
+              nodes={nodes}
+              lists={lists}
+              first={row.index === 0}
+              last={row.index === routing.rules.length - 1}
+              open={expanded === row.index}
+              onToggle={() => setExpanded((was) => (was === row.index ? null : row.index))}
+              onChange={(rule) =>
+                commit({
+                  ...routing,
+                  rules: routing.rules.map((item, at) => (at === row.index ? rule : item)),
+                })
+              }
+              onMove={(delta) => move(row.index, delta)}
+              onRemove={() => {
+                setExpanded((was) =>
+                  was === null || was < row.index ? was : was === row.index ? null : was - 1,
+                );
+                commit({
+                  ...routing,
+                  rules: routing.rules.filter((_, at) => at !== row.index),
+                });
+              }}
+            />
+          ))}
+
+          {routing.rules.length === 0 && (
+            <EmptyState
+              size="sm"
+              title={t("No custom rules")}
+              hint={t("Everything goes by the route: rule sets, ready-made sets and MATCH.")}
+            />
+          )}
+
+          <Button
+            className="self-start"
+            icon={<Plus />}
+            onClick={() => {
+              setFilter("all");
+              setExpanded(routing.rules.length);
+              commit({
+                ...routing,
+                rules: [
+                  ...routing.rules,
+                  { kind: KINDS[0], values: [], target: targets[0], options: [] },
+                ],
+              });
+            }}
+          >
+            {t("Rule")}
+          </Button>
+        </>
+      )}
     </div>
   );
 }

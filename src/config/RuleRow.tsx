@@ -6,12 +6,14 @@ import {
   ChevronDown,
   ChevronUp,
   Ellipsis,
+  Plus,
   Trash2,
 } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 import {
   Button,
   Card,
+  Checkbox,
   Field,
   IconButton,
   Menu,
@@ -26,7 +28,7 @@ import * as api from "../api";
 import { t, tn } from "../i18n";
 import ProcessPicker from "../shell/ProcessPicker";
 import { targetLook } from "./kinds";
-import { ruleValues } from "./rule-values";
+import { resolves, retyped, ruleValues, withNoResolve } from "./rule-values";
 import TargetPicker from "./TargetPicker";
 
 /// The value field's placeholder depends on the rule kind: "github.com" and "192.168.0.0/16"
@@ -39,7 +41,7 @@ const PLACEHOLDER: Record<string, string> = {
   GEOIP: "RU",
   "PROCESS-NAME": "python.exe\nnode.exe",
   "DOMAIN-REGEX": "^example[0-9]{1,3}\\.org$",
-  "RULE-SET": "my-rules",
+  "RULE-SET": "antizapret",
 };
 
 function valuesLabel(kind: string): string {
@@ -56,6 +58,7 @@ function valuesCount(kind: string, n: number): string {
   if (kind.includes("REGEX")) return tn(n, "{n} expression", "{n} expressions");
   if (kind.startsWith("DOMAIN")) return tn(n, "{n} domain", "{n} domains");
   if (kind.startsWith("PROCESS")) return tn(n, "{n} process", "{n} processes");
+  if (kind === "RULE-SET") return tn(n, "{n} list", "{n} lists");
   return tn(n, "{n} value", "{n} values");
 }
 
@@ -66,6 +69,9 @@ type Props = {
   kinds: string[];
   targets: string[];
   nodes: string[];
+  /// Downloaded rule sets (D-157): a `RULE-SET` rule offers them instead of making you
+  /// remember the name.
+  lists: string[];
   first: boolean;
   last: boolean;
   open: boolean;
@@ -85,6 +91,7 @@ export default function RuleRow({
   kinds,
   targets,
   nodes,
+  lists,
   first,
   last,
   open,
@@ -120,7 +127,7 @@ export default function RuleRow({
         <Select
           aria-label={t("Rule {no} kind", { no })}
           value={rule.kind}
-          onChange={(kind) => onChange({ ...rule, kind })}
+          onChange={(kind) => onChange(retyped(rule, kind))}
           options={kinds.map((kind) => ({ value: kind, label: kind }))}
         />
         <button
@@ -188,7 +195,10 @@ export default function RuleRow({
       </div>
       <div id={panelId} hidden={!open}>
         {open && (
-          <Field label={valuesLabel(rule.kind)} hint={t("One value per line. Paste a whole list.")}>
+          <Field
+            label={valuesLabel(rule.kind)}
+            hint={t("One value per line. You can paste a whole list.")}
+          >
             <div className="flex flex-col items-start gap-2">
               <Textarea
                 className="um-rule-values w-full resize-y"
@@ -204,10 +214,46 @@ export default function RuleRow({
                   onChange({ ...rule, values: ruleValues(next) });
                 }}
               />
+              {resolves(rule.kind) && (
+                <Checkbox
+                  label="no-resolve"
+                  description={t(
+                    "don't look up a site's address just for this rule: a connection that came with a name skips it and goes to the next rule",
+                  )}
+                  checked={rule.options.includes("no-resolve")}
+                  onChange={(event) =>
+                    onChange({
+                      ...rule,
+                      options: withNoResolve(rule.options, event.target.checked),
+                    })
+                  }
+                />
+              )}
               {rule.kind === "PROCESS-NAME" && (
                 <Button size="sm" icon={<AppWindow />} onClick={() => setPicking(true)}>
                   {t("Choose running process")}
                 </Button>
+              )}
+              {rule.kind === "RULE-SET" && (
+                <div className="flex flex-wrap gap-1">
+                  {lists
+                    .filter((id) => !rule.values.includes(id))
+                    .map((id) => (
+                      <Button
+                        key={id}
+                        size="sm"
+                        variant="ghost"
+                        icon={<Plus />}
+                        onClick={() => {
+                          const next = [...ruleValues(text), id];
+                          setText(next.join("\n"));
+                          onChange({ ...rule, values: next });
+                        }}
+                      >
+                        {id}
+                      </Button>
+                    ))}
+                </div>
               )}
             </div>
           </Field>

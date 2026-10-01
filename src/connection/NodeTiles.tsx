@@ -2,10 +2,12 @@ import { Pencil } from "lucide-react";
 import { memo } from "react";
 import { Badge, IconButton, Item } from "rootik";
 import type { Node } from "../api";
+import { targetLook } from "../config/kinds";
 import type { NodeSpeed } from "../hooks/useTraffic";
 import { t } from "../i18n";
 import Flag from "../shell/Flag";
 import { hide } from "../shell/secret";
+import { isExit } from "./exits";
 import NodeDelay from "./NodeDelay";
 import { nowText } from "./rate";
 
@@ -44,7 +46,8 @@ export default function NodeTiles({
           rate={rates[node.name]}
           plain={plain}
           onSelect={onSelect}
-          onEdit={onEdit}
+          // DIRECT and AUTO are the client's, not a source's: nothing to edit (D-166).
+          onEdit={isExit(node) ? undefined : onEdit}
         />
       ))}
     </div>
@@ -74,6 +77,8 @@ const Tile = memo(function Tile({
   onSelect,
   onEdit,
 }: TileProps) {
+  // Значок выхода — тот же, что у цели правила в «Маршрутизации»: одно имя, один облик.
+  const look = isExit(node) ? targetLook(node.name, []) : null;
   return (
     <Item
       data-node={node.name}
@@ -89,14 +94,16 @@ const Tile = memo(function Tile({
           onEdit(node.name);
         })
       }
-      media={plain ? undefined : <Flag country={node.country} />}
+      icon={look && !plain ? <look.Icon /> : undefined}
+      iconTone={look?.tone}
+      media={plain || look ? undefined : <Flag country={node.country} />}
       title={node.name}
       // Three lines, as before (D-085): who in the title; how and where; what now and from where.
       description={
         !plain && (
           <>
             <span className="block truncate">
-              {hide(node.address, hidden) ?? "—"} · {node.kind}
+              {node.address === null ? node.kind : `${hide(node.address, hidden)} · ${node.kind}`}
             </span>
             <span className="block truncate">
               {rate && `${nowText(rate)} · ${t("{n} conn.", { n: rate.connections })} · `}
@@ -107,8 +114,9 @@ const Tile = memo(function Tile({
       }
       meta={
         <span className="flex flex-col items-end gap-1">
-          <NodeDelay node={node} />
-          {!node.supported && (
+          {/* До DIRECT и AUTO мерить нечего: прочерк стоял бы там всегда. */}
+          {!isExit(node) && <NodeDelay node={node} />}
+          {!node.supported && !isExit(node) && (
             <Badge size="sm" tone="danger">
               {t("not supported")}
             </Badge>

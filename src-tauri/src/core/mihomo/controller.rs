@@ -277,6 +277,50 @@ impl Controller {
             .collect())
     }
 
+    /// Перечитать rule set с диска без перезапуска ядра (D-157). Провайдера с таким именем
+    /// может не быть — список ещё не участвует в правилах, — это не ошибка.
+    pub async fn reload_rules(&self, name: &str) -> Result<()> {
+        let response = crate::http::Http::direct()?
+            .put(format!("{}/providers/rules/{}", self.base(), encode(name)))
+            .bearer_auth(&self.secret)
+            .send()
+            .await
+            .map_err(|e| AppError::network(format!("Ядро не ответило: {e}")))?;
+        let status = response.status();
+        if !status.is_success() && status != reqwest::StatusCode::NOT_FOUND {
+            return Err(AppError::network(format!(
+                "Ядро не перечитало список: {status}"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Обновить geo-базы (D-157): ядро скачивает их по своим `geox-url` и перечитывает.
+    pub async fn update_geo(&self) -> Result<()> {
+        let response = crate::http::Http::direct()?
+            .post(format!("{}/configs/geo", self.base()))
+            .bearer_auth(&self.secret)
+            .send()
+            .await
+            .map_err(|e| AppError::network(format!("Ядро не ответило: {e}")))?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            // Ядро отвечает `{"message": "…"}`; причина едет в подробностях, а не в заголовке
+            // (D-028). Качает оно через свои же правила, то есть через VPN, — мёртвый узел
+            // тоже причина.
+            let said = serde_json::from_str::<serde_json::Value>(&body)
+                .ok()
+                .and_then(|value| value["message"].as_str().map(str::to_string))
+                .unwrap_or(body);
+            return Err(AppError::CoreFailed {
+                message: format!("Ядро не скачало geo-базы ({status})"),
+                log: vec![without_query(&said)],
+            });
+        }
+        Ok(())
+    }
+
     /// Перечитать источник без перезапуска ядра (проверено, S-012).
     pub async fn reload(&self, source: &str) -> Result<()> {
         let response = crate::http::Http::direct()?
@@ -593,6 +637,19 @@ fn encode(raw: &str) -> String {
         .collect()
 }
 
+/// Адреса в кавычках — без запроса: у подписанной ссылки на выпуск GitHub в нём токен,
+/// и в окне и логе ему не место. Хост и путь при этом видны — по ним понятно, что не скачалось.
+fn without_query(text: &str) -> String {
+    text.split('"')
+        .enumerate()
+        .map(|(at, part)| match part.split_once('?') {
+            Some((head, _)) if at % 2 == 1 && head.contains("://") => head,
+            _ => part,
+        })
+        .collect::<Vec<_>>()
+        .join("\"")
+}
+
 /// Новый секрет на каждый запуск: он живёт ровно столько же, сколько процесс ядра.
 fn secret() -> Result<String> {
     let mut bytes = [0u8; 16];
@@ -603,6 +660,16 @@ fn secret() -> Result<String> {
 
 #[cfg(test)]
 mod tests {
+    /// Токен подписанной ссылки не доезжает до окна, а сама ссылка — доезжает.
+    #[test]
+    fn a_signed_link_loses_its_token() {
+        let said = r#"can't download GeoSite database file: Get "https://release-assets.githubusercontent.com/a/b?sig=SECRET&jwt=x": EOF"#;
+        assert_eq!(
+            super::without_query(said),
+            r#"can't download GeoSite database file: Get "https://release-assets.githubusercontent.com/a/b": EOF"#
+        );
+    }
+
     /// `umiray → AUTO → узел`: окно показывает, куда трафик уходит на самом деле (D-145).
     #[test]
     fn a_route_follows_groups_down_to_the_node() {

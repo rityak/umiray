@@ -40,6 +40,8 @@ pub struct Status {
     /// Адрес локального прокси показываем настоящий: пользователь мог сменить порт оверрайдом.
     port: Option<u16>,
     core_present: bool,
+    /// Скачан ли qd: переключатель ядер в шапке виден только тогда (D-161).
+    qd_present: bool,
     /// TUN без прав администратора не поднимется, интерфейс должен это показывать заранее.
     elevated: bool,
     /// Поднимается ли клиент с правами **всегда** — то есть заведена ли задача (D-087).
@@ -101,6 +103,7 @@ impl Status {
             port: core.port,
             started: running.as_ref().and_then(|(_, engine)| engine.started),
             core_present: crate::core::mihomo::Mihomo::binary().exists(),
+            qd_present: state.qd.present(),
             elevated: Elevation::is_elevated(),
             always_admin: Autostart::always_admin(),
             system_proxy,
@@ -161,7 +164,7 @@ fn look(running: Option<&EngineState>, system_proxy: bool) -> tray::Look {
 fn restart_reason(state: &AppState) -> Option<String> {
     let launched = state.mihomo.launched()?;
     let assembled = crate::render::effective::ConfigRenderer::effective(
-        state.routing.rules(state).ok().flatten().as_deref(),
+        &state.routing.document(state).ok()?,
         state.mihomo.probe_port(),
     )
     .ok()?;
@@ -181,6 +184,7 @@ mod tests {
             wanted: true,
             started: None,
             capture,
+            recovering: false,
         }
     }
 

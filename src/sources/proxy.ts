@@ -11,7 +11,20 @@
 
 import { tk } from "../i18n";
 
-export type Kind = "text" | "secret" | "number" | "bool" | "select" | "multi" | "numbers";
+export type Kind =
+  | "text"
+  | "secret"
+  | "number"
+  | "bool"
+  /// A checkbox cannot write `false`, and some core defaults are `true`: sudoku's pure
+  /// downlink must match the server either way. Shown as a list, written as a boolean.
+  | "yesno"
+  | "select"
+  | "multi"
+  | "numbers"
+  /// Several lines kept as they are: a PEM certificate or key. A one-line input would glue
+  /// it into one string, and the core would not find the `BEGIN` line.
+  | "pem";
 
 export type Field = {
   /// Key in the core config. A dot means nesting: `ws-opts.path` becomes `ws-opts: { path: … }`.
@@ -23,6 +36,9 @@ export type Field = {
   placeholder?: string;
   /// The node will not come up without it. Checked at assembly, not only highlighted.
   need?: boolean;
+  /// Whether a typed value makes sense. The core takes port 99999 or an address with
+  /// spaces without a word, and the node just never comes up — so the form says it first.
+  valid?: (text: string) => boolean;
   /// When the field makes sense at all. vless with `reality` and with `tls` has different
   /// fields, and a ws path means nothing for grpc — showing everything at once invites junk.
   /// A hidden field is **not written** either: typed a path, changed your mind — it stays out.
@@ -47,8 +63,15 @@ const SERVER: Field = {
   kind: "text",
   need: true,
   placeholder: tk("example.com or 1.2.3.4"),
+  valid: (text) => !/\s/.test(text),
 };
-const PORT: Field = { key: "port", label: tk("Port"), kind: "number", need: true };
+const PORT: Field = {
+  key: "port",
+  label: tk("Port"),
+  kind: "number",
+  need: true,
+  valid: (text) => /^\d+$/.test(text) && Number(text) >= 1 && Number(text) <= 65535,
+};
 const UDP: Field = {
   key: "udp",
   label: "UDP",
@@ -133,6 +156,21 @@ const tls = (pick: boolean, sni = "servername"): Part => ({
   ],
 });
 
+/// TLS over QUIC is always on, and there is no browser to pretend to be: the core has no
+/// `client-fingerprint` for hysteria2 or tuic, so the field would be written and ignored.
+const QUIC_TLS: Part = {
+  title: tk("Security"),
+  fields: tls(false, "sni").fields.filter((field) => field.key !== "client-fingerprint"),
+};
+
+/// QUIC congestion control, as the core names it for tuic and shadowquic.
+const CONGESTION: Field = {
+  key: "congestion-controller",
+  label: tk("Congestion control"),
+  kind: "select",
+  options: ["cubic", "new_reno", "bbr"],
+};
+
 const REALITY: Part = {
   title: "REALITY",
   fields: [
@@ -148,7 +186,7 @@ const REALITY: Part = {
       key: "reality-opts.support-x25519mlkem768",
       label: tk("Post-quantum exchange"),
       kind: "bool",
-      hint: tk("x25519mlkem768: enabled on recent servers"),
+      hint: tk("x25519mlkem768: on newer servers"),
       when: isReality,
     },
   ],
@@ -222,7 +260,7 @@ const CONNECTION: Part = {
       key: "interface-name",
       label: tk("Network adapter"),
       kind: "text",
-      hint: tk("go out exactly through it, not through the one the system picks"),
+      hint: tk("leave through this adapter, not the one the system picks"),
     },
     { key: "tfo", label: "TCP Fast Open", kind: "bool" },
     { key: "mptcp", label: "Multipath TCP", kind: "bool" },
@@ -414,7 +452,7 @@ const KINDS: Protocol[] = [
             placeholder: "443-8443",
             hint: tk("port hopping; the main port is still required"),
           },
-          { key: "hop-interval", label: tk("Hop interval, s"), kind: "number" },
+          { key: "hop-interval", label: tk("Port hop interval, s"), kind: "number" },
           { key: "up", label: tk("Upload"), kind: "text", placeholder: "50 Mbps" },
           { key: "down", label: tk("Download"), kind: "text", placeholder: "200 Mbps" },
           {
@@ -451,7 +489,529 @@ const KINDS: Protocol[] = [
           },
         ],
       },
+      QUIC_TLS,
+    ],
+  },
+  {
+    // JLS instead of a certificate: nothing to verify or pin, only the name and ALPN.
+    id: "shadowquic",
+    label: "ShadowQUIC",
+    parts: [
+      basics(),
+      {
+        title: "ShadowQUIC",
+        fields: [
+          { key: "username", label: tk("Username"), kind: "text", need: true },
+          { key: "password", label: tk("Password"), kind: "secret", need: true },
+          CONGESTION,
+          {
+            key: "zero-rtt",
+            label: "0-RTT",
+            kind: "bool",
+            hint: tk("faster reconnects, but a recorded handshake can be replayed"),
+          },
+          {
+            key: "udp-over-stream",
+            label: tk("UDP in streams"),
+            kind: "bool",
+            hint: tk("no losses, but a lost packet delays everything behind it"),
+          },
+          {
+            key: "quic-versions",
+            label: tk("QUIC versions"),
+            kind: "multi",
+            options: ["v1", "v2"],
+          },
+          { key: "up", label: tk("Upload"), kind: "text", placeholder: "50 Mbps" },
+          { key: "down", label: tk("Download"), kind: "text", placeholder: "200 Mbps" },
+        ],
+      },
+      {
+        title: tk("Security"),
+        fields: [
+          {
+            key: "sni",
+            label: "SNI",
+            kind: "text",
+            hint: tk("the site the handshake pretends to reach"),
+          },
+          { key: "alpn", label: "ALPN", kind: "multi", options: ["h3"] },
+        ],
+      },
+    ],
+  },
+  {
+    // v5 only: a v4 `token` from a subscription stays in "the rest" and survives the edit.
+    id: "tuic",
+    label: "TUIC",
+    parts: [
+      basics(),
+      {
+        title: "TUIC",
+        fields: [
+          { key: "uuid", label: "UUID", kind: "secret", need: true },
+          { key: "password", label: tk("Password"), kind: "secret", need: true },
+          CONGESTION,
+          {
+            key: "udp-relay-mode",
+            label: tk("UDP relay"),
+            kind: "select",
+            options: ["native", "quic"],
+            hint: tk("native — datagrams, losses stay losses; quic — streams, nothing is lost"),
+          },
+          {
+            key: "reduce-rtt",
+            label: "0-RTT",
+            kind: "bool",
+            hint: tk("faster reconnects, but a recorded handshake can be replayed"),
+          },
+          { key: "disable-sni", label: tk("Do not send SNI"), kind: "bool" },
+        ],
+      },
+      QUIC_TLS,
+    ],
+  },
+  {
+    id: "anytls",
+    label: "AnyTLS",
+    parts: [
+      basics(UDP),
+      {
+        title: "AnyTLS",
+        fields: [{ key: "password", label: tk("Password"), kind: "secret", need: true }],
+      },
+      // TLS is always on; REALITY the core refuses for anytls by design.
       tls(false, "sni"),
+    ],
+  },
+  {
+    id: "trusttunnel",
+    label: "TrustTunnel",
+    parts: [
+      basics(UDP),
+      {
+        title: "TrustTunnel",
+        fields: [
+          { key: "username", label: tk("Username"), kind: "text", need: true },
+          { key: "password", label: tk("Password"), kind: "secret", need: true },
+          {
+            key: "quic",
+            label: "HTTP/3",
+            kind: "bool",
+            hint: tk("over QUIC instead of HTTP/2; the server must listen on UDP too"),
+          },
+          { ...CONGESTION, options: ["cubic", "new_reno", "bbr"], under: "quic" },
+          {
+            key: "health-check",
+            label: tk("Server health check"),
+            kind: "bool",
+          },
+        ],
+      },
+      tls(false, "sni"),
+    ],
+  },
+  {
+    id: "snell",
+    label: "Snell",
+    parts: [
+      basics(UDP),
+      {
+        title: "Snell",
+        fields: [
+          { key: "psk", label: "PSK", kind: "secret", need: true },
+          {
+            key: "version",
+            label: tk("Version"),
+            kind: "number",
+            placeholder: "4",
+            hint: tk("1 to 5; UDP from 3"),
+          },
+          { key: "reuse", label: tk("Reuse connections"), kind: "bool", hint: tk("v4 and newer") },
+        ],
+      },
+      {
+        title: tk("Obfuscation"),
+        fields: [
+          {
+            key: "obfs-opts.mode",
+            label: tk("Mode"),
+            kind: "select",
+            options: ["http", "tls", "shadow-tls", "restls", "jls"],
+          },
+          {
+            key: "obfs-opts.host",
+            label: "Host",
+            kind: "text",
+            placeholder: "bing.com",
+            when: (values) => Boolean(values["obfs-opts.mode"]),
+          },
+          {
+            key: "obfs-opts.username",
+            label: tk("Username"),
+            kind: "text",
+            when: (values) => values["obfs-opts.mode"] === "jls",
+          },
+          {
+            key: "obfs-opts.password",
+            label: tk("Obfuscation password"),
+            kind: "secret",
+            need: true,
+            when: (values) => ["shadow-tls", "restls", "jls"].includes(values["obfs-opts.mode"]),
+          },
+          {
+            key: "obfs-opts.version",
+            label: tk("ShadowTLS version"),
+            kind: "number",
+            placeholder: "3",
+            when: (values) => values["obfs-opts.mode"] === "shadow-tls",
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: "sudoku",
+    label: "Sudoku",
+    parts: [
+      basics(),
+      {
+        title: "Sudoku",
+        fields: [
+          {
+            key: "key",
+            label: tk("Key"),
+            kind: "secret",
+            need: true,
+            hint: tk("the private key of a sudoku pair, or the server's UUID"),
+          },
+          {
+            key: "aead-method",
+            label: tk("Encryption"),
+            kind: "select",
+            options: ["chacha20-poly1305", "aes-128-gcm", "none"],
+          },
+          { key: "padding-min", label: tk("Padding, min %"), kind: "number", placeholder: "10" },
+          { key: "padding-max", label: tk("Padding, max %"), kind: "number", placeholder: "30" },
+          {
+            key: "table-type",
+            label: tk("Table"),
+            kind: "select",
+            options: [
+              "prefer_ascii",
+              "prefer_entropy",
+              "up_ascii_down_entropy",
+              "up_entropy_down_ascii",
+            ],
+          },
+          { key: "custom-table", label: tk("Custom table"), kind: "text", placeholder: "xpxvvpvv" },
+          {
+            key: "enable-pure-downlink",
+            label: tk("Pure downlink"),
+            kind: "yesno",
+            options: ["true", "false"],
+            hint: tk("must match the server; empty — true"),
+          },
+          {
+            key: "multiplex",
+            label: tk("Multiplexing"),
+            kind: "select",
+            options: ["off", "auto", "on"],
+          },
+        ],
+      },
+      {
+        title: tk("HTTP mask"),
+        fields: [
+          { key: "httpmask.disable", label: tk("Disable the mask"), kind: "bool" },
+          {
+            key: "httpmask.mode",
+            label: tk("Mode"),
+            kind: "select",
+            options: ["legacy", "stream", "poll", "auto", "ws"],
+            hint: tk("all but legacy go through a CDN or a reverse proxy"),
+          },
+          {
+            key: "httpmask.tls",
+            label: "HTTPS",
+            kind: "bool",
+            when: (values) => (values["httpmask.mode"] ?? "legacy") !== "legacy",
+          },
+          {
+            key: "httpmask.host",
+            label: "Host",
+            kind: "text",
+            when: (values) => (values["httpmask.mode"] ?? "legacy") !== "legacy",
+          },
+          { key: "httpmask.path-root", label: tk("Path prefix"), kind: "text" },
+        ],
+      },
+    ],
+  },
+  {
+    id: "ssh",
+    label: "SSH",
+    parts: [
+      basics(),
+      {
+        title: tk("Access"),
+        fields: [
+          { key: "username", label: tk("Username"), kind: "text", need: true },
+          { key: "password", label: tk("Password"), kind: "secret" },
+          {
+            key: "private-key",
+            label: tk("Private key"),
+            kind: "secret",
+            hint: tk("the key itself or a path to its file"),
+          },
+          { key: "private-key-passphrase", label: tk("Key passphrase"), kind: "secret" },
+          {
+            key: "host-key",
+            label: tk("Server key"),
+            kind: "multi",
+            options: [],
+            placeholder: "ssh-ed25519 AAAA…",
+            hint: tk("empty — any server is trusted, including an impostor"),
+          },
+          {
+            key: "host-key-algorithms",
+            label: tk("Key algorithms"),
+            kind: "multi",
+            options: [],
+            hint: tk("empty — taken from the pinned keys"),
+            when: (values) => Boolean(values["host-key"]?.trim()),
+          },
+        ],
+      },
+    ],
+  },
+  {
+    // Usually comes as an .ovpn file ("From file"); the form is for edits and for the rare
+    // hand-made node. Either a login or a client certificate: the dry run names the miss.
+    id: "openvpn",
+    label: "OpenVPN",
+    parts: [
+      basics(UDP),
+      {
+        title: "OpenVPN",
+        fields: [
+          { key: "proto", label: tk("Transport"), kind: "select", options: ["udp", "tcp"] },
+          { key: "username", label: tk("Username"), kind: "text" },
+          { key: "password", label: tk("Password"), kind: "secret" },
+          {
+            key: "cipher",
+            label: tk("Cipher"),
+            kind: "select",
+            options: [
+              "AES-128-GCM",
+              "AES-256-GCM",
+              "CHACHA20-POLY1305",
+              "AES-128-CBC",
+              "AES-256-CBC",
+            ],
+          },
+          {
+            key: "data-ciphers",
+            label: tk("Offered ciphers"),
+            kind: "multi",
+            options: ["AES-256-GCM", "AES-128-GCM", "CHACHA20-POLY1305"],
+          },
+          {
+            key: "auth",
+            label: tk("Digest"),
+            kind: "select",
+            options: ["SHA1", "SHA256", "SHA384", "SHA512", "MD5"],
+            hint: tk("only for CBC; GCM and ChaCha ignore it"),
+          },
+          { key: "comp-lzo", label: "LZO", kind: "select", options: ["no", "yes", "adaptive"] },
+          { key: "mtu", label: "MTU", kind: "number", placeholder: "1500" },
+        ],
+      },
+      {
+        title: tk("Certificates"),
+        fields: [
+          { key: "ca", label: tk("Server CA"), kind: "pem", need: true },
+          { key: "cert", label: tk("Client certificate"), kind: "pem" },
+          { key: "key", label: tk("Client key"), kind: "pem" },
+          { key: "tls-auth", label: "tls-auth", kind: "pem" },
+          {
+            key: "key-direction",
+            label: tk("Key direction"),
+            kind: "select",
+            options: ["0", "1"],
+            when: (values) => Boolean(values["tls-auth"]?.trim()),
+          },
+          { key: "tls-crypt", label: "tls-crypt", kind: "pem" },
+          { key: "tls-crypt-v2", label: "tls-crypt-v2", kind: "pem" },
+        ],
+      },
+      {
+        title: tk("Tunnel"),
+        fields: [
+          { key: "remote-dns-resolve", label: tk("Resolve names on the far side"), kind: "bool" },
+          {
+            key: "dns",
+            label: tk("DNS in the tunnel"),
+            kind: "multi",
+            options: ["1.1.1.1", "8.8.8.8"],
+            hint: tk("who answers queries on the far side"),
+            under: "remote-dns-resolve",
+          },
+        ],
+      },
+    ],
+  },
+  {
+    // A network, not a server: no address and no port — the node joins a tailnet and leaves
+    // through its exit node.
+    id: "tailscale",
+    label: "Tailscale",
+    parts: [
+      { title: tk("Basics"), fields: [NAME, UDP] },
+      {
+        title: "Tailscale",
+        fields: [
+          {
+            key: "auth-key",
+            label: tk("Auth key"),
+            kind: "secret",
+            hint: tk("empty — a login link appears in the core log on the first start"),
+          },
+          {
+            key: "control-url",
+            label: tk("Control server"),
+            kind: "text",
+            placeholder: "https://controlplane.tailscale.com",
+            hint: tk("empty — Tailscale itself; for headscale — its address"),
+          },
+          {
+            key: "exit-node",
+            label: tk("Exit node"),
+            kind: "text",
+            placeholder: tk("100.64.0.1 or auto:any"),
+            hint: tk("without it only the tailnet is reachable, not the internet"),
+          },
+          {
+            key: "exit-node-allow-lan-access",
+            label: tk("Local network past the exit node"),
+            kind: "bool",
+          },
+          { key: "accept-routes", label: tk("Accept subnet routes"), kind: "bool" },
+          { key: "hostname", label: tk("Device name"), kind: "text" },
+          {
+            key: "ephemeral",
+            label: tk("Ephemeral device"),
+            kind: "bool",
+            hint: tk("the tailnet forgets it once it goes offline"),
+          },
+          {
+            key: "state-dir",
+            label: tk("State folder"),
+            kind: "text",
+            hint: tk("empty — its own folder by the node name; one folder is one device"),
+          },
+        ],
+      },
+    ],
+  },
+  {
+    // A network, like tailscale. The core (v1.19.30) makes its own identity: the device ID to
+    // authorize in the controller appears in its log on the first start. Its default state
+    // folder is already per network and node, so nothing to add here.
+    id: "zerotier",
+    label: "ZeroTier",
+    parts: [
+      { title: tk("Basics"), fields: [NAME, UDP] },
+      {
+        title: "ZeroTier",
+        fields: [
+          {
+            key: "network",
+            label: tk("Network ID"),
+            kind: "text",
+            need: true,
+            placeholder: "0123456789abcdef",
+            hint: tk("the device ID to authorize appears in the core log on the first start"),
+          },
+          {
+            key: "tcp-fallback-mode",
+            label: tk("TCP relay"),
+            kind: "select",
+            options: ["auto", "force", "disable"],
+            hint: tk("where UDP is blocked, traffic goes through ZeroTier's TCP relay"),
+          },
+          { key: "low-bandwidth", label: tk("Low bandwidth"), kind: "bool" },
+          { key: "mtu", label: "MTU", kind: "number" },
+          { key: "planet", label: tk("Own planet file"), kind: "text" },
+          { key: "state-dir", label: tk("State folder"), kind: "text" },
+          { key: "remote-dns-resolve", label: tk("Resolve names on the far side"), kind: "bool" },
+          {
+            key: "dns",
+            label: tk("DNS in the tunnel"),
+            kind: "multi",
+            options: [],
+            hint: tk("empty — the servers the controller gives"),
+            under: "remote-dns-resolve",
+          },
+        ],
+      },
+    ],
+  },
+  {
+    // Cloudflare WARP over MASQUE: keys come from usque ("From file" takes its config.json).
+    id: "masque",
+    label: "MASQUE",
+    parts: [
+      basics(UDP),
+      {
+        title: tk("Keys"),
+        fields: [
+          { key: "private-key", label: tk("Own key"), kind: "secret", need: true },
+          {
+            key: "public-key",
+            label: tk("Server key"),
+            kind: "text",
+            need: true,
+            hint: tk("base64 without the BEGIN and END lines"),
+          },
+        ],
+      },
+      {
+        title: tk("Tunnel"),
+        fields: [
+          { key: "ip", label: tk("Tunnel address"), kind: "text", placeholder: "172.16.0.2/32" },
+          { key: "ipv6", label: tk("IPv6 address"), kind: "text" },
+          { key: "mtu", label: "MTU", kind: "number", placeholder: "1280" },
+          {
+            key: "network",
+            label: tk("Transport"),
+            kind: "select",
+            options: ["quic", "h2", "h3-l4proxy"],
+            hint: tk("h2 where UDP is blocked; h3-l4proxy carries no UDP"),
+          },
+          {
+            key: "sni",
+            label: "SNI",
+            kind: "text",
+            placeholder: "consumer-masque.cloudflareclient.com",
+          },
+          {
+            key: "congestion-controller",
+            label: tk("Congestion control"),
+            kind: "select",
+            options: ["bbr"],
+          },
+          { key: "remote-dns-resolve", label: tk("Resolve names on the far side"), kind: "bool" },
+          {
+            key: "dns",
+            label: tk("DNS in the tunnel"),
+            kind: "multi",
+            options: ["1.1.1.1", "8.8.8.8"],
+            hint: tk("who answers queries on the far side"),
+            under: "remote-dns-resolve",
+          },
+        ],
+      },
     ],
   },
   {
@@ -558,6 +1118,131 @@ const KINDS: Protocol[] = [
     ],
   },
   {
+    id: "mieru",
+    label: "Mieru",
+    parts: [
+      {
+        title: tk("Basics"),
+        // A port or a range, never both: the core refuses the pair. Each hides the other, so
+        // the one left visible is what gets required and written.
+        fields: [
+          NAME,
+          SERVER,
+          { ...PORT, when: (values) => !values["port-range"]?.trim() },
+          {
+            key: "port-range",
+            label: tk("Port range"),
+            kind: "text",
+            placeholder: "2090-2099",
+            when: (values) => !values.port?.trim(),
+          },
+          UDP,
+        ],
+      },
+      {
+        title: "Mieru",
+        fields: [
+          {
+            key: "transport",
+            label: tk("Transport"),
+            kind: "select",
+            options: ["TCP", "UDP"],
+            need: true,
+          },
+          { key: "username", label: tk("Username"), kind: "text", need: true },
+          { key: "password", label: tk("Password"), kind: "secret", need: true },
+          {
+            key: "multiplexing",
+            label: tk("Multiplexing"),
+            kind: "select",
+            options: [
+              "MULTIPLEXING_OFF",
+              "MULTIPLEXING_LOW",
+              "MULTIPLEXING_MIDDLE",
+              "MULTIPLEXING_HIGH",
+            ],
+          },
+          {
+            key: "handshake-mode",
+            label: tk("Handshake"),
+            kind: "select",
+            options: ["HANDSHAKE_STANDARD", "HANDSHAKE_NO_WAIT"],
+            hint: tk("NO_WAIT sends data without waiting for the handshake: faster, 0-RTT"),
+          },
+          { key: "traffic-pattern", label: tk("Traffic pattern"), kind: "text" },
+        ],
+      },
+    ],
+  },
+  {
+    // Stream ciphers only: an AEAD cipher the core refuses for ssr ("not a stream cipher").
+    id: "ssr",
+    label: "ShadowsocksR",
+    parts: [
+      basics(UDP),
+      {
+        title: "ShadowsocksR",
+        fields: [
+          {
+            key: "cipher",
+            label: tk("Cipher"),
+            kind: "select",
+            need: true,
+            options: [
+              "aes-128-cfb",
+              "aes-192-cfb",
+              "aes-256-cfb",
+              "aes-128-ctr",
+              "aes-192-ctr",
+              "aes-256-ctr",
+              "rc4-md5",
+              "chacha20",
+              "chacha20-ietf",
+              "xchacha20",
+              "none",
+            ],
+          },
+          { key: "password", label: tk("Password"), kind: "secret", need: true },
+          {
+            key: "protocol",
+            label: tk("Protocol"),
+            kind: "select",
+            need: true,
+            options: [
+              "origin",
+              "auth_sha1_v4",
+              "auth_aes128_md5",
+              "auth_aes128_sha1",
+              "auth_chain_a",
+              "auth_chain_b",
+            ],
+          },
+          { key: "protocol-param", label: tk("Protocol parameter"), kind: "text" },
+          {
+            key: "obfs",
+            label: tk("Obfuscation"),
+            kind: "select",
+            need: true,
+            options: [
+              "plain",
+              "http_simple",
+              "http_post",
+              "random_head",
+              "tls1.2_ticket_auth",
+              "tls1.2_ticket_fastauth",
+            ],
+          },
+          {
+            key: "obfs-param",
+            label: tk("Obfuscation parameter"),
+            kind: "text",
+            placeholder: "cdn.example.com",
+          },
+        ],
+      },
+    ],
+  },
+  {
     id: "socks5",
     label: "SOCKS5",
     parts: [
@@ -642,7 +1327,7 @@ export const fieldsOf = (id: string) => protocol(id).parts.flatMap((part) => par
 function written(field: Field, raw: string): unknown | undefined {
   const text = raw.trim();
   if (text === "") return undefined;
-  if (field.kind === "bool") return text === "true";
+  if (field.kind === "bool" || field.kind === "yesno") return text === "true";
   if (field.kind === "number") {
     const number = Number(text);
     return Number.isFinite(number) ? number : undefined;
@@ -718,6 +1403,7 @@ function flatten(entry: Entry, prefix = "", out: Entry = {}): Entry {
 /// field" — then it goes to "the rest" and survives the edit intact.
 function shownAs(field: Field, raw: unknown): string | undefined {
   if (field.kind === "bool") return raw === true ? "true" : undefined;
+  if (field.kind === "yesno") return typeof raw === "boolean" ? String(raw) : undefined;
   if (field.kind === "multi" || field.kind === "numbers") {
     return Array.isArray(raw) ? raw.map(String).join(", ") : undefined;
   }
@@ -781,6 +1467,20 @@ export function toEntry(id: string, values: Values, extra: Entry = {}): Entry {
   }
   // "Security" is a window field: for the core it is `tls` and the presence of `reality-opts` (D-120).
   if (values.security === "tls" || values.security === "reality") entry.tls = true;
+  // The core's default state folder is one for all tailscale nodes: two nodes in it would be
+  // one device fighting itself. The name is locked after adding, so the folder stays put.
+  if (id === "tailscale" && entry["state-dir"] === undefined) {
+    entry["state-dir"] = `tailscale/${String(entry.name).replace(/[^\p{L}\p{N}._-]+/gu, "-")}`;
+  }
+  // A pin is checked only against the key type the handshake picks, and without a list the
+  // server picks its own: a correct ed25519 pin failed against the server's ecdsa (S-029).
+  const pinned = entry["host-key"];
+  if (id === "ssh" && Array.isArray(pinned) && entry["host-key-algorithms"] === undefined) {
+    const types = new Set(pinned.map((key) => String(key).split(" ")[0]));
+    entry["host-key-algorithms"] = [...types].flatMap((type) =>
+      type === "ssh-rsa" ? ["rsa-sha2-512", "rsa-sha2-256"] : [type],
+    );
+  }
   // Here the node is a whole exit to the outside, same as a link (D-063).
   if (id === "wireguard") {
     entry["allowed-ips"] = values.ipv6?.trim() ? ["0.0.0.0/0", "::/0"] : ["0.0.0.0/0"];
@@ -791,6 +1491,16 @@ export function toEntry(id: string, values: Values, extra: Entry = {}): Entry {
 
 /// What is missing for the node to come up at all. Counted over **visible** fields: a
 /// hidden one cannot be required — it was not shown.
+/// Filled fields whose value the node cannot work with.
+export function wrong(id: string, values: Values): string[] {
+  return shown(id, values)
+    .filter((field) => {
+      const text = (values[field.key] ?? "").trim();
+      return field.valid !== undefined && text !== "" && !field.valid(text);
+    })
+    .map((field) => field.label);
+}
+
 export function missing(id: string, values: Values): string[] {
   return shown(id, values)
     .filter((field) => field.need && !(values[field.key] ?? "").trim())

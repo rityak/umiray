@@ -9,6 +9,7 @@ use crate::app::catalog::Catalog;
 use crate::app::connect::Connection;
 use crate::app::diagnostics::Diagnostics;
 use crate::app::killswitch::KillSwitch;
+use crate::app::lists::Lists;
 use crate::app::maintenance::Maintenance;
 use crate::app::notice::Notices;
 use crate::app::presets::Presets;
@@ -33,6 +34,8 @@ pub struct AppState {
     pub catalog: Catalog,
     /// Источники узлов: добавить, обновить, поправить, удалить.
     pub sources: Sources,
+    /// Rule sets: каталог, добавить, обновить, удалить (D-157).
+    pub lists: Lists,
     /// Системный прокси вокруг ядра — с памятью о том, как было.
     pub proxy: SystemProxy,
     /// Kill switch вокруг ядра — с памятью о том, как было.
@@ -60,6 +63,7 @@ impl AppState {
             presets: Presets,
             catalog: Catalog::default(),
             sources: Sources,
+            lists: Lists,
             proxy: SystemProxy,
             kill_switch: KillSwitch,
             diagnostics: Diagnostics,

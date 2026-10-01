@@ -1,30 +1,25 @@
-import { Eye, EyeOff, Gauge, LayoutGrid, RefreshCw, Server, Table2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  Badge,
-  Button,
-  Callout,
-  Card,
-  EmptyState,
-  IconButton,
-  SegmentedControl,
-  Select,
-  Tooltip,
-} from "rootik";
+import { Eye, EyeOff, Gauge, LayoutGrid, Plus, RefreshCw, Server, Table2 } from "lucide-react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Button, Card, EmptyState, IconButton, SegmentedControl, Select, Tooltip } from "rootik";
 import * as api from "../api";
 import type { NodeSpeed } from "../hooks/useTraffic";
 import { locale, t } from "../i18n";
-import { failure, type Message, notice } from "../shell/Banner";
+import { failure, type Message } from "../shell/Banner";
 import { hide } from "../shell/secret";
+import AddMenu, { type AddKind } from "../sources/AddMenu";
 import NodeEditor from "./NodeEditor";
 import NodeTable from "./NodeTable";
 import NodeTiles from "./NodeTiles";
 
 type Props = {
+  /// The card title: the "Nodes · Sources" switch (D-160).
+  head: ReactNode;
   nodes: api.Node[];
+  /// The client's exits, DIRECT and AUTO: first in any order, never edited (D-166).
+  exits?: api.Node[];
   selected: string | null;
-  /// RULES assigns routes through rules; the banner offers switching to MANUAL (D-056).
-  rules: boolean;
+  /// A word above the list, e.g. that routing sends the rest elsewhere (D-166).
+  note?: ReactNode;
   /// Sources name the nodes and give the list its default order. None — no such order.
   sources: api.Source[];
   /// Privacy mode hides server addresses in this section (D-127).
@@ -32,9 +27,9 @@ type Props = {
   /// App polls live traffic regardless of the open section (S-018).
   rates: Record<string, NodeSpeed>;
   onSelect: (node: string) => void;
-  onManual: () => void;
   onChanged: () => void;
-  onAdd: () => void;
+  /// One add menu for every "+" (D-160).
+  onAdd: (kind: AddKind) => void;
   onMessage: (message: Message) => void;
   /// Fetch the list again where it comes from. The list says what it refreshes.
   onRefresh: () => Promise<void>;
@@ -52,6 +47,9 @@ type Props = {
 };
 
 type Sort = "source" | "name" | "delay";
+
+/// One empty list for every render: a fresh `[]` default would re-sort on each poll.
+const NONE: api.Node[] = [];
 /// Session-only view choice, like form/code in other sections (D-079).
 type View = "tiles" | "table";
 
@@ -64,14 +62,15 @@ function byDelay(a: api.Node, b: api.Node): number {
 
 /// Compare nodes across all sources.
 export default function Nodes({
+  head,
   nodes,
+  exits = NONE,
   selected,
-  rules,
+  note,
   sources,
   hidden,
   rates,
   onSelect,
-  onManual,
   onChanged,
   onAdd,
   onMessage,
@@ -91,13 +90,6 @@ export default function Nodes({
   const [view, setView] = useState<View>("tiles");
   const [measuring, setMeasuring] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [rulesHintHidden, setRulesHintHidden] = useState(() => {
-    try {
-      return localStorage.getItem("umiray:rules-hint-hidden") === "true";
-    } catch {
-      return false;
-    }
-  });
   /// Right click edits; left click still selects (D-114).
   const [editing, setEditing] = useState<string | null>(null);
 
@@ -111,8 +103,8 @@ export default function Nodes({
     const sorted = [...nodes];
     if (sort === "name") sorted.sort((a, b) => a.name.localeCompare(b.name, locale()));
     if (sort === "delay") sorted.sort(byDelay);
-    return sorted;
-  }, [nodes, sort]);
+    return [...exits, ...sorted];
+  }, [nodes, exits, sort]);
 
   /// User-triggered checks report failures; automatic checks stay silent so proxy
   /// measurements do not show a connect-first banner on every visit (D-062, D-069).
@@ -156,44 +148,30 @@ export default function Nodes({
     measure.current(false);
   }, [nodes, measurer]);
 
-  const select = useCallback(
-    (node: string) => {
-      if (rules) {
-        onMessage(notice(t("Switch to Manual first — the route has not changed.")));
-        return;
+  const empty = nodes.length === 0;
+  /// Nothing imported yet: the exits alone are not a list, so the card still says where
+  /// nodes come from (D-166).
+  const plate = (
+    <EmptyState
+      icon={<Server />}
+      title={t("No nodes")}
+      hint={emptyHint}
+      action={
+        <AddMenu onPick={onAdd} trigger={<Button variant="primary">{t("Add source")}</Button>} />
       }
-      onSelect(node);
-    },
-    [rules, onMessage, onSelect],
+    />
   );
 
-  if (nodes.length === 0) {
+  if (empty && exits.length === 0) {
     return (
-      <Card className="h-full min-h-0 justify-center">
-        <EmptyState
-          icon={<Server />}
-          title={t("No nodes")}
-          hint={emptyHint}
-          action={
-            <Button variant="primary" onClick={onAdd}>
-              {t("Add source")}
-            </Button>
-          }
-        />
+      <Card padding="sm" className="h-full min-h-0" title={head}>
+        <div className="flex h-full items-center justify-center">{plate}</div>
       </Card>
     );
   }
 
   return (
-    <Card
-      padding="sm"
-      className="h-full min-h-0"
-      title={
-        <span className="inline-flex items-center gap-2">
-          {t("Nodes")} <Badge size="sm">{nodes.length}</Badge>
-        </span>
-      }
-    >
+    <Card padding="sm" className="h-full min-h-0" title={head}>
       {/* Only the list below the toolbar scrolls. */}
       <div className="flex h-full min-h-0 flex-col gap-2">
         <div className="flex shrink-0 flex-wrap items-center gap-1.5">
@@ -242,6 +220,12 @@ export default function Nodes({
             label={refreshLabel}
             onClick={refresh}
           />
+          <AddMenu
+            onPick={onAdd}
+            trigger={
+              <IconButton size="sm" variant="ghost" icon={<Plus />} label={t("Add source")} />
+            }
+          />
           <span className="flex-1" />
           {measurer && (
             <Tooltip
@@ -261,30 +245,16 @@ export default function Nodes({
             </Tooltip>
           )}
         </div>
-        {rules && !rulesHintHidden && (
-          <Callout
-            tone="info"
-            onDismiss={() => {
-              setRulesHintHidden(true);
-              try {
-                localStorage.setItem("umiray:rules-hint-hidden", "true");
-              } catch {
-                // Still dismiss for this session when storage is unavailable.
-              }
-            }}
-            actions={
-              <Button size="sm" onClick={onManual}>
-                {t("Choose manually")}
-              </Button>
-            }
-          >
-            {t("In Rules mode, your rules assign the exits.")}
-          </Callout>
-        )}
-        {/* The table owns its scroll so its header stays sticky. */}
+        {note}
+        {/* The table owns its scroll so its header stays sticky. Without nodes the list is
+            only the exits, and the plate below takes the rest. */}
         <div
           className={
-            view === "tiles" ? "-mx-1 min-h-0 flex-1 overflow-y-auto px-1 pb-1" : "min-h-0 flex-1"
+            empty
+              ? "shrink-0"
+              : view === "tiles"
+                ? "-mx-1 min-h-0 flex-1 overflow-y-auto px-1 pb-1"
+                : "min-h-0 flex-1"
           }
         >
           {view === "tiles" ? (
@@ -295,7 +265,7 @@ export default function Nodes({
               hidden={hidden}
               rates={rates}
               plain={plain}
-              onSelect={select}
+              onSelect={onSelect}
               onEdit={editable ? setEditing : undefined}
             />
           ) : (
@@ -307,11 +277,12 @@ export default function Nodes({
               hidden={hidden}
               rates={rates}
               plain={plain}
-              onSelect={select}
+              onSelect={onSelect}
               onEdit={editable ? setEditing : undefined}
             />
           )}
         </div>
+        {empty && <div className="flex flex-1 items-center justify-center">{plate}</div>}
       </div>
 
       {editing !== null &&
@@ -319,12 +290,7 @@ export default function Nodes({
           // Resolve from the latest list so saved edits are reflected immediately.
           const node = nodes.find((item) => item.name === editing);
           return node === undefined ? null : (
-            <NodeEditor
-              node={node}
-              onClose={() => setEditing(null)}
-              onChanged={onChanged}
-              onMessage={onMessage}
-            />
+            <NodeEditor node={node} onClose={() => setEditing(null)} onChanged={onChanged} />
           );
         })()}
     </Card>

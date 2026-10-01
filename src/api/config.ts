@@ -26,9 +26,13 @@ export const Advanced = z.object({
   mtu: z.number(),
   strictRoute: z.boolean(),
   dnsHijack: z.array(z.string()),
+  /// `endpoint-independent-nat`: «открытый» NAT для игр и звонков в TUN (D-169).
+  openNat: z.boolean(),
   dnsEnable: z.boolean(),
   enhancedMode: Enhanced,
   nameserver: z.array(z.string()),
+  /// `prefer-h3`: DoH сначала по HTTP/3 (D-169).
+  preferH3: z.boolean(),
 });
 export type Advanced = z.infer<typeof Advanced>;
 
@@ -103,11 +107,34 @@ export const Rule = z.object({
 });
 export type Rule = z.infer<typeof Rule>;
 
-/// Документ маршрутизации целиком: правила по порядку и судьба всего остального.
+/// Где запись встаёт в маршруте (D-158): high → medium → low; без поля — medium.
+export const Priority = z.enum(["high", "medium", "low"]);
+export type Priority = z.infer<typeof Priority>;
+
+/// Скачанный список в маршруте (D-157, D-158). `url` — только у своего, по адресу.
+export const RuleSetUse = z.object({
+  id: z.string(),
+  url: z.string().optional(),
+  target: z.string(),
+  priority: Priority.optional(),
+});
+export type RuleSetUse = z.infer<typeof RuleSetUse>;
+
+/// Готовый набор в маршруте (D-158). Без `target` — выход самого набора.
+export const ReadyUse = z.object({
+  id: z.string(),
+  target: z.string().optional(),
+  priority: Priority.optional(),
+});
+export type ReadyUse = z.infer<typeof ReadyUse>;
+
+/// Документ маршрутизации целиком (D-158): свои правила, rule sets, готовые наборы и MATCH.
 export const Routing = z.object({
   rules: z.array(Rule),
   /// Цель `MATCH`.
   fallback: z.string(),
+  ruleSets: z.array(RuleSetUse),
+  ready: z.array(ReadyUse),
 });
 export type Routing = z.infer<typeof Routing>;
 
@@ -155,19 +182,18 @@ export const presetsRename = (id: string, name: string) =>
 /// разделу «Маршрутизация» нечего было бы показать (D-071).
 export const presetsDelete = (id: string) => call(done, "presets_delete", { id });
 
-/// Встроенный набор правил (D-083): файл в папке `rulesets/` плюс отметка «включён».
+/// Готовый набор правил (D-083): файл в `collections/rules`. В маршрут его выбирает
+/// раздел `ready` документа (D-158); `target` — общий выход его строк, `null` — разные.
 export const Ruleset = z.object({
   id: z.string(),
   title: z.string(),
   titleEn: z.string().nullish(),
-  on: z.boolean(),
+  target: z.string().nullable(),
   rules: z.array(z.string()),
 });
 export type Ruleset = z.infer<typeof Ruleset>;
 
 export const rulesetsList = () => call(z.array(Ruleset), "rulesets_list");
-/// Включение доезжает до живого ядра перезагрузкой (D-102), поэтому команда отдаёт статус.
-export const rulesetsSet = (id: string, on: boolean) => call(Status, "rulesets_set", { id, on });
 /// Текст набора для правки в окне (D-104): тот же файл, что правят руками.
 export const rulesetsRead = (id: string) => call(z.string(), "rulesets_read", { id });
 /// «Сохранить» здесь **применяет**: отдельного «применить» у встроенного набора нет,

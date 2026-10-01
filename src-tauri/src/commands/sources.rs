@@ -60,6 +60,16 @@ pub async fn sources_add_file(
     state.sources.add_file(&app, &state).await
 }
 
+/// Выпустить узел Cloudflare WARP (D-165). Туннель — строкой, незнакомый отвергается.
+#[tauri::command]
+pub async fn sources_add_warp(
+    tunnel: crate::nodes::warp::Tunnel,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Import> {
+    state.sources.add_warp(&app, &state, tunnel).await
+}
+
 #[tauri::command]
 pub async fn sources_refresh_all(state: State<'_, AppState>) -> Result<Vec<String>> {
     Ok(state.sources.refresh_all(&state).await)

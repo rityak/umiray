@@ -4,7 +4,7 @@
 use serde_json::Value;
 use tauri::State;
 
-use crate::app::qd::QdStatus;
+use crate::app::qd::{Adopted, QdStatus};
 use crate::app::state::AppState;
 use crate::error::Result;
 
@@ -22,6 +22,18 @@ pub async fn qd_call(
     body: Option<Value>,
 ) -> Result<Value> {
     state.qd.call(&method, &path, body).await
+}
+
+/// Ссылка `qd://` из поля добавления (D-161): qd скачивается, если его нет.
+#[tauri::command]
+pub async fn qd_adopt(state: State<'_, AppState>, link: String) -> Result<Adopted> {
+    state.qd_panel.adopt(&state, &link).await
+}
+
+/// Тумблер «qd» выключили — удалить бинарь (D-161).
+#[tauri::command]
+pub async fn qd_remove(state: State<'_, AppState>) -> Result<()> {
+    state.qd_panel.remove(&state).await
 }
 
 #[tauri::command]

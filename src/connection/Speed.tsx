@@ -3,6 +3,7 @@ import { Card, EmptyState, LineChart, Stat, seriesColor, useElementSize } from "
 import { formatBytes } from "../api";
 import type { Speed as Rate } from "../hooks/useTraffic";
 import { t } from "../i18n";
+import { smooth } from "./rate";
 
 type Props = {
   running: boolean;
@@ -49,7 +50,9 @@ const EMPTY = 88;
 export default function Speed({ running, history, current, totals, connections }: Props) {
   const body = useElementSize<HTMLDivElement>();
   const chart = useElementSize<HTMLDivElement>();
-  const scale = axis(Math.max(0, ...history.flatMap((point) => [point.down, point.up])));
+  const down = smooth(history.map((point) => point.down));
+  const up = smooth(history.map((point) => point.up));
+  const scale = axis(Math.max(0, ...down, ...up));
   const stats = body.height >= STATS;
   const summary = running
     ? [
@@ -96,12 +99,12 @@ export default function Speed({ running, history, current, totals, connections }
                       series={[
                         {
                           name: t("Download"),
-                          data: history.map((point) => point.down / scale.unit),
+                          data: down.map((value) => value / scale.unit),
                           color: DOWN,
                         },
                         {
                           name: t("Upload"),
-                          data: history.map((point) => point.up / scale.unit),
+                          data: up.map((value) => value / scale.unit),
                           color: UP,
                         },
                       ]}
@@ -115,7 +118,7 @@ export default function Speed({ running, history, current, totals, connections }
                 <EmptyState
                   size="sm"
                   title={t("VPN is off")}
-                  hint={t("The chart appears after connecting.")}
+                  hint={t("The chart shows up once you connect.")}
                 />
               </div>
             )}

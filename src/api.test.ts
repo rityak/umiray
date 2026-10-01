@@ -22,6 +22,7 @@ const status = (over: Partial<Status> = {}): Status => ({
   trouble: null,
   port: null,
   corePresent: true,
+  qdPresent: false,
   elevated: false,
   alwaysAdmin: false,
   systemProxy: false,

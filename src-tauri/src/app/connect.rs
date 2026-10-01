@@ -138,7 +138,7 @@ impl Connection {
         // Порт служебного входа — у работающего ядра: свежий сделал бы конфиги разными
         // на ровном месте.
         let effective = crate::render::effective::ConfigRenderer::effective(
-            state.routing.rules(state)?.as_deref(),
+            &state.routing.document(state)?,
             state.mihomo.probe_port(),
         )?;
         let changed = match crate::core::mihomo::apply::Apply::needed(&launched, &effective.yaml)? {

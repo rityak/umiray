@@ -1,6 +1,6 @@
 [package]
 name = "umiray"
-version = "1.2.0"
+version = "1.3.0"
 edition = "2021"
 autobins = false
 
@@ -32,7 +32,12 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 # net — UDP для запросов к резолверам (D-097); остальное было и раньше.
 tokio = { version = "1", features = ["time", "rt", "macros", "net", "sync"] }
 sha2 = "0.10"
+# Ключ ECDSA P-256 устройства WARP под MASQUE (D-165). Уже в дереве через rustls.
+ring = "0.17"
+# Кириллический домен списка — в punycode (D-157): так имя приходит в DNS и SNI. Уже в дереве через url.
+idna = "1"
 tauri-plugin-updater = "2"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
 
 # Спрятанному в трей окну WebView2 говорят «тебя не видно» (`IsVisible`): иначе страница
 # считает себя на экране и крутит таймеры и отрисовку часами. Уже в дереве через wry.
@@ -52,6 +57,7 @@ features = [
     "Win32_System_Threading",
     "Win32_System_JobObjects",
     "Win32_System_Console",
+    "Win32_System_DataExchange",
     "Win32_System_IO",
     "Win32_System_Registry",
     "Win32_System_SystemInformation",

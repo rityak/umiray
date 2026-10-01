@@ -20,16 +20,16 @@ export default function AdminOffer({ onAccept, onDismiss }: Props) {
       actions={
         <>
           <Button size="sm" variant="ghost" onClick={onDismiss}>
-            {t("Don't pin")}
+            {t("Not now")}
           </Button>
           <Button size="sm" variant="primary" onClick={onAccept}>
-            {t("Pin")}
+            {t("Create task")}
           </Button>
         </>
       }
     >
       {t(
-        "The rights are here now — the scheduler task can be created right from here. After that TUN comes up at once, and UAC asks neither at launch nor at sign-in. Remove it in Settings → Umiray Settings.",
+        "You have admin rights now, so the scheduler task can be created right away. Then TUN starts at once, with no UAC prompt at launch or sign-in. Remove it in Settings → Umiray Settings.",
       )}
     </Callout>
   );

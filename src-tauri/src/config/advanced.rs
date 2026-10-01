@@ -74,9 +74,15 @@ pub struct Options {
     pub strict_route: bool,
     /// Куда заворачивать чужие запросы к DNS: `адрес:порт`.
     pub dns_hijack: Vec<String>,
+    /// Один внешний UDP-порт на все адреса назначения (`endpoint-independent-nat`): игры,
+    /// звонки и P2P видят «открытый» NAT. Спорное (D-169): стеку TUN это чуть дороже.
+    pub open_nat: bool,
     pub dns_enable: bool,
     pub enhanced_mode: Enhanced,
     pub nameserver: Vec<String>,
+    /// DoH сначала по HTTP/3 (`prefer-h3`). Спорное (D-169): где QUIC пропускают, быстрее;
+    /// где режут, первый запрос ждёт отказа и уходит на HTTP/2.
+    pub prefer_h3: bool,
 }
 
 /// Ключи файла. Названы один раз: чтение и запись обязаны говорить об одном поле.
@@ -93,6 +99,8 @@ const STRICT_ROUTE: &str = "strict-route";
 const DNS_HIJACK: &str = "dns-hijack";
 const ENHANCED_MODE: &str = "enhanced-mode";
 const NAMESERVER: &str = "nameserver";
+const OPEN_NAT: &str = "endpoint-independent-nat";
+const PREFER_H3: &str = "prefer-h3";
 
 /// Разумные границы MTU. Ниже 576 не пройдёт даже IPv4-минимум, выше 9000 —
 /// jumbo-кадр, которого не переварит обычная сеть. Проверяем, потому что это **граница
@@ -152,9 +160,11 @@ fn of(map: &Mapping) -> Result<Options> {
         mtu: field(tun, MTU)?,
         strict_route: field(tun, STRICT_ROUTE)?,
         dns_hijack: field(tun, DNS_HIJACK)?,
+        open_nat: field(tun, OPEN_NAT)?,
         dns_enable: field(dns, ENABLE)?,
         enhanced_mode: field(dns, ENHANCED_MODE)?,
         nameserver: field(dns, NAMESERVER)?,
+        prefer_h3: field(dns, PREFER_H3)?,
     })
 }
 
@@ -214,6 +224,7 @@ fn apply(map: &mut Mapping, options: &Options) -> Result<()> {
     Yaml::set(tun, STACK, tag(options.stack)?);
     Yaml::set(tun, STRICT_ROUTE, Value::from(options.strict_route));
     Yaml::set(tun, DNS_HIJACK, seq(cleaned(&options.dns_hijack)));
+    Yaml::set(tun, OPEN_NAT, Value::from(options.open_nat));
     match options.device.trim() {
         "" => clear(tun, DEVICE),
         name => Yaml::set(tun, DEVICE, Value::from(name)),
@@ -227,6 +238,7 @@ fn apply(map: &mut Mapping, options: &Options) -> Result<()> {
     Yaml::set(dns, ENABLE, Value::from(options.dns_enable));
     Yaml::set(dns, ENHANCED_MODE, tag(options.enhanced_mode)?);
     Yaml::set(dns, NAMESERVER, seq(nameserver));
+    Yaml::set(dns, PREFER_H3, Value::from(options.prefer_h3));
 
     // Тумблер ставит только `enable`; что именно нюхать — `fill`, то есть один раз.
     // Правило то же, что у всей сборки (D-029): что задаёт способность — форсируем,
@@ -267,6 +279,22 @@ mod tests {
         of(&Mapping::new()).unwrap()
     }
 
+    /// Спорные поля лежат там, где их читает ядро, а не плоско, как в форме.
+    #[test]
+    fn the_disputed_options_land_in_their_sections() {
+        let map = written(
+            "",
+            &Options {
+                open_nat: true,
+                prefer_h3: true,
+                ..defaults()
+            },
+        );
+        assert_eq!(map["tun"]["endpoint-independent-nat"], Value::from(true));
+        assert_eq!(map["dns"]["prefer-h3"], Value::from(true));
+        assert!(of(&map).unwrap().open_nat);
+    }
+
     fn written(document: &str, options: &Options) -> Mapping {
         let mut map = Yaml::top_mapping(document).unwrap();
         apply(&mut map, options).unwrap();
@@ -291,6 +319,10 @@ mod tests {
             "ноль означает «решает ядро», а не «MTU нулевой»"
         );
         assert!(!empty.sniffer);
+        assert!(
+            !empty.open_nat && !empty.prefer_h3,
+            "спорное без поля выключено"
+        );
 
         for bad in [
             "tun: {stack: черепаха}",
@@ -456,9 +488,11 @@ mod tests {
             mtu: 1400,
             strict_route: true,
             dns_hijack: vec!["any:53".into()],
+            open_nat: true,
             dns_enable: true,
             enhanced_mode: Enhanced::RedirHost,
             nameserver: vec!["https://1.1.1.1/dns-query".into(), "8.8.8.8".into()],
+            prefer_h3: true,
         };
         assert_eq!(of(&written("", &options)).unwrap(), options);
     }

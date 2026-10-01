@@ -12,6 +12,7 @@ pub mod core;
 pub mod diag;
 pub mod direction;
 pub mod groups;
+pub mod lists;
 pub mod mode;
 pub mod nodes;
 pub mod presets;
