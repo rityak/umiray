@@ -264,8 +264,11 @@ const ru: Record<string, Entry> = {
   "Generate headers": "Сгенерировать заголовки",
   Apply: "Применить",
   "Some subscriptions didn't refresh.": "Обновились не все подписки.",
-  "Everything your rules don't catch goes to {target}. The choice here only affects rules that point to umiray.":
-    "Всё, что не попало под правила, идёт в {target}. Выбор здесь влияет только на правила с целью umiray.",
+  "Everything your rules don't catch goes to {target} — set by MATCH in Routing. Pick an exit or a node to send it there instead.":
+    "Всё, что не попало под правила, идёт в {target} — так задано в MATCH в «Маршрутизации». Выберите выход или узел, чтобы отправить это туда.",
+  "Send everything else through {name}?": "Отправлять всё остальное через {name}?",
+  "Right now the MATCH rule in Routing sends it to {target}. It will follow the choice here again.":
+    "Сейчас правило MATCH в «Маршрутизации» шлёт его в {target}. После замены оно снова будет следовать выбору здесь.",
   "No nodes": "Узлов нет",
   "Add a subscription or a link.": "Добавьте подписку или ссылку.",
   "Add source": "Добавить источник",
@@ -762,7 +765,7 @@ const ru: Record<string, Entry> = {
   "Custom URL": "Свой адрес",
   "UDP through compatible servers": "UDP через серверы с его поддержкой",
   "Route UDP through compatible servers": "UDP через серверы с его поддержкой",
-  "Reading nodes…": "загрузка узлов…",
+  "Reading nodes…": "Загрузка узлов…",
   "No compatible nodes: add a hysteria2, tuic or wireguard source":
     "нет узлов hysteria2, tuic или wireguard",
   "Country flag": "Флаг страны",
@@ -896,7 +899,7 @@ const ru: Record<string, Entry> = {
   // Мастер первого запуска (D-162).
   setup: "мастер настройки",
   "umiray setup": "Настройка umiray",
-  Setup: "Способ",
+  Approach: "Способ",
   Subscription: "Подписка",
   "How to set up": "Как настроить",
   Recommended: "Рекомендованная",
@@ -908,8 +911,8 @@ const ru: Record<string, Entry> = {
   "Needs administrator rights": "Нужны права администратора",
   "Add a source first — then AUTO and nodes can be chosen.":
     "Сначала добавьте источник — тогда можно выбрать AUTO и узлы.",
-  "Measuring resolvers…": "Меряю резолверы…",
-  "Measuring MTU…": "Меряю MTU…",
+  "Measuring resolvers…": "Замеряю DNS…",
+  "Measuring MTU…": "Замеряю MTU…",
   "Saving…": "Сохраняю…",
   "Skip setup": "Пропустить",
   Back: "Назад",
@@ -923,8 +926,8 @@ const ru: Record<string, Entry> = {
     "Настроит ядро сразу для всех режимов и подберёт DNS и MTU под этот компьютер.",
   "Changes nothing. You can set everything up later in Settings.":
     "Ничего не меняет. Всё можно настроить позже в «Настройках».",
-  "Checks public DNS servers and keeps the four fastest. The core asks all of them at once and takes the first answer.":
-    "Проверит публичные DNS-серверы и оставит четыре самых быстрых. Ядро спрашивает их все сразу и берёт первый ответ.",
+  "Compares public DNS servers and keeps the four fastest.":
+    "Сравнит публичные DNS и оставит четыре самых быстрых.",
   "DNS filtering": "Фильтрация DNS",
   "No filtering": "Без фильтров",
   "Block ads": "Блокировка рекламы",
@@ -939,28 +942,25 @@ const ru: Record<string, Entry> = {
   "measures public DNS servers and writes the four fastest; the core asks them all at once":
     "опросит публичные DNS-серверы и запишет четыре самых быстрых — ядро спрашивает их все сразу",
   Pick: "Подобрать",
-  "Finds the largest packet that gets through whole and leaves room for the tunnel header.":
-    "Найдёт самый крупный пакет, который проходит без дробления, и оставит место под заголовок туннеля.",
+  "Fits the packet size to your network so traffic in TUN isn't split.":
+    "Подгонит размер пакета под вашу сеть, чтобы трафик в TUN не дробился.",
   "What Recommended does": "Что сделает «Рекомендованная»",
-  "Sets up the core the same way for Proxy, System and TUN.":
-    "Настроит ядро одинаково для Proxy, System и TUN.",
-  "Ads and trackers won't load in the browser or in apps. DNS is picked only from servers that block ads, and the ad-blocking rules are turned on.":
-    "Реклама и трекеры не загрузятся ни в браузере, ни в программах. DNS подберётся только из серверов, которые режут рекламу, и включатся правила блокировки.",
+  "Writes the recommended core config, one for Proxy, System and TUN.":
+    "Запишет рекомендованный конфиг ядра, один на Proxy, System и TUN.",
+  "Ads and trackers won't load in browsers or apps. DNS and routing rules take care of it.":
+    "Реклама и трекеры не будут грузиться ни в браузере, ни в программах — об этом позаботятся DNS и правила маршрута.",
   "Ads are blocked": "Реклама блокируется",
   "Ad blocking is off": "Блокировка рекламы выключена",
   "Fine-tuning": "Тонкости",
-  "Each of these usually helps, but not on every computer. All of them stay in Mihomo Settings.":
-    "Обычно каждая из этих опций помогает, но не на любом компьютере. Все они потом есть в «Настройках mihomo».",
-  "Recognize sites by connection": "Узнавать сайт по соединению",
-  "Site rules also work for apps that connect by address, not by name. Rarely, an app stops working with it — then turn it off.":
-    "Правила для сайтов срабатывают и для программ, которые подключаются по адресу, а не по имени. Изредка какая-нибудь программа с этим не работает — тогда выключите.",
-  "DNS over HTTP/3": "DNS по HTTP/3",
-  "Names resolve faster if your provider lets QUIC through. If it blocks QUIC, the first lookup waits a moment and then goes the usual way.":
-    "Адреса находятся быстрее, если провайдер пропускает QUIC. Если не пропускает, первый запрос немного подождёт и пойдёт обычным путём.",
+  "These usually help but sometimes get in the way. Change them later in Mihomo Settings.":
+    "Обычно помогают, но иногда мешают. Поменять их можно потом в «Настройках mihomo».",
+  Sniffer: "Sniffer",
+  "Site rules also catch apps that connect by IP. If an app stops working, turn it off.":
+    "Правила для сайтов сработают и для программ, которые подключаются по IP. Если программа перестала работать — выключите.",
   "Open NAT": "Открытый NAT",
-  "Games, calls and torrents connect to other people more easily. Works in TUN mode and adds a little load.":
-    "Играм, звонкам и торрентам проще соединяться с другими людьми. Работает в режиме TUN и немного добавляет нагрузки.",
-  "Writing the core config…": "Пишу конфиг ядра…",
+  "Games, calls and torrents connect to other people more easily. TUN only, adds a little CPU load.":
+    "Играм, звонкам и торрентам проще соединяться с другими. Только в TUN, немного нагружает процессор.",
+  "Writing the core config…": "Записываю конфиг ядра…",
   "Everything is saved to Mihomo Settings, where you can change it.":
     "Всё запишется в «Настройки mihomo» — там же можно поменять.",
   "Subscription, capture and route, step by step. Your sources stay":

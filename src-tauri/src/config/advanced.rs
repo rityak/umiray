@@ -80,8 +80,8 @@ pub struct Options {
     pub dns_enable: bool,
     pub enhanced_mode: Enhanced,
     pub nameserver: Vec<String>,
-    /// DoH сначала по HTTP/3 (`prefer-h3`). Спорное (D-169): где QUIC пропускают, быстрее;
-    /// где режут, первый запрос ждёт отказа и уходит на HTTP/2.
+    /// DoH сначала по HTTP/3 (`prefer-h3`). Только в форме, не в мастере (D-169): где QUIC
+    /// пропускают, быстрее; где режут (S-034), первый запрос ждёт отказа и уходит на HTTP/2.
     pub prefer_h3: bool,
 }
 

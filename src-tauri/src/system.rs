@@ -8,6 +8,7 @@ pub mod browser;
 pub mod console;
 pub mod elevation;
 pub mod install;
+pub mod instance;
 pub mod job;
 pub mod killswitch;
 pub mod lang;

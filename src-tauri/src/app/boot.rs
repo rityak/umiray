@@ -103,6 +103,11 @@ const STEPS: &[Step] = &[
         run: window,
     },
     Step {
+        id: "replace",
+        label: "приём просьбы уступить место",
+        run: replace,
+    },
+    Step {
         id: "sweep",
         label: "уборка осиротевшего ядра",
         run: sweep,
@@ -179,6 +184,18 @@ fn window(app: &AppHandle) -> Done {
 /// Прибираемся после падения, и ядро — первым: осиротевшее держит порт, а в TUN ещё
 /// и весь трафик машины (D-059). Место обязано быть именно здесь: вторую копию приложения
 /// плагин одиночного запуска гасит раньше `setup`, иначе она убила бы ядро первой.
+/// Повышенный клиент обязан слышать новую версию, запущенную без прав (B-030).
+fn replace(app: &AppHandle) -> Done {
+    if crate::system::instance::Instance::hear_lower(&app.config().identifier) {
+        Ok(())
+    } else {
+        Err(
+            "окно одиночного запуска не нашлось — новая версия не сможет попросить уступить место"
+                .into(),
+        )
+    }
+}
+
 fn sweep(app: &AppHandle) -> Done {
     let state = app.state::<AppState>();
     for id in crate::core::EngineId::ALL {

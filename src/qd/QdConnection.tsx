@@ -199,9 +199,11 @@ export default function QdConnection({
         </Card>
       </div>
 
-      {/* `contain: size`: the row takes the height of the power card, and the nodes scroll
-          inside it instead of pushing the traffic down. */}
-      <div className="flex min-h-0 flex-col gap-3 [contain:size]">
+      {/* `contain: size` while there are nodes: the row takes the height of the power card,
+          and the nodes scroll inside it instead of pushing the traffic down. Without nodes
+          the column keeps its own height — the empty subscription card is taller than the
+          power card and would slide under the traffic. */}
+      <div className={`flex min-h-0 flex-col gap-3 ${shown.length > 0 ? "[contain:size]" : ""}`}>
         <QdSubscription
           state={state}
           hidden={hidden}

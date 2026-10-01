@@ -18,7 +18,7 @@ type StepId = "way" | "options" | "source" | "capture" | "route";
 /// ядро, которое мастер настраивает (перехват и маршрут есть только у mihomo), и способ:
 /// спорные опции спрашивает только «Рекомендованная» (D-169).
 const STEPS: { id: StepId; label: string; shows: (engine: api.Engine, way: Way) => boolean }[] = [
-  { id: "way", label: tk("Setup"), shows: () => true },
+  { id: "way", label: tk("Approach"), shows: () => true },
   {
     id: "options",
     label: tk("Fine-tuning"),
@@ -108,7 +108,6 @@ export default function Setup({
       (options) =>
         setChoices({
           sniffer: options.sniffer,
-          preferH3: options.preferH3,
           openNat: options.openNat,
         }),
       () => {},

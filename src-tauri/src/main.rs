@@ -52,7 +52,7 @@ fn main() {
         // трей ломает обычный сценарий — «закрыл окно, запустил ярлык снова» (D-046).
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             // Новая версия просит уступить место (B-027): выход штатный, как из трея.
-            if system::install::Installation::asked_to_leave(&args) {
+            if system::instance::Instance::asked_to_leave(&args) {
                 app.exit(0);
                 return;
             }
@@ -142,6 +142,7 @@ fn main() {
             commands::nodes::nodes_list,
             commands::nodes::nodes_ping,
             commands::direction::direction_set,
+            commands::direction::direction_take_match,
             commands::direction::routing_set,
             commands::direction::routing_ads_set,
             commands::connection::connection_snapshot,

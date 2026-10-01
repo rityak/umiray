@@ -105,6 +105,7 @@ export default function QdSubscription({
     return (
       <Card padding="sm" title={t("Subscription")} actions={add}>
         <EmptyState
+          size="sm"
           icon={<Rss />}
           title={t("No sources")}
           hint={t("Add the qd:// link from your provider. A new link replaces the current one.")}

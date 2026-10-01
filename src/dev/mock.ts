@@ -363,8 +363,7 @@ const TUNED: Record<string, api.Report> = {
   recommended: {
     tool: "recommended",
     verdict: "ok",
-    headline:
-      "Конфиг ядра: рекомендованный, DNS и сниффер — во всех режимах. Рискованное: dns.prefer-h3, tun.endpoint-independent-nat",
+    headline: "Конфиг ядра: рекомендованный, одинаково подходит для Proxy, System и TUN",
   },
   "dns-race": {
     tool: "dns-race",
@@ -431,7 +430,11 @@ const qdCall = (method: string, path: string, body: Record<string, unknown> | nu
     qdFlags = { ...qdFlags, ...body };
     return qdState();
   }
-  if (at === "nodes") return qdNodes;
+  if (at === "nodes") return qdImported ? qdNodes : [];
+  if (at === "reset") {
+    qdImported = false;
+    return qdState();
+  }
   if (at.startsWith("history/"))
     return {
       window: 60,
@@ -623,6 +626,14 @@ const HANDLERS: Record<string, (args: Args) => unknown> = {
   nodes_code_set: () => null,
   nodes_reset: () => null,
   direction_set: ({ direction: next, node: name }) => {
+    direction = next as api.Direction;
+    if (name) selected = String(name);
+    return status_();
+  },
+  // Как бэкенд: MATCH применённого набора — снова в выбор, и сразу выбор.
+  direction_take_match: ({ direction: next, node: name }) => {
+    const id = presets.find((preset) => preset.applied)?.id;
+    if (id !== undefined && routing[id]) routing[id] = { ...routing[id], fallback: "umiray" };
     direction = next as api.Direction;
     if (name) selected = String(name);
     return status_();

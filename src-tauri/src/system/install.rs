@@ -12,20 +12,12 @@ use std::process::{self, Command};
 use windows_sys::Win32::Storage::FileSystem::{
     GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW, VS_FIXEDFILEINFO,
 };
-use windows_sys::Win32::System::DataExchange::COPYDATASTRUCT;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    FindWindowW, MessageBoxW, SendMessageW, IDYES, MB_ICONINFORMATION, MB_ICONQUESTION, MB_OK,
-    MB_YESNO, WM_COPYDATA,
+    MessageBoxW, IDYES, MB_ICONINFORMATION, MB_ICONQUESTION, MB_OK, MB_YESNO,
 };
 
 use crate::paths::Paths;
-
-/// С этим аргументом новая копия просит работающую уступить место (B-027): та выходит
-/// штатно — гасит ядро и снимает системный прокси, как по «Выходу» в трее.
-pub const REPLACE: &str = "--replace";
-
-/// Метка сообщения плагина одиночного запуска: им же копии говорят друг с другом всегда.
-const SINGLE_INSTANCE_DATA: usize = 1542;
+use crate::system::instance::Instance;
 
 /// Сколько ждать, пока работающая копия выйдет: ей нужно погасить ядро.
 const LEAVE_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
@@ -58,11 +50,6 @@ impl Installation {
                 false
             }
         }
-    }
-
-    /// Новая копия просит эту уступить место (B-027).
-    pub fn asked_to_leave(args: &[String]) -> bool {
-        args.iter().any(|arg| arg == REPLACE)
     }
 }
 
@@ -151,7 +138,7 @@ fn replace_running(
 
 /// Попросить работающую копию уйти и положить файл, как только он освободится.
 fn evict(identifier: &str, source: &Path, target: &Path) -> bool {
-    ask_to_leave(identifier);
+    Instance::ask_to_leave(identifier);
     let started = std::time::Instant::now();
     while started.elapsed() < LEAVE_WAIT {
         if copy_to(source, target).is_ok() {
@@ -171,32 +158,6 @@ fn differs(source: &Path, target: &Path) -> bool {
             .map(|meta| (meta.len(), meta.modified().ok()))
     };
     stamp(target).is_none() || stamp(source) != stamp(target)
-}
-
-/// Попросить работающую копию выйти — тем же сообщением, каким плагин одиночного запуска
-/// передаёт ей аргументы второго запуска: `каталог|аргументы…` (`tauri-plugin-single-instance`).
-fn ask_to_leave(identifier: &str) {
-    let class = wide(&format!("{identifier}-sic"));
-    let title = wide(&format!("{identifier}-siw"));
-    let window = unsafe { FindWindowW(class.as_ptr(), title.as_ptr()) };
-    if window.is_null() {
-        return;
-    }
-    let data = leave_message(&std::env::current_dir().unwrap_or_default());
-    let message = COPYDATASTRUCT {
-        dwData: SINGLE_INSTANCE_DATA,
-        cbData: data.len() as u32,
-        lpData: data.as_ptr() as *mut _,
-    };
-    unsafe {
-        SendMessageW(window, WM_COPYDATA, 0, &message as *const _ as isize);
-    }
-}
-
-/// Текст сообщения: каталог, потом аргументы через `|`, в конце ноль — плагин читает его
-/// как строку C и делит по `|` (`tauri-plugin-single-instance`, `WM_COPYDATA`).
-fn leave_message(cwd: &Path) -> String {
-    format!("{}|umiray|{REPLACE}\0", cwd.to_string_lossy())
 }
 
 fn wide(text: &str) -> Vec<u16> {
@@ -293,72 +254,6 @@ fn file_version(path: &Path) -> io::Result<(u16, u16, u16, u16)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Работающая копия получает аргументы так, как их разбирает плагин: первое — каталог,
-    /// остальное — аргументы, и среди них просьба уйти.
-    #[test]
-    fn the_leave_request_reads_as_arguments_of_a_second_launch() {
-        let data = leave_message(Path::new(r"C:\Users\me"));
-        let text = data.strip_suffix('\0').expect("строка C кончается нулём");
-        let mut parts = text.split('|');
-        assert_eq!(parts.next(), Some(r"C:\Users\me"));
-        let args: Vec<String> = parts.map(str::to_string).collect();
-        assert!(Installation::asked_to_leave(&args), "{args:?}");
-        assert!(!Installation::asked_to_leave(&["umiray".into()]));
-    }
-
-    /// Живая: настоящая отладочная копия получает просьбу и выходит штатно, с кодом 0 —
-    /// то есть через `RunEvent::Exit`, который гасит ядро. Работающую копию закрывает.
-    #[test]
-    #[ignore]
-    fn live_a_running_copy_leaves_when_asked() {
-        let exe = std::env::current_exe()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("umiray-dev.exe");
-        assert!(exe.is_file(), "нет {exe:?} — сначала `cargo build`");
-        let identifier = crate::app::boot::Boot::context()
-            .config()
-            .identifier
-            .clone();
-        let class = wide(&format!("{identifier}-sic"));
-        let title = wide(&format!("{identifier}-siw"));
-        let found = || unsafe { !FindWindowW(class.as_ptr(), title.as_ptr()).is_null() };
-
-        // Своя копия, если её нет; уже работающая — тоже годится, просьба одна и та же.
-        let mut own = (!found()).then(|| {
-            process::Command::new(&exe)
-                .arg("--scheduled")
-                .spawn()
-                .expect("копия не запустилась")
-        });
-        let up = std::time::Instant::now();
-        while !found() && up.elapsed() < std::time::Duration::from_secs(30) {
-            std::thread::sleep(std::time::Duration::from_millis(200));
-        }
-        assert!(found(), "окно одиночного запуска так и не появилось");
-
-        ask_to_leave(&identifier);
-        let asked = std::time::Instant::now();
-        while found() && asked.elapsed() < LEAVE_WAIT {
-            std::thread::sleep(std::time::Duration::from_millis(200));
-        }
-        if found() {
-            // Своя копия не должна пережить провал: она держит вывод прогона открытым.
-            if let Some(child) = own.as_mut() {
-                let _ = child.kill();
-            }
-            panic!("копия не ушла за {LEAVE_WAIT:?}");
-        }
-        if let Some(child) = own.as_mut() {
-            let status = child.wait().unwrap();
-            assert!(status.success(), "выход не штатный: {status}");
-        }
-        println!("копия ушла за {:?}", asked.elapsed());
-    }
 
     #[test]
     fn an_older_build_cannot_replace_the_installed_client() {

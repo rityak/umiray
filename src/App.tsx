@@ -1,7 +1,16 @@
 import { Layers, Network, Route, ScrollText, SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { AppShell, Button, Callout, Dialog, Dock, type DockItem, Toaster } from "rootik";
+import {
+  AppShell,
+  Button,
+  Callout,
+  ConfirmHost,
+  Dialog,
+  Dock,
+  type DockItem,
+  Toaster,
+} from "rootik";
 import * as api from "./api";
 import TitleBar from "./chrome/TitleBar";
 import ClientUpdate from "./config/ClientUpdate";
@@ -317,6 +326,7 @@ export default function App() {
     >
       {/* Тосты живут в верхнем слое: видны и поверх мастера (D-161). */}
       <Toaster position="bottom-right" />
+      <ConfirmHost />
       {/* Окна добавления — одни на все кнопки «+» (D-160). */}
       {adding.open === "link" && <LinkDialog onSubmit={adding.submit} onClose={adding.close} />}
       {adding.open === "warp" && <WarpDialog onDone={adding.done} onClose={adding.close} />}

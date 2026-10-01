@@ -3,6 +3,15 @@
 The version comes from `package.json`, is mirrored in `Cargo.toml`, and appears in
 the subscription User-Agent as `umiray/<version>`.
 
+## 1.3.1
+
+### Changes
+
+- V131
+
+For Windows x64, download `umiray_1.3.1_x64-setup.exe` from this release's assets.
+Existing installations can update from within the client.
+
 ## 1.3.0
 
 ### New
@@ -10,7 +19,7 @@ the subscription User-Agent as `umiray/<version>`.
 - First-run setup wizard, also available from the title bar: a source, the capture mode
   and the exit, step by step. "Recommended" writes a tuned mihomo config, picks the fastest
   DNS resolvers and the TUN MTU, can block ads, and has a step for options with
-  trade-offs: sniffing, `prefer-h3` and open NAT.
+  trade-offs: sniffing and open NAT.
 - Rule sets: downloaded lists of domains and subnets — antizapret, antifilter, Telegram,
   YouTube and more from the built-in catalog, or any list by address. Each has its own exit
   and priority and is refreshed in the background; a list from GitHub has a button that
@@ -36,6 +45,8 @@ the subscription User-Agent as `umiray/<version>`.
 - Sources moved into Connection: one card switches between nodes and sources, and one "+"
   menu adds anything — a link, a subscription, a file, WARP or a `qd://` link.
 - `DIRECT` and `AUTO` are the first rows of the node list instead of a separate switch.
+- When the MATCH rule in Routing points somewhere other than your choice, Connection marks
+  its target, and picking another exit offers to send everything else there instead.
 - DNS and sniffing are on in every capture mode, not only in TUN. DNS resolvers are picked
   from a category: no filtering, ad blocking, or any.
 - The Tools section is gone: each check runs where its answer is needed.

@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef } from "react";
-import { Callout } from "rootik";
+import { Callout, confirm } from "rootik";
 import * as api from "../api";
 import type { Drafts } from "../config/draft";
 import { useCached } from "../hooks/useCached";
@@ -110,17 +110,21 @@ export default function Connection({
   usePoll(poll);
 
   /// Показываем выбор сразу, но правду скажет ближайший опрос: источник истины — бэкенд,
-  /// и он же поправит направление, если выбранного узла больше нет.
+  /// и он же поправит направление, если выбранного узла больше нет. `takeMatch` — заодно
+  /// вернуть выбору `MATCH` набора (D-166).
   const choose = useCallback(
-    async (next: api.Direction, picked?: string) => {
+    async (next: api.Direction, picked?: string, takeMatch = false) => {
       generation.current++;
       setDirection(next);
       if (picked) {
         setNode(picked);
         setRoute([picked]);
       }
+      if (takeMatch) setFallback(null);
       try {
-        onStatus(await api.directionSet(next, picked));
+        onStatus(
+          await (takeMatch ? api.directionTakeMatch(next, picked) : api.directionSet(next, picked)),
+        );
       } catch (e) {
         onMessage(failure(e));
       } finally {
@@ -132,12 +136,28 @@ export default function Connection({
   );
 
   /// DIRECT и AUTO — такие же строки списка, как узлы (D-166): нажатие ставит направление.
+  /// Пока `MATCH` набора смотрит мимо выбора, нажатие спрашивает, заменить ли его: молча
+  /// выбранный узел решал бы только правила в `umiray`.
   const pick = useCallback(
-    (name: string) => {
+    async (name: string) => {
+      if (fallback === name) return;
       const next = choice(name);
-      choose(next.direction, next.node);
+      if (fallback === null) {
+        choose(next.direction, next.node);
+        return;
+      }
+      const replace = await confirm({
+        title: t("Send everything else through {name}?", { name }),
+        description: t(
+          "Right now the MATCH rule in Routing sends it to {target}. It will follow the choice here again.",
+          { target: fallback },
+        ),
+        confirmLabel: t("Replace"),
+        cancelLabel: t("Cancel"),
+      });
+      if (replace) choose(next.direction, next.node, true);
     },
-    [choose],
+    [choose, fallback],
   );
   const own = useMemo(() => exits(nodes.length), [nodes.length]);
   const measure = useMemo(() => ({ method: ping, run: api.nodesPing }), [ping]);
@@ -228,14 +248,14 @@ export default function Connection({
           head={head}
           nodes={nodes}
           exits={own}
-          selected={chosen(direction, node)}
+          // `MATCH` набора не в `umiray` — отмечена его цель: DIRECT, AUTO или узел. Цель-группа
+          // строкой списка не бывает, и тогда не отмечено ничего (D-166).
+          selected={fallback ?? chosen(direction, node)}
           note={
-            // `MATCH` набора не в `umiray`: выбор здесь решает только правила в `umiray`,
-            // и молчать об этом значит врать про нажатие (D-166).
             fallback !== null && (
               <Callout tone="info">
                 {t(
-                  "Everything your rules don't catch goes to {target}. The choice here only affects rules that point to umiray.",
+                  "Everything your rules don't catch goes to {target} — set by MATCH in Routing. Pick an exit or a node to send it there instead.",
                   { target: fallback },
                 )}
               </Callout>

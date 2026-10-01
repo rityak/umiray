@@ -101,6 +101,24 @@ impl Routing {
         })
     }
 
+    /// Вернуть `MATCH` применённого набора выбору и сразу выбрать (D-166). Так отвечает нажатие
+    /// в «Соединении», когда `MATCH` смотрит мимо выбора, — после «Заменить» человека: иначе
+    /// выбор решал бы только правила в `umiray`, а всё остальное шло бы прежней целью.
+    pub fn take_match(
+        &self,
+        state: &AppState,
+        direction: Direction,
+        node: Option<String>,
+    ) -> Result<()> {
+        if let Some(id) = self.applied_preset(state) {
+            let text = PresetStore::content(&id)?;
+            if let Some(changed) = with_match_to_choice(&text)? {
+                PresetStore::write(&id, RULES, &changed)?;
+            }
+        }
+        self.set_direction(state, direction, node)
+    }
+
     /// Включить или выключить маршрутизацию (D-166). До живого ядра правку доводит
     /// `Connection::change`: сборка меняется целиком, соединения рвутся (D-143).
     pub fn set_routing(&self, state: &AppState, on: bool) -> Result<()> {
@@ -235,6 +253,17 @@ fn with_ads(text: &str, on: bool) -> Result<String> {
     RulesCodec::render(text, &routing)
 }
 
+/// Документ набора с `MATCH` в псевдоним — в выбор «Соединения». `None` — он и так там.
+/// Остальное как было: правила, rule sets и готовые наборы не трогаются.
+fn with_match_to_choice(text: &str) -> Result<Option<String>> {
+    let mut routing = RulesCodec::parse(text)?;
+    if routing.fallback == crate::config::direction::SELECTOR {
+        return Ok(None);
+    }
+    routing.fallback = crate::config::direction::SELECTOR.into();
+    RulesCodec::render(text, &routing).map(Some)
+}
+
 fn applied(settings: &Settings, presets: &[Preset]) -> Option<String> {
     settings
         .preset
@@ -284,6 +313,31 @@ ready:
         let off = RulesCodec::parse(&with_ads(&on, false).unwrap()).unwrap();
         let ids: Vec<&str> = off.ready.iter().map(|ready| ready.id.as_str()).collect();
         assert_eq!(ids, ["direct-ru"]);
+    }
+
+    /// «Заменить» в «Соединении» переводит только `MATCH` — свои правила и списки остаются,
+    /// а `MATCH` уже в выборе не переписывается.
+    #[test]
+    fn taking_match_back_moves_only_match() {
+        let mine = "rules:
+  - DOMAIN,a.ru,DIRECT
+  - MATCH,RU-VLESS-GROUP
+ready:
+  - id: direct-ru
+";
+        let changed = with_match_to_choice(mine)
+            .unwrap()
+            .expect("MATCH мимо выбора");
+        let routing = RulesCodec::parse(&changed).unwrap();
+        assert_eq!(routing.fallback, crate::config::direction::SELECTOR);
+        assert_eq!(routing.rules.len(), 1, "своё правило на месте");
+        assert_eq!(routing.ready.len(), 1, "готовый набор на месте");
+        assert_eq!(
+            routed(Some(&changed)),
+            None,
+            "выбор снова решает всё непойманное"
+        );
+        assert!(with_match_to_choice(&changed).unwrap().is_none());
     }
 
     /// При `MATCH` мимо псевдонима «через какой сервер» отвечает документ, а не ядро.

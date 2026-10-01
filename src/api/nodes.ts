@@ -120,6 +120,10 @@ export const connectionSnapshot = () => call(ConnectionSnapshot, "connection_sna
 /// и окно обязано показать результат сразу, а не через опрос.
 export const directionSet = (direction: Direction, node?: string) =>
   call(Status, "direction_set", { direction, node: node ?? null });
+/// То же и вернуть выбору `MATCH` применённого набора (D-166): нажатие, когда `MATCH`
+/// смотрит мимо выбора, после «Заменить». Одна перезагрузка ядра вместо двух.
+export const directionTakeMatch = (direction: Direction, node?: string) =>
+  call(Status, "direction_take_match", { direction, node: node ?? null });
 /// Включить или выключить маршрутизацию (D-166): выключенная шлёт всё в выбранный выход.
 export const routingSet = (on: boolean) => call(Status, "routing_set", { on });
 /// Блокировать ли рекламу (D-169): готовый набор в применённом наборе маршрута.

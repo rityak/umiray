@@ -27,6 +27,24 @@ pub async fn direction_set(
         .await
 }
 
+/// Выбрать выход и вернуть ему `MATCH` применённого набора (D-166): нажатие в «Соединении»,
+/// когда `MATCH` смотрит мимо выбора, после «Заменить» человека. Одна правка — одна
+/// перезагрузка ядра, а не две подряд.
+#[tauri::command]
+pub async fn direction_take_match(
+    direction: direction::Direction,
+    node: Option<String>,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Status> {
+    state
+        .connection
+        .change(&app, &state, || {
+            state.routing.take_match(&state, direction, node)
+        })
+        .await
+}
+
 /// Блокировать ли рекламу (D-169): готовый набор в применённом наборе маршрута. Статус —
 /// по той же причине, что и у маршрутизации: сборка доезжает до работающего ядра сразу.
 #[tauri::command]

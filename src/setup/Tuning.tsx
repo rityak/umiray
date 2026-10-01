@@ -23,16 +23,14 @@ export const TUNING: Tune[] = [
   {
     id: "recommended",
     title: "mihomo",
-    what: tk("Sets up the core the same way for Proxy, System and TUN."),
+    what: tk("Writes the recommended core config, one for Proxy, System and TUN."),
     doing: tk("Writing the core config…"),
     icon: <FileCog />,
   },
   {
     id: "dns-race",
     title: "DNS",
-    what: tk(
-      "Checks public DNS servers and keeps the four fastest. The core asks all of them at once and takes the first answer.",
-    ),
+    what: tk("Compares public DNS servers and keeps the four fastest."),
     doing: tk("Measuring resolvers…"),
     icon: <Server />,
     filtered: true,
@@ -40,9 +38,7 @@ export const TUNING: Tune[] = [
   {
     id: "pmtu",
     title: "MTU",
-    what: tk(
-      "Finds the largest packet that gets through whole and leaves room for the tunnel header.",
-    ),
+    what: tk("Fits the packet size to your network so traffic in TUN isn't split."),
     doing: tk("Measuring MTU…"),
     icon: <Ruler />,
   },
@@ -69,7 +65,7 @@ export default function Tuning({ ads, onAds }: Props) {
       <Switch
         label={t("Block ads")}
         description={t(
-          "Ads and trackers won't load in the browser or in apps. DNS is picked only from servers that block ads, and the ad-blocking rules are turned on.",
+          "Ads and trackers won't load in browsers or apps. DNS and routing rules take care of it.",
         )}
         checked={ads}
         onChange={(event) => onAds(event.target.checked)}

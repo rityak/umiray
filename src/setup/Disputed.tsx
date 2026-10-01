@@ -3,31 +3,26 @@ import { t, tk } from "../i18n";
 
 /// Что решает сам человек (D-169): у каждой опции есть цена, и правильного ответа на все
 /// машины нет. Новая спорная опция — запись здесь и поле в «Настройках mihomo».
-export type Choices = { sniffer: boolean; preferH3: boolean; openNat: boolean };
+/// `prefer-h3` здесь нет: HTTP/3 к DoH на сетях в РФ не проходит, и пользы от него ноль (S-034).
+export type Choices = { sniffer: boolean; openNat: boolean };
 
 /// С чего начинает первый запуск: так, как советует рекомендованный конфиг.
-export const ADVISED: Choices = { sniffer: true, preferH3: true, openNat: true };
+export const ADVISED: Choices = { sniffer: true, openNat: true };
 
+/// Подпись — термин, как его ищут (COPY, правило 2); подсказка — что будет и чем заплатишь.
 const OPTIONS: { key: keyof Choices; label: string; about: string }[] = [
   {
     key: "sniffer",
-    label: tk("Recognize sites by connection"),
+    label: tk("Sniffer"),
     about: tk(
-      "Site rules also work for apps that connect by address, not by name. Rarely, an app stops working with it — then turn it off.",
-    ),
-  },
-  {
-    key: "preferH3",
-    label: tk("DNS over HTTP/3"),
-    about: tk(
-      "Names resolve faster if your provider lets QUIC through. If it blocks QUIC, the first lookup waits a moment and then goes the usual way.",
+      "Site rules also catch apps that connect by IP. If an app stops working, turn it off.",
     ),
   },
   {
     key: "openNat",
     label: tk("Open NAT"),
     about: tk(
-      "Games, calls and torrents connect to other people more easily. Works in TUN mode and adds a little load.",
+      "Games, calls and torrents connect to other people more easily. TUN only, adds a little CPU load.",
     ),
   },
 ];
@@ -43,7 +38,7 @@ export default function Disputed({ value, onChange }: Props) {
     <div className="flex flex-col gap-4">
       <Text size="sm" tone="muted">
         {t(
-          "Each of these usually helps, but not on every computer. All of them stay in Mihomo Settings.",
+          "These usually help but sometimes get in the way. Change them later in Mihomo Settings.",
         )}
       </Text>
       {OPTIONS.map((option) => (
