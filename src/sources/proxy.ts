@@ -1489,6 +1489,22 @@ export function toEntry(id: string, values: Values, extra: Entry = {}): Entry {
   return entry;
 }
 
+/// Whether two entries say the same. Key order is not meaning: the form lays fields out in
+/// model order, the file in its own, and comparing text called an untouched node edited.
+export function sameEntry(a: Entry | null, b: Entry | null): boolean {
+  return JSON.stringify(sorted(a)) === JSON.stringify(sorted(b));
+}
+
+function sorted(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sorted);
+  if (value === null || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([key, inner]) => [key, sorted(inner)]),
+  );
+}
+
 /// What is missing for the node to come up at all. Counted over **visible** fields: a
 /// hidden one cannot be required — it was not shown.
 /// Filled fields whose value the node cannot work with.

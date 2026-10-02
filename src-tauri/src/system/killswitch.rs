@@ -70,6 +70,19 @@ pub struct Backup {
     /// и оставил машину запертой без единой записи о том, кто её запер.
     #[serde(default)]
     pub profiles: Vec<Profile>,
+    /// Что мы разрешили: бинарь ядра и адаптер (D-073). Тот же приём, что `ours`
+    /// у системного прокси: адаптер правят в «Настройках», и правила, разрешающие прежний,
+    /// заперли бы машину при живом туннеле. Пусто — снимок прошлой сборки, сверять не с чем.
+    #[serde(default)]
+    pub allowed: Option<Allowed>,
+}
+
+/// Кого выпускают наши разрешения.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Allowed {
+    pub core: String,
+    pub device: String,
 }
 
 /// Профиль брандмауэра, каким он был до нас.
@@ -138,19 +151,37 @@ impl Firewall {
     #[cfg(test)]
     pub fn engage(core: &std::path::Path, device: &str) -> Result<Backup> {
         let previous = read_profiles()?;
-        if let Err(why) = Firewall::apply(core, device) {
+        let allowed = Allowed {
+            core: core.display().to_string(),
+            device: device.to_string(),
+        };
+        if let Err(why) = Firewall::apply(&allowed) {
             // Полдороги хуже, чем ничего: разрешения без запрета бессмысленны, запрет без
             // разрешений отнимает сеть. Прибираем за собой и отдаём причину наверх.
-            let _ = Firewall::release(&Backup { profiles: previous });
+            let _ = Firewall::release(&Backup {
+                profiles: previous,
+                allowed: None,
+            });
             return Err(why);
         }
-        Ok(Backup { profiles: previous })
+        Ok(Backup {
+            profiles: previous,
+            allowed: None,
+        })
     }
 
     /// Поставить правила без нового снимка. Снимок хранит приложение до изменения ОС,
     /// поэтому reconnect не должен заменять его состоянием уже включённого запрета.
-    pub fn apply(core: &std::path::Path, device: &str) -> Result<()> {
-        powershell(&script(&core.display().to_string(), device))?;
+    pub fn apply(allowed: &Allowed) -> Result<()> {
+        powershell(&script(&allowed.core, &allowed.device))?;
+        Ok(())
+    }
+
+    /// Заменить разрешения, не снимая запрета: адаптер или бинарь ядра сменились, а машина
+    /// всё это время заперта (B-042). Новые встают раньше, чем уходят прежние, — окна, где
+    /// новое ядро не выпущено, нет.
+    pub fn renew(allowed: &Allowed) -> Result<()> {
+        powershell(&renew_script(allowed))?;
         Ok(())
     }
 
@@ -216,6 +247,17 @@ fn script(core: &str, device: &str) -> String {
          New-NetFirewallRule -DisplayName '{PREFIX}: локальная сеть' -Direction Outbound \
            -Action Allow -RemoteAddress LocalSubnet | Out-Null
          Set-NetFirewallProfile -All -Enabled True -DefaultOutboundAction Block"
+    )
+}
+
+/// Текст замены разрешений: прежние запоминаются, новые встают, прежние уходят. Запрет
+/// стоит всё время — машина не открывается ни на миг (B-042).
+fn renew_script(allowed: &Allowed) -> String {
+    format!(
+        "$old = @(Get-NetFirewallRule -DisplayName '{PREFIX}*' -ErrorAction SilentlyContinue)
+         {}
+         $old | Remove-NetFirewallRule",
+        script(&allowed.core, &allowed.device)
     )
 }
 
@@ -325,6 +367,7 @@ mod tests {
                     action: "Block".into(),
                 },
             ],
+            allowed: None,
         };
         let out = restore_script(&backup);
         assert!(out.contains("-Name Domain -Enabled False -DefaultOutboundAction NotConfigured"));
@@ -362,6 +405,29 @@ mod tests {
             out.matches('\'').count() % 2,
             0,
             "кавычки не сбалансированы — часть скрипта прочтётся не как задумано:\n{out}"
+        );
+    }
+
+    /// B-042: замена разрешений не открывает машину. Прежние правила запоминаются до новых
+    /// и уходят после них, а запрет профиля не снимается вовсе.
+    #[test]
+    fn the_renewal_puts_new_allowances_before_removing_the_old() {
+        let out = renew_script(&Allowed {
+            core: r"C:\umiray\mihomo.exe".into(),
+            device: "umiray".into(),
+        });
+        let remembered = out
+            .find("$old = @(Get-NetFirewallRule")
+            .expect("прежние запомнены");
+        let first = out.find("New-NetFirewallRule").expect("новые встают");
+        let removed = out
+            .find("$old | Remove-NetFirewallRule")
+            .expect("прежние уходят");
+        assert!(remembered < first && out.rfind("New-NetFirewallRule") < Some(removed));
+        assert!(out.contains("-InterfaceAlias 'umiray'"), "новый адаптер");
+        assert!(
+            !out.contains("NotConfigured"),
+            "запрет не снимается:\n{out}"
         );
     }
 }

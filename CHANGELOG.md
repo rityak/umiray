@@ -3,6 +3,48 @@
 The version comes from `package.json`, is mirrored in `Cargo.toml`, and appears in
 the subscription User-Agent as `umiray/<version>`.
 
+## 1.3.2
+
+### New
+
+- Ready-made sets "AI services" and "Geo-blocked for Russia": both go through the VPN even
+  when the exit is Direct. Existing installations get them once; a deleted set stays deleted.
+- A subscription that failed to update in the background now says so with a line in the
+  window, and the line stays until the next successful update.
+- Uninstalling the client puts the Windows proxy back: the running client is asked to quit
+  cleanly before the installer removes it.
+
+### Changes
+
+- On the qd view "+" opens the `qd://` link dialog straight away. Files, the manual form and
+  WARP belong to mihomo, and a non-`qd://` link is refused at the field.
+- A subscription node keeps its address, port and path in the editor: another address is
+  another node.
+- Kill switch follows the capture mode: switching TUN to Proxy lifts it, and a renamed TUN
+  adapter gets new allowances without unlocking the machine.
+- Node names from subscriptions lose commas: a rule can lead to any node.
+
+### Fixes
+
+- A subscription answering with a page instead of nodes ("subscription expired", a Wi-Fi
+  portal) no longer wipes the nodes and sends traffic around the VPN.
+- Editing a subscription node's address no longer overwrites the neighbouring node, and
+  editing one of two nodes behind the same address no longer copies it over the other.
+- A second edit of a subscription node no longer erases the first one.
+- A subscription deleted while it was updating no longer comes back.
+- Picking TUN without administrator rights while connected no longer leaves the browser
+  outside the VPN.
+- Background updates no longer stop when the clock was ahead at the last update.
+- A rule leading to a group or node with a comma in its name is refused instead of silently
+  going through `umiray`.
+- `no-resolve` after a regex rule no longer becomes its target, and a space after a comma
+  inside a regex is kept.
+- A comma in a rule value splits it into values instead of shifting the target.
+- A new group no longer opens and edits together with the first one.
+- Unsaved changes in mihomo Settings and the WireGuard mask survive leaving the section.
+- An untouched node no longer offers "Save".
+- Exporting settings onto the client's own database is refused.
+
 ## 1.3.1
 
 ### Changes

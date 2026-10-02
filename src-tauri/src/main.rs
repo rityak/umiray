@@ -31,10 +31,15 @@ use app::state::AppState;
 use app::tray;
 
 fn main() {
+    let context = app::boot::Boot::context();
+    // Удаление зовёт клиента прибраться (B-044) — и только: ни переноса, ни задачи, ни окна.
+    if std::env::args().any(|arg| arg == app::maintenance::UNINSTALL) {
+        app::maintenance::Maintenance::uninstall(&context.config().identifier);
+        return;
+    }
     // Клиент работает только из каталога данных (D-171): сборка из другого места кладёт
     // себя туда и запускает копию — до того, как задача и плагин одиночного запуска
     // увидели бы не тот бинарь.
-    let context = app::boot::Boot::context();
     if system::install::Installation::handoff(&context.config().identifier) {
         return;
     }

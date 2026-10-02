@@ -19,20 +19,18 @@ type Props = {
   /// Absent — the type cannot change: for an existing node that would be another node, not an edit.
   onKind?: (kind: string) => void;
   onChange: (key: string, value: string) => void;
-  /// Fields shown but not editable (an existing node's name, D-121).
-  locked?: string[];
-  /// Why the field is locked — as a caption under it.
-  why?: string;
+  /// Fields shown but not editable (an existing node's name, D-121; a subscription node's
+  /// address, D-036): field key → why, shown as a caption under it.
+  locked?: Record<string, string>;
 };
 
 /**
  * Node fields from the protocol model (D-121). One form for two dialogs: "Manually" and the
  * node editor. A new protocol is one entry in `proxy.ts` and shows up here by itself.
  */
-export default function ProxyForm({ kind, values, onKind, onChange, locked, why }: Props) {
+export default function ProxyForm({ kind, values, onKind, onChange, locked = {} }: Props) {
   const here = new Set(shown(kind, values).map((field) => field.key));
   const visible = (field: Field) => here.has(field.key);
-  const shut = new Set(locked ?? []);
 
   /// A field, and under it the fields that hang off its checkbox (D-131).
   const rows = (fields: Field[], parent?: string): ReactNode[] =>
@@ -45,8 +43,8 @@ export default function ProxyForm({ kind, values, onKind, onChange, locked, why 
             <Row
               field={field}
               value={values[field.key] ?? ""}
-              locked={shut.has(field.key)}
-              why={shut.has(field.key) ? why : undefined}
+              locked={field.key in locked}
+              why={locked[field.key]}
               onChange={(next) => onChange(field.key, next)}
             />
             {inner.length > 0 && (

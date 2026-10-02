@@ -13,6 +13,11 @@ const notes = read("CHANGELOG.md")
 assert.ok(notes, `CHANGELOG.md must contain release notes for ${pkg.version}`);
 for (const asset of ["public/ray-mark.svg", "public/ray.svg"])
   assert.match(read(asset), /<svg\b/, `${asset} must contain the app icon`);
+assert.match(
+  read(`src-tauri/${config.bundle.windows.nsis.installerHooks}`),
+  /NSIS_HOOK_PREUNINSTALL/,
+  "The uninstall hook must give Windows its proxy back (B-044)",
+);
 assert.match(pkg.version, /^\d+\.\d+\.\d+$/, "Release version must be stable X.Y.Z");
 assert.equal(lock.version, pkg.version, "package-lock version differs");
 assert.equal(lock.packages[""].version, pkg.version, "package-lock root version differs");

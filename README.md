@@ -9,7 +9,7 @@
   Tauri&nbsp;2 · Rust · React · <a href="https://github.com/rityak/rootik">Rootik</a>
 </p>
 
-<p align="center"><b>1.3.1</b> · <a href="README.ru.md">Русская версия</a></p>
+<p align="center"><b>1.3.2</b> · <a href="README.ru.md">Русская версия</a></p>
 
 ![Connection](screenshots/connection.png)
 

@@ -45,6 +45,20 @@ impl Instance {
         }
     }
 
+    /// Попросить работающую копию выйти и дождаться, пока её окно исчезнет: к этому моменту
+    /// она погасила ядро и вернула прокси и брандмауэр. `true` — ушла или её не было.
+    pub fn send_away(identifier: &str, wait: std::time::Duration) -> bool {
+        Instance::ask_to_leave(identifier);
+        let asked = std::time::Instant::now();
+        while !window(identifier).is_null() {
+            if asked.elapsed() > wait {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        true
+    }
+
     /// Слышать просьбу уступить место и от копии без прав (B-030). Клиент «всегда
     /// от администратора» повышен, а новая версия запускается обычной: Windows не доставляет
     /// `WM_COPYDATA` процессу выше уровнем (UIPI), и замена молча не удавалась. Канал умеет

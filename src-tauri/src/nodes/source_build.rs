@@ -1,21 +1,23 @@
 //! Преобразование сырья источника в записи ядра.
 
+use std::collections::HashMap;
+
 use crate::error::{AppError, Result};
-use crate::nodes::entries::EntryPatch;
+use crate::nodes::entries::{Entries, EntryPatch};
 
 /// Ссылки источника — в документ `proxies:` (D-122). Второй список — то, чего разбор
 /// не осилил: такие ссылки в конфиг не идут, но в окне видны.
 ///
 /// Правка ложится **поверх** разобранного, а не в него: свежий ключ с сервера должен
-/// доезжать и через неделю после правки.
+/// доезжать и через неделю после правки. `written` пусто — записи как их прислала панель:
+/// от них редактор считает разницу (D-119).
 pub(super) fn converted(
-    id: &str,
     lines: Vec<String>,
     mask: &crate::config::awg::Mask,
+    written: &Entries,
 ) -> Result<(String, Vec<String>)> {
-    let written = EntryPatch::load(id);
     let mask = mask.option();
-    let mut proxies = Vec::new();
+    let mut entries = Vec::new();
     let mut skipped = Vec::new();
     for line in lines {
         match crate::nodes::convert::Converter::to_entry(&line) {
@@ -32,16 +34,22 @@ pub(super) fn converted(
                         crate::yaml::Yaml::set(&mut entry, "amnezia-wg-option", option);
                     }
                 }
-                if let Some(patch) =
-                    SourceBuilder::identity_of(&entry).and_then(|key| written.get(&key))
-                {
-                    EntryPatch::apply(patch, &mut entry);
-                }
-                proxies.push(serde_yaml::Value::Mapping(entry));
+                entries.push(entry);
             }
             None => skipped.push(line),
         }
     }
+    let keys = SourceBuilder::keys(&entries);
+    let proxies = entries
+        .into_iter()
+        .zip(keys)
+        .map(|(mut entry, key)| {
+            if let Some(patch) = key.and_then(|key| written.get(&key)) {
+                EntryPatch::apply(patch, &mut entry);
+            }
+            serde_yaml::Value::Mapping(entry)
+        })
+        .collect();
     let mut document = serde_yaml::Mapping::new();
     crate::yaml::Yaml::set(
         &mut document,
@@ -95,5 +103,25 @@ impl SourceBuilder {
             })
             .unwrap_or_default();
         Some(format!("{kind}|{}:{port}|{path}", text("server")))
+    }
+
+    /// Ключи правок записей по порядку (B-036). Двойники — узлы за одним тождеством, у панелей
+    /// это разные uuid и sni за одним адресом — различаются номером: первый остаётся с голым
+    /// тождеством, и прежние правки находят свой узел, следующий — `тождество#2`. Без номера
+    /// правка одного ложилась на оба.
+    pub fn keys(entries: &[serde_yaml::Mapping]) -> Vec<Option<String>> {
+        let mut seen: HashMap<String, usize> = HashMap::new();
+        entries
+            .iter()
+            .map(|entry| {
+                let identity = Self::identity_of(entry)?;
+                let count = seen.entry(identity.clone()).or_default();
+                *count += 1;
+                Some(match *count {
+                    1 => identity,
+                    n => format!("{identity}#{n}"),
+                })
+            })
+            .collect()
     }
 }

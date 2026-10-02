@@ -40,11 +40,20 @@ export default function MaskForm({ onMessage, onSaved, onUnsavedChange }: Props)
   /// Keep the opt-in visible before numbers are entered; disk stores the fields (D-131).
   const [amnezia, setAmnezia] = useState(false);
 
+  // An unsaved edit outlives leaving the section: the fresh file replaces only an untouched
+  // draft. `disk` is the snapshot the cached draft was made against — read once, on opening.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: snapshot at opening
   useEffect(() => {
     api.clientMaskGet().then(
       (mask) => {
+        setDraft((was) =>
+          was !== null &&
+          disk !== null &&
+          api.MASK_FIELDS.some((field) => was[field] !== disk[field])
+            ? was
+            : mask,
+        );
         setDisk(mask);
-        setDraft(mask);
       },
       (e) => onMessage(failure(e)),
     );

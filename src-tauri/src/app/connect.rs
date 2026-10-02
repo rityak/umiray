@@ -178,8 +178,18 @@ impl Connection {
         choice: crate::app::mode::Choice,
     ) -> Result<Status> {
         let _transition = self.lock().await;
+        let running = state.mihomo.status().running;
+        // Права — до записи режима и до снятия системного прокси (B-041): отказ на полпути
+        // оставлял ядро в Proxy без прокси в Windows, TUN в конфиге и зелёное окно —
+        // браузер ходил мимо VPN. Остановленному ядру права не нужны: их спросит запуск.
+        if running {
+            crate::core::mihomo::Mihomo::check_privileges(
+                choice.core(),
+                crate::system::elevation::Elevation::is_elevated(),
+            )?;
+        }
         crate::app::mode::Choice::set(state, choice)?;
-        if !state.mihomo.status().running {
+        if !running {
             return Ok(self.shown(app, state));
         }
         if choice == crate::app::mode::Choice::System {

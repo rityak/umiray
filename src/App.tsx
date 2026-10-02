@@ -193,9 +193,11 @@ export default function App() {
     (status.trouble
       ? {
           tone: "error" as const,
-          text: status.trouble,
+          text: status.trouble.text,
           details: [],
-          kind: "restartNeeded",
+          // Кнопка — только там, где перезапуск лечит: подписке, которая не обновилась, он
+          // не поможет.
+          kind: status.trouble.restart ? "restartNeeded" : undefined,
         }
       : null) ??
     (status.restartReason
@@ -300,6 +302,7 @@ export default function App() {
           engines={status.qdPresent ? ["mihomo", "qd"] : ["mihomo"]}
           onEngine={chooseEngine}
           onAdd={adding.pick}
+          adds={engine.adds}
           onSetup={() => setSetupOpen(true)}
           onSettings={() => {
             opener.current = document.activeElement as HTMLElement | null;
@@ -328,7 +331,9 @@ export default function App() {
       <Toaster position="bottom-right" />
       <ConfirmHost />
       {/* Окна добавления — одни на все кнопки «+» (D-160). */}
-      {adding.open === "link" && <LinkDialog onSubmit={adding.submit} onClose={adding.close} />}
+      {adding.open === "link" && (
+        <LinkDialog onSubmit={adding.submit} onClose={adding.close} qdOnly={viewed === "qd"} />
+      )}
       {adding.open === "warp" && <WarpDialog onDone={adding.done} onClose={adding.close} />}
       {adding.open === "node" && <NodeDialog onDone={adding.done} onClose={adding.close} />}
       {setupOpen && (

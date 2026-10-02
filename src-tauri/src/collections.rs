@@ -34,7 +34,7 @@ const DNS_SHIPPED: &str = include_str!("../../collections/dns.yaml");
 const LISTS_SHIPPED: &str = include_str!("../../collections/lists.yaml");
 
 /// Наборы правил — та же раздача, только папкой. Пара «идентификатор, содержимое».
-const RULES_SHIPPED: [(&str, &str); 2] = [
+const RULES_SHIPPED: [(&str, &str); 4] = [
     (
         "direct-ru",
         include_str!("../../collections/rules/direct-ru.yaml"),
@@ -43,7 +43,20 @@ const RULES_SHIPPED: [(&str, &str); 2] = [
         "block-ads",
         include_str!("../../collections/rules/block-ads.yaml"),
     ),
+    ("ai", include_str!("../../collections/rules/ai.yaml")),
+    (
+        "geoblock",
+        include_str!("../../collections/rules/geoblock.yaml"),
+    ),
 ];
+
+/// Наборы первой поставки: их получила каждая установка, у которой ещё нет отметки
+/// выданного. Удалённый человеком из них не должен вернуться.
+const RULES_FIRST: [&str; 2] = ["direct-ru", "block-ads"];
+
+/// Какие поставляемые наборы эта база уже получала — строкой в той же таблице: отметка
+/// про коллекцию и едет вместе с ней.
+const OFFERED: &str = "rules-offered";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -141,6 +154,24 @@ impl Collections {
         })
     }
 
+    /// Новые наборы поставки — в уже заполненную базу, каждый один раз (D-100). Удалённый
+    /// человеком не возвращается: он записан как выданный. На чистой установке `seed` уже
+    /// положил всё, и здесь ставится только отметка.
+    pub fn offer() -> Result<()> {
+        let given = Db::get(Table::Collections, OFFERED, "")?;
+        let present: Vec<String> = Self::folder(RULES).into_iter().map(|(id, _)| id).collect();
+        let (missing, marker) = offered(given.as_deref(), &present);
+        if given.as_deref() == Some(marker.as_str()) {
+            return Ok(());
+        }
+        Db::batch(|batch| {
+            for (id, shipped) in &missing {
+                batch.put(Table::Collections, RULES, id, shipped)?;
+            }
+            batch.put(Table::Collections, OFFERED, "", &marker)
+        })
+    }
+
     /// Доучить коллекции, перенесённые с файлов (D-170), тому, что новые получают образцом:
     /// перевод названий наборов, каталог rule sets, провайдеры DNS под категории (S-033).
     /// Каждое — один раз: `done` отвечает, стояла ли у старой папки метка этого шага.
@@ -207,6 +238,36 @@ impl Collections {
             .filter(|(id, _)| !id.is_empty())
             .collect()
     }
+}
+
+/// Что положить и какой станет отметка. `given` — отметка из базы, `None` — её не было:
+/// тогда выданы наборы первой поставки. Набор, который уже лежит, не перекладывается.
+fn offered(given: Option<&str>, present: &[String]) -> (Vec<(&'static str, &'static str)>, String) {
+    let given: Vec<&str> = match given {
+        Some(text) => text
+            .lines()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .collect(),
+        None => RULES_FIRST.to_vec(),
+    };
+    let missing = RULES_SHIPPED
+        .into_iter()
+        .filter(|(id, _)| !given.contains(id) && !present.iter().any(|have| have == id))
+        .collect();
+    let mut marker = given;
+    for (id, _) in RULES_SHIPPED {
+        if !marker.contains(&id) {
+            marker.push(id);
+        }
+    }
+    (
+        missing,
+        marker.join(
+            "
+",
+        ),
+    )
 }
 
 fn translated_title(text: &str, shipped: &str) -> Option<String> {
@@ -310,6 +371,36 @@ mod tests {
             );
             assert!(value.get("rules").is_some(), "{id}: нет правил");
         }
+    }
+
+    /// Новый набор поставки доходит до заполненной базы один раз; удалённый человеком —
+    /// ни из первой поставки, ни из новой — не возвращается.
+    #[test]
+    fn a_new_shipped_set_arrives_once_and_a_deleted_one_stays_deleted() {
+        let have = |ids: &[&str]| ids.iter().map(|id| id.to_string()).collect::<Vec<_>>();
+        let ids = |missing: &[(&'static str, &'static str)]| -> Vec<&'static str> {
+            missing.iter().map(|(id, _)| *id).collect()
+        };
+
+        // Установка до этой отметки: block-ads человек удалил, новых наборов ещё нет.
+        let (missing, marker) = offered(None, &have(&["direct-ru"]));
+        assert_eq!(ids(&missing), ["ai", "geoblock"]);
+        assert_eq!(
+            marker,
+            "direct-ru
+block-ads
+ai
+geoblock"
+        );
+
+        // Следующий запуск: ai человек тоже удалил — не возвращается.
+        let (missing, again) = offered(Some(&marker), &have(&["direct-ru", "geoblock"]));
+        assert!(missing.is_empty());
+        assert_eq!(again, marker);
+
+        // Чистая установка: `seed` положил всё — только отметка.
+        let (missing, _) = offered(None, &have(&["ai", "block-ads", "direct-ru", "geoblock"]));
+        assert!(missing.is_empty());
     }
 
     /// Дописываются только недостающие из названных, текст владельца остаётся как был,

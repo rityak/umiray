@@ -27,6 +27,8 @@ type Props = {
   /// "Where to" — the same choices a rule has.
   targets: string[];
   nodes: string[];
+  /// Names nothing answers to (D-156).
+  lost: (target: string) => boolean;
   onMessage: (message: Message | null) => void;
 };
 
@@ -60,7 +62,7 @@ function staleDays(list: api.RuleList): number | null {
  * its own exit. They work in every direction — an exit through a proxy is used even in
  * Direct. The client downloads a list when it is added; the core builds its own format.
  */
-export default function RuleSets({ entries, onChange, targets, nodes, onMessage }: Props) {
+export default function RuleSets({ entries, onChange, targets, nodes, lost, onMessage }: Props) {
   const [cache, setCache] = useCached<api.RuleList[]>("lists", []);
   const [offers, setOffers] = useCached<api.ListOffer[]>("lists.catalog", []);
   const [adding, setAdding] = useState(false);
@@ -227,6 +229,7 @@ export default function RuleSets({ entries, onChange, targets, nodes, onMessage 
                         value={entry.target}
                         groups={targets}
                         nodes={nodes}
+                        lost={lost}
                         label={t("Where to send «{name}»", { name: title(entry.id) })}
                         onChange={(target) =>
                           onChange(

@@ -117,7 +117,10 @@ impl Sources {
 
     /// Обновить одну подписку по кнопке.
     pub async fn refresh(&self, app: &AppHandle, state: &AppState, id: &str) -> Result<Import> {
-        let (source, mut notices) = SourceImporter::refresh(id).await?;
+        let refreshed = SourceImporter::refresh(id).await;
+        // Удача снимает жалобу фонового обновления, отказ её ставит (D-038).
+        crate::app::refresher::Refresher::complain(state);
+        let (source, mut notices) = refreshed?;
         notices.extend(reload(app, state, &source.id).await);
         spawn_geo();
         Ok(Import { notices, source })
@@ -163,6 +166,8 @@ impl Sources {
             .connection
             .change(app, state, || SourceStore::delete(id))
             .await?;
+        // Жалоба могла быть об этой подписке — её больше нет.
+        crate::app::refresher::Refresher::complain(state);
         Ok(warning)
     }
 

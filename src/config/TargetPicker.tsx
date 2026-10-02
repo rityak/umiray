@@ -1,5 +1,5 @@
 import { Select } from "rootik";
-import { targetLook } from "./kinds";
+import { lostLook, targetLook } from "./kinds";
 
 type Props = {
   value: string;
@@ -8,6 +8,8 @@ type Props = {
   /// Nodes the core will actually bring up (D-082).
   nodes: string[];
   label: string;
+  /// Names nothing answers to (D-156): the build sends them to `umiray`.
+  lost: (target: string) => boolean;
   onChange: (target: string) => void;
 };
 
@@ -17,10 +19,10 @@ type Props = {
  * is always in the list — otherwise the field would show emptiness where the document
  * says something.
  */
-export default function TargetPicker({ value, groups, nodes, label, onChange }: Props) {
+export default function TargetPicker({ value, groups, nodes, label, lost, onChange }: Props) {
   const all = [...new Set([value, ...groups, ...nodes])];
   const options = all.map((target) => {
-    const look = targetLook(target, nodes);
+    const look = lost(target) ? lostLook() : targetLook(target, nodes);
     return {
       value: target,
       label: target,

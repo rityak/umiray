@@ -21,7 +21,19 @@ type Row = { key: number; group: api.Group; selection: Selection };
 
 const EMPTY: Choices = { sources: [], nodes: [] };
 
-let kept: { text: string; rows: Row[] } | null = null;
+/// What the form showed when the section was left: the rows, the draft they render to and
+/// the document their origins point into. Coming back to the same draft resumes exactly
+/// this; taking our own output as the new base would point origins at the wrong groups.
+let kept: { text: string; rows: Row[]; base: string } | null = null;
+
+/// Keys are unique per session, not per mount: kept rows outlive the component, and a
+/// counter restarting at zero gave a new group the key of the first one — both opened
+/// and were edited as one.
+let last = 0;
+const key = () => {
+  last += 1;
+  return last;
+};
 
 function fresh(key: number): Row {
   return {
@@ -47,23 +59,16 @@ function fresh(key: number): Row {
  * Edits update the shared draft; Save, Revert and Ctrl+S also serve code view.
  */
 export default function GroupsForm({ text, onDraft, onMessage }: Props) {
-  const [rows, setRows] = useState<Row[]>(() => (kept?.text === text ? kept.rows : []));
+  const [resumed] = useState(() => (kept?.text === text ? kept : null));
+  const [rows, setRows] = useState<Row[]>(() => resumed?.rows ?? []);
   const [choices, setChoices] = useCached<Choices>("groups.choices", EMPTY);
-  const cached = useRef(kept?.text === text);
-  kept = { text, rows };
   const [open, setOpen] = useState<number | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
-  const next = useRef(0);
-  /// Names and positions change while editing, so neither can identify a row.
-  const key = useCallback(() => {
-    next.current += 1;
-    return next.current;
-  }, []);
   /// Origins refer to this document. Rebuilding on our own output after reordering
   /// would attach unknown fields to the wrong group.
-  const base = useRef<string | null>(null);
+  const base = useRef<string | null>(resumed?.base ?? null);
   /// Do not parse the form's own output again.
-  const ours = useRef<string | null>(null);
+  const ours = useRef<string | null>(resumed ? text : null);
 
   /// Parsing may finish before the node catalog arrives; read its latest value.
   const choicesRef = useRef(choices);
@@ -80,29 +85,25 @@ export default function GroupsForm({ text, onDraft, onMessage }: Props) {
     // Compare only with our output. Revert restores base and must reparse it.
     if (text === ours.current) return;
     base.current = text;
-    if (cached.current) {
-      cached.current = false;
-      return;
-    }
     let alive = true;
     api.groupsParse(text).then(
       (groups) => {
         if (!alive) return;
+        const parsed = groups.map((group) => ({
+          key: key(),
+          group,
+          selection: read(group, choicesRef.current),
+        }));
+        kept = { text, rows: parsed, base: text };
         setRefused(null);
-        setRows(
-          groups.map((group) => ({
-            key: key(),
-            group,
-            selection: read(group, choicesRef.current),
-          })),
-        );
+        setRows(parsed);
       },
       (e) => alive && setRefused(api.asAppError(e).message),
     );
     return () => {
       alive = false;
     };
-  }, [text, key]);
+  }, [text]);
 
   /// Recompute derived selections when the catalog arrives after parsing.
   useEffect(() => {
@@ -118,6 +119,7 @@ export default function GroupsForm({ text, onDraft, onMessage }: Props) {
           list.map((row) => row.group),
         );
         ours.current = rendered;
+        kept = { text: rendered, rows: list, base: base.current ?? "" };
         onDraft(rendered);
       } catch (e) {
         onMessage(failure(e));
@@ -158,6 +160,7 @@ export default function GroupsForm({ text, onDraft, onMessage }: Props) {
           key={row.key}
           group={row.group}
           selection={row.selection}
+          taken={rows.filter((item) => item.key !== row.key).map((item) => item.group.name.trim())}
           choices={choices}
           open={open === row.key}
           onToggle={() => setOpen(open === row.key ? null : row.key)}

@@ -189,6 +189,8 @@ mod tests {
     /// строковые константы, и разбирать надо ровно то, что уедет пользователю.
     const DIRECT_RU: &str = include_str!("../../../collections/rules/direct-ru.yaml");
     const BLOCK_ADS: &str = include_str!("../../../collections/rules/block-ads.yaml");
+    const AI: &str = include_str!("../../../collections/rules/ai.yaml");
+    const GEOBLOCK: &str = include_str!("../../../collections/rules/geoblock.yaml");
 
     #[test]
     fn a_file_gives_its_title_and_its_rules() {
@@ -196,7 +198,9 @@ mod tests {
         assert_eq!(set.title, "Россия — напрямую");
         assert_eq!(set.title_en.as_deref(), Some("Russia — direct"));
         assert_eq!(set.id, "direct-ru");
-        assert!(set.rules.contains(&"DOMAIN-SUFFIX,ru,DIRECT".to_string()));
+        assert!(set
+            .rules
+            .contains(&"DOMAIN-SUFFIX,ru,DIRECT,no-resolve".to_string()));
         assert!(
             !set.rules.iter().any(|rule| rule.contains("push")),
             "пуши — не про страну, в этом наборе им места нет"
@@ -204,12 +208,20 @@ mod tests {
         assert_eq!(parse("block-ads", BLOCK_ADS).unwrap().rules.len(), 1);
     }
 
-    /// Выход набора — общий выход его строк (D-158): у поставляемых он один на весь файл.
+    /// Выход набора — общий выход его строк (D-158): у поставляемых он один на весь файл,
+    /// иначе его не переопределить в «Маршрутизации». `no-resolve` в хвосте regex выходом
+    /// не считается (B-035). Нейросети и закрытое — в `AUTO`: выбор в «Соединении» бывает
+    /// `DIRECT`, и сервис снова увидел бы российский адрес.
     #[test]
     fn a_set_s_exit_is_the_one_its_lines_share() {
         assert_eq!(
             parse("direct-ru", DIRECT_RU).unwrap().target.as_deref(),
             Some("DIRECT")
+        );
+        assert_eq!(parse("ai", AI).unwrap().target.as_deref(), Some("AUTO"));
+        assert_eq!(
+            parse("geoblock", GEOBLOCK).unwrap().target.as_deref(),
+            Some("AUTO")
         );
         assert_eq!(
             parse("block-ads", BLOCK_ADS).unwrap().target.as_deref(),

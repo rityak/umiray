@@ -11,45 +11,63 @@ use crate::app::engine::{Capture, Engine};
 use crate::app::settings::Patch;
 use crate::app::state::AppState;
 use crate::app::status::Status;
-use crate::core::EngineId;
 use crate::error::Result;
-use crate::system::killswitch::Backup;
-use crate::system::killswitch::Firewall;
+use crate::system::killswitch::{Allowed, Backup, Firewall};
 
 pub struct KillSwitch;
 
 impl KillSwitch {
-    /// Запереть выход (D-073). Только в TUN: в local и system ядро — обычный прокси, мимо
-    /// которого приложение вправе ходить, и запирать машину за него мы не подряжались.
-    /// Выпускаем бинарь того ядра, что держит адаптер, и через тот адаптер, что оно подняло.
+    /// Привести запрет к ядру, которое сейчас держит трафик (D-073). Зовётся, когда ядро
+    /// поднялось, и тумблером.
+    ///
+    /// Только в TUN: в local и system ядро — обычный прокси, мимо которого приложение вправе
+    /// ходить. Поэтому запрет, оставшийся от TUN после смены режима, снимается: перезапуск
+    /// его не трогает, и без этого в Proxy всё мимо прокси стояло без сети (B-042). Выпускаем
+    /// бинарь того ядра, что держит адаптер, и через тот адаптер, что оно подняло; сменился
+    /// адаптер — меняем разрешения, не открывая машину.
     ///
     /// Молчаливый отказ намеренный: не встало правило — VPN всё равно работает, просто без
     /// подстраховки, и ронять из-за этого подключение хуже. Что защиты нет, видно в статусе.
-    pub fn engage(&self, state: &AppState, engine: &dyn Engine) -> Result<()> {
-        let Some(Capture::Tun { device }) = engine.state().capture else {
-            return Ok(());
+    pub fn follow(&self, state: &AppState, engine: &dyn Engine) -> Result<()> {
+        let tun = match engine.state().capture {
+            Some(Capture::Tun { device }) => Some(Allowed {
+                core: engine.binary().display().to_string(),
+                device,
+            }),
+            _ => None,
         };
         let settings = state.settings.get();
-        if !settings.kill_switch {
-            return Ok(());
+        let held = settings.kill_switch_backup;
+        match step(tun.as_ref(), settings.kill_switch, held.as_ref()) {
+            Step::Keep => Ok(()),
+            Step::Release => self.release(state),
+            Step::Engage(allowed) => {
+                let backup = Backup {
+                    profiles: Firewall::profiles()?,
+                    allowed: Some(allowed.clone()),
+                };
+                // Сначала сохраняем исходное состояние, затем меняем машину: падение между
+                // ними оставит данные, по которым следующий запуск всё вернёт.
+                remember(state, Some(backup.clone()))?;
+                if let Err(why) = Firewall::apply(&allowed) {
+                    let _ = Firewall::release(&backup);
+                    let _ = remember(state, None);
+                    return Err(why);
+                }
+                Ok(())
+            }
+            Step::Renew(allowed) => {
+                // Снимок прежний: в нём то, что стояло до нас, а не наш же запрет (D-134).
+                Firewall::renew(&allowed)?;
+                remember(
+                    state,
+                    held.map(|backup| Backup {
+                        allowed: Some(allowed),
+                        ..backup
+                    }),
+                )
+            }
         }
-        // При reconnect правила уже стоят, а снимок содержит состояние до первой установки.
-        // Повторный `engage` снял бы снимок с нашего же Block и породил дубликаты правил.
-        if settings.kill_switch_backup.is_some() {
-            return Ok(());
-        }
-        let backup = Backup {
-            profiles: Firewall::profiles()?,
-        };
-        // Сначала сохраняем исходное состояние, затем меняем машину: падение между ними
-        // оставит данные, по которым следующий запуск всё вернёт.
-        remember(state, Some(backup.clone()))?;
-        if let Err(why) = Firewall::apply(&engine.binary(), &device) {
-            let _ = Firewall::release(&backup);
-            let _ = remember(state, None);
-            return Err(why);
-        }
-        Ok(())
     }
 
     /// Снять запрет и вернуть умолчание брандмауэра. Как и у прокси, зовётся при остановке,
@@ -68,22 +86,43 @@ impl KillSwitch {
     /// следующем подключении. Под замком перехода: иначе параллельный запуск успел бы
     /// поставить свой запрет поверх.
     ///
-    /// Выключение снимает запрет **всегда**, не спрашивая, работает ли ядро: если правило
-    /// осталось от прошлой жизни клиента, тумблер — самый естественный способ его убрать.
+    /// Выключение снимает запрет, не спрашивая, работает ли ядро: если правило осталось
+    /// от прошлой жизни клиента, тумблер — самый естественный способ его убрать.
     pub async fn set(&self, app: &AppHandle, state: &AppState, on: bool) -> Result<Status> {
         let _transition = state.connection.lock().await;
         state.settings.patch(Patch {
             kill_switch: Some(on),
             ..Default::default()
         })?;
-        if on {
-            for id in EngineId::ALL {
-                self.engage(state, state.engine(id))?;
-            }
-        } else {
-            self.release(state)?;
+        match state.running() {
+            Some((id, _)) if on => self.follow(state, state.engine(id))?,
+            _ => self.release(state)?,
         }
         Ok(state.connection.shown(app, state))
+    }
+}
+
+/// Что сделать с запретом.
+#[derive(Debug, PartialEq)]
+enum Step {
+    Keep,
+    Engage(Allowed),
+    /// Запрет наш, но выпускает не то ядро или не тот адаптер.
+    Renew(Allowed),
+    Release,
+}
+
+/// `tun` — кого выпускать, если трафик держит адаптер; `wanted` — тумблер; `held` — снимок,
+/// то есть наш запрет уже стоит.
+fn step(tun: Option<&Allowed>, wanted: bool, held: Option<&Backup>) -> Step {
+    match (tun, held) {
+        (Some(allowed), None) if wanted => Step::Engage(allowed.clone()),
+        (Some(allowed), Some(backup)) if wanted => match backup.allowed.as_ref() {
+            Some(was) if was == allowed => Step::Keep,
+            _ => Step::Renew(allowed.clone()),
+        },
+        (_, Some(_)) => Step::Release,
+        (_, None) => Step::Keep,
     }
 }
 
@@ -92,4 +131,67 @@ fn remember(state: &AppState, backup: Option<Backup>) -> Result<()> {
     state
         .settings
         .update(|settings| settings.kill_switch_backup = backup)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn allowed(device: &str) -> Allowed {
+        Allowed {
+            core: r"C:\umiray\mihomo.exe".into(),
+            device: device.into(),
+        }
+    }
+
+    fn held(device: Option<&str>) -> Backup {
+        Backup {
+            profiles: Vec::new(),
+            allowed: device.map(allowed),
+        }
+    }
+
+    #[test]
+    fn the_lock_follows_the_capture() {
+        let tun = allowed("Meta");
+        assert_eq!(step(Some(&tun), true, None), Step::Engage(tun.clone()));
+        assert_eq!(
+            step(Some(&tun), true, Some(&held(Some("Meta")))),
+            Step::Keep,
+            "переподключение: правила уже те, снимок не переснимаем (D-134)"
+        );
+        assert_eq!(
+            step(Some(&tun), false, None),
+            Step::Keep,
+            "тумблер выключен"
+        );
+        assert_eq!(
+            step(None, true, None),
+            Step::Keep,
+            "в Proxy запирать нечего"
+        );
+    }
+
+    /// B-042: TUN сменили на Proxy при включённом запрете — перезапуск ядра его не трогал,
+    /// и всё мимо прокси оставалось без сети.
+    #[test]
+    fn a_lock_left_from_tun_is_lifted_in_proxy() {
+        assert_eq!(step(None, true, Some(&held(Some("Meta")))), Step::Release);
+    }
+
+    /// B-042: адаптер переименовали в «Настройках» — разрешение выпускало прежний, и при
+    /// живом туннеле машина стояла без сети.
+    #[test]
+    fn a_new_adapter_renews_the_allowances() {
+        let tun = allowed("umiray");
+        assert_eq!(
+            step(Some(&tun), true, Some(&held(Some("Meta")))),
+            Step::Renew(tun.clone())
+        );
+        assert_eq!(
+            step(Some(&tun), true, Some(&held(None))),
+            Step::Renew(tun.clone()),
+            "снимок прошлой сборки не знает, кого выпускал, — обновить"
+        );
+    }
 }

@@ -32,7 +32,10 @@ impl Subscription {
             .header("X-Device-Model", "PC")
             .send()
             .await
-            .map_err(|e| AppError::network(format!("Не удалось получить подписку: {e}")))?;
+            // Без адреса: в нём токен подписки, а отказ висит строкой в окне (D-038).
+            .map_err(|e| {
+                AppError::network(format!("Не удалось получить подписку: {}", e.without_url()))
+            })?;
 
         // Панель говорит о переполнении отдельным заголовком — это точный ответ на вопрос
         // «почему список пуст», в отличие от догадки по заглушкам в теле.
@@ -71,10 +74,9 @@ impl Subscription {
             .get("profile-title")
             .and_then(|value| value.to_str().ok())
             .and_then(decode_title);
-        let body = response
-            .text()
-            .await
-            .map_err(|e| AppError::network(format!("Не удалось прочитать ответ: {e}")))?;
+        let body = response.text().await.map_err(|e| {
+            AppError::network(format!("Не удалось прочитать ответ: {}", e.without_url()))
+        })?;
         Ok(Fetched { body, title })
     }
 

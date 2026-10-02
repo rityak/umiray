@@ -1,46 +1,49 @@
 # Прямой выход для российских адресов: мимо VPN, а не через него.
 # Правится как обычный файл; `title` — наше поле, всё остальное ядро читает само.
+#
+# `no-resolve` — по умолчанию у всего прямого: адрес домена ради правила не узнаём. У regex
+# ядро прочло бы его целью — сборка отдаёт такие строки без хвоста.
 title: Россия — напрямую
 title_en: Russia — direct
 rules:
-  - DOMAIN-SUFFIX,ru,DIRECT
-  - DOMAIN-SUFFIX,xn--p1ai,DIRECT
-  - DOMAIN-SUFFIX,vk.com,DIRECT
-  - DOMAIN-SUFFIX,userapi.com,DIRECT
-  - DOMAIN-SUFFIX,vk-portal.net,DIRECT
-  - DOMAIN-REGEX,^(.+\.)?yandex\.(aero|az|by|cloud|co\.il|com(\.am|\.ge|\.ru|\.tr|\.ua)?|de|ee|eu|fi|fr|jobs|kg|kz|lt|lv|md|net|org|pl|ru|st|sx|tj|tm|tr|ua|uz)$,DIRECT
-  - DOMAIN-SUFFIX,yastatic.net,DIRECT
-  - DOMAIN-SUFFIX,ya-light.com,DIRECT
-  - DOMAIN-SUFFIX,avito.st,DIRECT
-  - DOMAIN-SUFFIX,2gis.com,DIRECT
-  - DOMAIN-SUFFIX,lmru.tech,DIRECT
-  - DOMAIN-REGEX,^(.+\.)?ozon\.(by|com|com\.by|com\.kz|dev|express|kz|li|tech|tm|travel)$,DIRECT
-  - DOMAIN-REGEX,^(.+\.)?ozonru\.(co\.il|com|eu|me)$,DIRECT
-  - DOMAIN-SUFFIX,ozoncom.by,DIRECT
-  - DOMAIN-SUFFIX,ozonglobalevents.com,DIRECT
-  - DOMAIN-SUFFIX,ozonusercontent.com,DIRECT
-  - DOMAIN-SUFFIX,rocketozon.by,DIRECT
-  - DOMAIN-SUFFIX,ozonrocet.by,DIRECT
-  - DOMAIN-SUFFIX,ozonroket.by,DIRECT
-  - DOMAIN-SUFFIX,xn--e1adjldbbpv.xn--90ais,DIRECT
-  - DOMAIN-REGEX,^(.+\.)?wildberries\.(am|by|co\.il|es|eu|ge|kg|kz|lt|tj|tm|uz)$,DIRECT
-  - DOMAIN-SUFFIX,wb.am,DIRECT
-  - DOMAIN-SUFFIX,wb.kg,DIRECT
-  - DOMAIN-SUFFIX,wb.kz,DIRECT
-  - DOMAIN-SUFFIX,wibes.com,DIRECT
-  - DOMAIN-SUFFIX,paywb.com,DIRECT
-  - DOMAIN-SUFFIX,mp.world,DIRECT
-  - DOMAIN-SUFFIX,warehouse.domains,DIRECT
-  - DOMAIN-SUFFIX,xn--90ab.com,DIRECT
-  - DOMAIN-SUFFIX,fix-price.com,DIRECT
-  - DOMAIN-SUFFIX,boosty.to,DIRECT
-  - DOMAIN-SUFFIX,donationalerts.com,DIRECT
-  - DOMAIN-SUFFIX,timeweb.cloud,DIRECT
-  - DOMAIN-SUFFIX,timeweb.com,DIRECT
-  - DOMAIN-SUFFIX,whoosh.bike,DIRECT
-  - DOMAIN-SUFFIX,okko.tv,DIRECT
-  - DOMAIN-SUFFIX,okko.sport,DIRECT
-  - DOMAIN-SUFFIX,youla.io,DIRECT
-  - DOMAIN-SUFFIX,carrotquest.io,DIRECT
-  - DOMAIN-SUFFIX,aeza.net,DIRECT
-  - DOMAIN-SUFFIX,ewisdom.us.kg,DIRECT
+  - DOMAIN-SUFFIX,ru,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,xn--p1ai,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,vk.com,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,userapi.com,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,vk-portal.net,DIRECT,no-resolve
+  - DOMAIN-REGEX,^(.+\.)?yandex\.(aero|az|by|cloud|co\.il|com(\.am|\.ge|\.ru|\.tr|\.ua)?|de|ee|eu|fi|fr|jobs|kg|kz|lt|lv|md|net|org|pl|ru|st|sx|tj|tm|tr|ua|uz)$,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,yastatic.net,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,ya-light.com,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,avito.st,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,2gis.com,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,lmru.tech,DIRECT,no-resolve
+  - DOMAIN-REGEX,^(.+\.)?ozon\.(by|com|com\.by|com\.kz|dev|express|kz|li|tech|tm|travel)$,DIRECT,no-resolve
+  - DOMAIN-REGEX,^(.+\.)?ozonru\.(co\.il|com|eu|me)$,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,ozoncom.by,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,ozonglobalevents.com,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,ozonusercontent.com,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,rocketozon.by,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,ozonrocet.by,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,ozonroket.by,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,xn--e1adjldbbpv.xn--90ais,DIRECT,no-resolve
+  - DOMAIN-REGEX,^(.+\.)?wildberries\.(am|by|co\.il|es|eu|ge|kg|kz|lt|tj|tm|uz)$,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,wb.am,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,wb.kg,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,wb.kz,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,wibes.com,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,paywb.com,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,mp.world,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,warehouse.domains,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,xn--90ab.com,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,fix-price.com,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,boosty.to,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,donationalerts.com,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,timeweb.cloud,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,timeweb.com,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,whoosh.bike,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,okko.tv,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,okko.sport,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,youla.io,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,carrotquest.io,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,aeza.net,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,ewisdom.us.kg,DIRECT,no-resolve

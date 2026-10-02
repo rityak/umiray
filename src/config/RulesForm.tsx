@@ -6,7 +6,7 @@ import { useCached } from "../hooks/useCached";
 import { t } from "../i18n";
 import { failure, type Message } from "../shell/Banner";
 import GeoBases from "./GeoBases";
-import { targetLook } from "./kinds";
+import { lostLook, targetLook } from "./kinds";
 import ReadySets from "./ReadySets";
 import RuleRow from "./RuleRow";
 import RuleSets from "./RuleSets";
@@ -43,6 +43,9 @@ const KINDS = [
 /// и в никуда.
 const TARGETS = ["umiray", "AUTO", "DIRECT", "REJECT"];
 
+/// Exits the core always has: a rule may name them, the lists just don't offer them.
+const EXITS = ["REJECT-DROP", "PASS", "COMPATIBLE", "GLOBAL"];
+
 const EMPTY: api.Routing = { rules: [], fallback: "umiray", ruleSets: [], ready: [] };
 
 let kept: { text: string; routing: api.Routing } | null = null;
@@ -66,10 +69,13 @@ export default function RulesForm({ text, onDraft, onMessage, onPending, running
     kept?.text === text ? kept.routing : EMPTY,
   );
   kept = { text, routing };
-  const [groups, setGroups] = useCached<string[]>("rules.groups", []);
+  /// `null` — not read yet or unreadable: then no target is called lost.
+  const [groupNames, setGroups] = useCached<string[] | null>("rules.groups", null);
+  const groups = groupNames ?? [];
   /// Узлы как второй список «куда» (D-082). Спрашиваем у бэкенда, а не считаем из групп:
   /// состав узлов знает каталог источников, а не документ.
-  const [nodes, setNodes] = useCached<string[]>("rules.nodes", []);
+  const [nodeNames, setNodes] = useCached<string[] | null>("rules.nodes", null);
+  const nodes = nodeNames ?? [];
   /// Downloaded rule sets by name — what a hand-written `RULE-SET` rule can point at (D-157).
   const [lists, setLists] = useCached<string[]>("rules.lists", []);
   const [page, setPage] = useCached<Page>("rules.page", "route");
@@ -92,7 +98,7 @@ export default function RulesForm({ text, onDraft, onMessage, onPending, running
       .then(api.groupsParse)
       .then(
         (list) => setGroups(list.map((group) => group.name)),
-        () => setGroups([]),
+        () => setGroups(null),
       );
   }, []);
 
@@ -101,7 +107,7 @@ export default function RulesForm({ text, onDraft, onMessage, onPending, running
     // получилась бы пустой, а такую ядро не принимает.
     api.nodesList().then(
       (list) => setNodes(list.filter((node) => node.supported).map((node) => node.name)),
-      () => setNodes([]),
+      () => setNodes(null),
     );
     api.listsList().then(
       (list) => setLists(list.map((item) => item.id)),
@@ -199,7 +205,13 @@ export default function RulesForm({ text, onDraft, onMessage, onPending, running
     commit({ ...routing, rules: next });
   };
 
-  const fallback = targetLook(routing.fallback, nodes);
+  /// A target nothing answers to: a renamed group, a node the subscription dropped. The build
+  /// sends it to `umiray` (D-156) — say so at the rule, not "group · through VPN".
+  const lost = (target: string) =>
+    groupNames !== null &&
+    nodeNames !== null &&
+    ![...TARGETS, ...EXITS, ...groups, ...nodes].includes(target);
+  const fallback = lost(routing.fallback) ? lostLook() : targetLook(routing.fallback, nodes);
 
   return (
     <div className="flex flex-col gap-3">
@@ -222,7 +234,7 @@ export default function RulesForm({ text, onDraft, onMessage, onPending, running
         <>
           <Text tone="muted" size="xs" className="block">
             {t(
-              "Top to bottom: your rules → high → medium → low → MATCH. Within a level, rule sets go before ready-made sets.",
+              "Checked top to bottom, the first match wins: your rules → high → medium → low → MATCH. On one level, rule sets go first.",
             )}
           </Text>
           <RuleSets
@@ -230,6 +242,7 @@ export default function RulesForm({ text, onDraft, onMessage, onPending, running
             onChange={(ruleSets) => commit({ ...routing, ruleSets })}
             targets={targets}
             nodes={nodes}
+            lost={lost}
             onMessage={onMessage}
           />
           <ReadySets
@@ -237,6 +250,7 @@ export default function RulesForm({ text, onDraft, onMessage, onPending, running
             onChange={(ready) => commit({ ...routing, ready })}
             targets={targets}
             nodes={nodes}
+            lost={lost}
             onMessage={onMessage}
           />
 
@@ -257,6 +271,7 @@ export default function RulesForm({ text, onDraft, onMessage, onPending, running
                   value={routing.fallback}
                   groups={targets}
                   nodes={nodes}
+                  lost={lost}
                   label={t("Where to send everything else")}
                   onChange={(fallback) => commit({ ...routing, fallback })}
                 />
@@ -282,7 +297,7 @@ export default function RulesForm({ text, onDraft, onMessage, onPending, running
                   value: id,
                   label: id,
                   icon: (() => {
-                    const { Icon } = targetLook(id, nodes);
+                    const { Icon } = lost(id) ? lostLook() : targetLook(id, nodes);
                     return <Icon />;
                   })(),
                   count: routing.rules.filter((rule) => rule.target === id).length,
@@ -293,7 +308,7 @@ export default function RulesForm({ text, onDraft, onMessage, onPending, running
             <Text tone="muted" size="xs" className="block">
               {filter !== "all"
                 ? t("only → {target}; order and numbering are shared", { target: filter })
-                : t("above rule sets and ready-made sets")}
+                : t("checked before rule sets, top to bottom; the first match wins")}
             </Text>
           </div>
 
@@ -306,6 +321,7 @@ export default function RulesForm({ text, onDraft, onMessage, onPending, running
               kinds={kinds}
               targets={targets}
               nodes={nodes}
+              lost={lost}
               lists={lists}
               first={row.index === 0}
               last={row.index === routing.rules.length - 1}

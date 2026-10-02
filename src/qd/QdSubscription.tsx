@@ -8,7 +8,7 @@ import { unchanged, usePoll } from "../hooks/usePoll";
 import { locale, t } from "../i18n";
 import { failure, type Message, notice } from "../shell/Banner";
 import { hide } from "../shell/secret";
-import AddMenu, { type AddKind } from "../sources/AddMenu";
+import type { AddKind } from "../sources/AddMenu";
 import * as qd from "./api";
 
 type Props = {
@@ -94,10 +94,14 @@ export default function QdSubscription({
     [onMessage],
   );
 
+  // qd берёт только свою ссылку (D-161): «+» открывает окно ссылки сразу, без меню mihomo.
   const add = (
-    <AddMenu
-      onPick={onAdd}
-      trigger={<IconButton size="sm" variant="ghost" icon={<Plus />} label={t("Add source")} />}
+    <IconButton
+      size="sm"
+      variant="ghost"
+      icon={<Plus />}
+      label={t("Add source")}
+      onClick={() => onAdd("link")}
     />
   );
 
@@ -110,10 +114,9 @@ export default function QdSubscription({
           title={t("No sources")}
           hint={t("Add the qd:// link from your provider. A new link replaces the current one.")}
           action={
-            <AddMenu
-              onPick={onAdd}
-              trigger={<Button variant="primary">{t("Add source")}</Button>}
-            />
+            <Button variant="primary" onClick={() => onAdd("link")}>
+              {t("Add source")}
+            </Button>
           }
         />
       </Card>

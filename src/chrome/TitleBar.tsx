@@ -33,6 +33,8 @@ type Props = {
   onEngine: (engine: Engine) => void;
   /// One add menu for every "+" (D-160).
   onAdd: (kind: AddKind) => void;
+  /// What "+" offers on the viewed engine: qd takes only its link.
+  adds: AddKind[];
   /// Мастер настройки (D-162): тот же, что открывается при первом запуске.
   onSetup: () => void;
   onSettings: () => void;
@@ -54,6 +56,7 @@ export default function TitleBar({
   engines,
   onEngine,
   onAdd,
+  adds,
   onSetup,
   onSettings,
   onDev,
@@ -98,6 +101,7 @@ export default function TitleBar({
           )}
           <AddMenu
             onPick={onAdd}
+            kinds={adds}
             trigger={
               <IconButton
                 icon={<Plus />}

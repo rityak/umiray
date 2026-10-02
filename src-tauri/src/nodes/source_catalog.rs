@@ -89,10 +89,7 @@ impl SourceCatalog {
                 // Правки читаем **раз на источник**, а не на узел: список опрашивается
                 // каждую секунду, а узлов в подписке бывает две сотни.
                 let written = EntryPatch::load(&id);
-                let keys: Vec<Option<String>> = built_proxies(&id)
-                    .iter()
-                    .map(SourceBuilder::identity_of)
-                    .collect();
+                let keys = SourceBuilder::keys(&built_proxies(&id));
                 let mine = id.clone();
                 let known = parse(&SourceStore::content(&id))
                     .into_iter()

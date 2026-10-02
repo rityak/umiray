@@ -1,0 +1,109 @@
+# Сервисы, которые сами закрылись для России: не блокировка РКН, а «недоступно в вашей
+# стране». Здесь основные; полный список (~500 доменов) — rule set itdoginfo geoblock:
+# https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Categories/geoblock.lst
+# Нейросети — отдельным набором «Нейросети».
+#
+# Выход — AUTO, а не выбор в «Соединении»: там может стоять DIRECT, и тогда сервис
+# снова увидел бы российский адрес. Сменить выход можно в «Маршрутизации».
+# Сверено 02.10.2026 с itdoginfo/allow-domains (Categories/geoblock).
+title: Закрытое для России
+title_en: Geo-blocked for Russia
+rules:
+  # Работа и документы
+  - DOMAIN-SUFFIX,notion.so,AUTO
+  - DOMAIN-SUFFIX,notion.com,AUTO
+  - DOMAIN-SUFFIX,notion.new,AUTO
+  - DOMAIN-SUFFIX,notion.site,AUTO
+  - DOMAIN-SUFFIX,notion-static.com,AUTO
+  - DOMAIN-SUFFIX,canva.com,AUTO
+  - DOMAIN-SUFFIX,canva.dev,AUTO
+  - DOMAIN-SUFFIX,framer.com,AUTO
+  - DOMAIN-SUFFIX,framerusercontent.com,AUTO
+  - DOMAIN-SUFFIX,atlassian.com,AUTO
+  - DOMAIN-SUFFIX,clickup.com,AUTO
+  - DOMAIN-SUFFIX,zapier.com,AUTO
+  - DOMAIN-SUFFIX,upwork.com,AUTO
+  - DOMAIN-SUFFIX,surveymonkey.com,AUTO
+  - DOMAIN-SUFFIX,wetransfer.com,AUTO
+  # Разработка
+  - DOMAIN-SUFFIX,jetbrains.com,AUTO
+  - DOMAIN-SUFFIX,myjetbrains.com,AUTO
+  - DOMAIN-SUFFIX,jetbrains.space,AUTO
+  - DOMAIN-SUFFIX,jetbrains.team,AUTO
+  - DOMAIN-SUFFIX,youtrack.cloud,AUTO
+  - DOMAIN-SUFFIX,toolbox.app,AUTO
+  - DOMAIN-SUFFIX,hashicorp.com,AUTO
+  - DOMAIN-SUFFIX,terraform.io,AUTO
+  - DOMAIN-SUFFIX,vagrantcloud.com,AUTO
+  - DOMAIN-SUFFIX,mongodb.com,AUTO
+  - DOMAIN-SUFFIX,redis.io,AUTO
+  - DOMAIN-SUFFIX,oracle.com,AUTO
+  - DOMAIN-SUFFIX,oraclecloud.com,AUTO
+  - DOMAIN-SUFFIX,netlify.com,AUTO
+  - DOMAIN-SUFFIX,grafana.com,AUTO
+  - DOMAIN-SUFFIX,sentry.io,AUTO
+  - DOMAIN-SUFFIX,snyk.io,AUTO
+  - DOMAIN-SUFFIX,ngrok.com,AUTO
+  - DOMAIN-SUFFIX,ngrok-agent.com,AUTO
+  - DOMAIN-SUFFIX,qt.io,AUTO
+  - DOMAIN-SUFFIX,posthog.com,AUTO
+  - DOMAIN-SUFFIX,amplitude.com,AUTO
+  - DOMAIN-SUFFIX,pkgs.tailscale.com,AUTO
+  # Софт и железо: сайты и загрузки
+  - DOMAIN-SUFFIX,adobe.com,AUTO
+  - DOMAIN-SUFFIX,adobe.io,AUTO
+  - DOMAIN-SUFFIX,adobe.net,AUTO
+  - DOMAIN-SUFFIX,autodesk.com,AUTO
+  - DOMAIN-SUFFIX,sketchup.com,AUTO
+  - DOMAIN-SUFFIX,affinity.studio,AUTO
+  - DOMAIN-SUFFIX,vmware.com,AUTO
+  - DOMAIN-SUFFIX,broadcom.com,AUTO
+  - DOMAIN-SUFFIX,parallels.com,AUTO
+  - DOMAIN-SUFFIX,teamviewer.com,AUTO
+  - DOMAIN-SUFFIX,intel.com,AUTO
+  - DOMAIN-SUFFIX,developer.nvidia.com,AUTO
+  - DOMAIN-SUFFIX,geforcenow.com,AUTO
+  - DOMAIN-SUFFIX,dell.com,AUTO
+  - DOMAIN-SUFFIX,dellcdn.com,AUTO
+  - DOMAIN-SUFFIX,cisco.com,AUTO
+  - DOMAIN-SUFFIX,corsair.com,AUTO
+  # Кино и музыка
+  - DOMAIN-SUFFIX,netflix.com,AUTO
+  - DOMAIN-SUFFIX,netflix.net,AUTO
+  - DOMAIN-SUFFIX,nflxext.com,AUTO
+  - DOMAIN-SUFFIX,nflximg.com,AUTO
+  - DOMAIN-SUFFIX,nflximg.net,AUTO
+  - DOMAIN-SUFFIX,nflxso.net,AUTO
+  - DOMAIN-SUFFIX,nflxvideo.net,AUTO
+  - DOMAIN-SUFFIX,fast.com,AUTO
+  - DOMAIN-SUFFIX,disneyplus.com,AUTO
+  - DOMAIN-SUFFIX,max.com,AUTO
+  - DOMAIN-SUFFIX,hbomax.com,AUTO
+  - DOMAIN-SUFFIX,primevideo.com,AUTO
+  - DOMAIN-SUFFIX,crunchyroll.com,AUTO
+  - DOMAIN-SUFFIX,spotify.com,AUTO
+  - DOMAIN-SUFFIX,deezer.com,AUTO
+  - DOMAIN-SUFFIX,tidal.com,AUTO
+  - DOMAIN-SUFFIX,last.fm,AUTO
+  - DOMAIN-SUFFIX,mixcloud.com,AUTO
+  # Игры
+  - DOMAIN-SUFFIX,supercell.com,AUTO
+  - DOMAIN-SUFFIX,clashofclans.com,AUTO
+  - DOMAIN-SUFFIX,clashroyaleapp.com,AUTO
+  - DOMAIN-SUFFIX,brawlstarsgame.com,AUTO
+  - DOMAIN-SUFFIX,haydaygame.com,AUTO
+  - DOMAIN-SUFFIX,squadbustersgame.com,AUTO
+  - DOMAIN-SUFFIX,marvelsnap.com,AUTO
+  - DOMAIN-SUFFIX,wbgames.com,AUTO
+  # Деньги и прочее
+  - DOMAIN-SUFFIX,patreon.com,AUTO
+  - DOMAIN-SUFFIX,patreonusercontent.com,AUTO
+  - DOMAIN-SUFFIX,wise.com,AUTO
+  - DOMAIN-SUFFIX,transferwise.com,AUTO
+  - DOMAIN-SUFFIX,paddle.com,AUTO
+  - DOMAIN-SUFFIX,buymeacoffee.com,AUTO
+  - DOMAIN-SUFFIX,gofundme.com,AUTO
+  - DOMAIN-SUFFIX,strava.com,AUTO
+  - DOMAIN-SUFFIX,imgur.com,AUTO
+  - DOMAIN-SUFFIX,weather.com,AUTO
+  - DOMAIN-SUFFIX,ikea.com,AUTO

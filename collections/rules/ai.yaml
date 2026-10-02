@@ -1,0 +1,89 @@
+# Нейросети, которые закрыты для России или отвечают «недоступно в вашем регионе».
+# Выход — AUTO, а не выбор в «Соединении»: там может стоять DIRECT, и тогда сервис
+# снова увидел бы российский адрес. Сменить выход можно в «Маршрутизации».
+#
+# Сверено 02.10.2026 с itdoginfo/allow-domains (Services/google_ai, Categories/geoblock).
+# Правится как обычный файл; `title` — наше поле, всё остальное ядро читает само.
+title: Нейросети
+title_en: AI services
+rules:
+  # OpenAI: ChatGPT, Sora, API
+  - DOMAIN-SUFFIX,openai.com,AUTO
+  - DOMAIN-SUFFIX,chatgpt.com,AUTO
+  - DOMAIN-SUFFIX,chat.com,AUTO
+  - DOMAIN-SUFFIX,ai.com,AUTO
+  - DOMAIN-SUFFIX,sora.com,AUTO
+  - DOMAIN-SUFFIX,oaistatic.com,AUTO
+  - DOMAIN-SUFFIX,oaiusercontent.com,AUTO
+  - DOMAIN,production-openaicom-storage.azureedge.net,AUTO
+  # Anthropic: Claude, API
+  - DOMAIN-SUFFIX,anthropic.com,AUTO
+  - DOMAIN-SUFFIX,claude.ai,AUTO
+  - DOMAIN-SUFFIX,claude.com,AUTO
+  - DOMAIN-SUFFIX,claudeusercontent.com,AUTO
+  # Чат поддержки OpenAI и Anthropic
+  - DOMAIN-SUFFIX,intercom.io,AUTO
+  - DOMAIN-SUFFIX,intercomcdn.com,AUTO
+  # Google: Gemini, AI Studio, NotebookLM, Labs, Jules, Antigravity
+  - DOMAIN-SUFFIX,gemini.google.com,AUTO
+  - DOMAIN-SUFFIX,gemini.google,AUTO
+  - DOMAIN-SUFFIX,bard.google.com,AUTO
+  - DOMAIN-SUFFIX,aistudio.google.com,AUTO
+  - DOMAIN-SUFFIX,makersuite.google.com,AUTO
+  - DOMAIN-SUFFIX,ai.google.dev,AUTO
+  - DOMAIN-SUFFIX,generativeai.google,AUTO
+  - DOMAIN-SUFFIX,notebooklm.google.com,AUTO
+  - DOMAIN-SUFFIX,notebooklm.google,AUTO
+  - DOMAIN-SUFFIX,labs.google,AUTO
+  - DOMAIN-SUFFIX,jules.google,AUTO
+  - DOMAIN-SUFFIX,jules.google.com,AUTO
+  - DOMAIN-SUFFIX,stitch.withgoogle.com,AUTO
+  - DOMAIN-SUFFIX,antigravity.google,AUTO
+  - DOMAIN-SUFFIX,deepmind.google,AUTO
+  - DOMAIN-SUFFIX,deepmind.com,AUTO
+  - DOMAIN-SUFFIX,generativelanguage.googleapis.com,AUTO
+  - DOMAIN-SUFFIX,proactivebackend-pa.googleapis.com,AUTO
+  - DOMAIN-SUFFIX,aisandbox-pa.googleapis.com,AUTO
+  - DOMAIN-SUFFIX,geller-pa.googleapis.com,AUTO
+  - DOMAIN-SUFFIX,robinfrontend-pa.googleapis.com,AUTO
+  - DOMAIN-SUFFIX,aida.googleapis.com,AUTO
+  - DOMAIN-SUFFIX,antigravity-pa.googleapis.com,AUTO
+  - DOMAIN-SUFFIX,antigravity.googleapis.com,AUTO
+  - DOMAIN-SUFFIX,speechs3proto2-pa.googleapis.com,AUTO
+  - DOMAIN-SUFFIX,alkalimakersuite-pa.clients6.google.com,AUTO
+  # xAI: Grok
+  - DOMAIN-SUFFIX,x.ai,AUTO
+  - DOMAIN-SUFFIX,grok.com,AUTO
+  # Microsoft Copilot и Designer
+  - DOMAIN-SUFFIX,copilot.microsoft.com,AUTO
+  - DOMAIN-SUFFIX,designer.microsoft.com,AUTO
+  - DOMAIN-SUFFIX,sydney.bing.com,AUTO
+  # Ассистенты для кода
+  - DOMAIN-SUFFIX,githubcopilot.com,AUTO
+  - DOMAIN-SUFFIX,cursor.com,AUTO
+  - DOMAIN-SUFFIX,cursor.sh,AUTO
+  - DOMAIN-SUFFIX,cursorapi.com,AUTO
+  - DOMAIN-SUFFIX,cursor-cdn.com,AUTO
+  - DOMAIN-SUFFIX,windsurf.com,AUTO
+  - DOMAIN-SUFFIX,codeium.com,AUTO
+  - DOMAIN-SUFFIX,jetbrains.ai,AUTO
+  - DOMAIN-SUFFIX,augmentcode.com,AUTO
+  - DOMAIN-SUFFIX,trae.ai,AUTO
+  - DOMAIN-SUFFIX,qoder.com,AUTO
+  - DOMAIN-SUFFIX,cline.bot,AUTO
+  # Другие
+  - DOMAIN-SUFFIX,perplexity.ai,AUTO
+  - DOMAIN-SUFFIX,mistral.ai,AUTO
+  - DOMAIN-SUFFIX,meta.ai,AUTO
+  - DOMAIN-SUFFIX,openrouter.ai,AUTO
+  - DOMAIN-SUFFIX,groq.com,AUTO
+  - DOMAIN-SUFFIX,manus.im,AUTO
+  - DOMAIN-SUFFIX,genspark.ai,AUTO
+  - DOMAIN-SUFFIX,deepl.com,AUTO
+  - DOMAIN-SUFFIX,elevenlabs.io,AUTO
+  - DOMAIN-SUFFIX,hume.ai,AUTO
+  - DOMAIN-SUFFIX,suno.com,AUTO
+  - DOMAIN-SUFFIX,midjourney.com,AUTO
+  - DOMAIN-SUFFIX,recraft.ai,AUTO
+  - DOMAIN-SUFFIX,reve.art,AUTO
+  - DOMAIN-SUFFIX,lightning.ai,AUTO

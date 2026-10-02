@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fieldsOf, fromEntry, missing, PROTOCOLS, shown, toEntry, wrong } from "./proxy";
+import { fieldsOf, fromEntry, missing, PROTOCOLS, sameEntry, shown, toEntry, wrong } from "./proxy";
 
 describe("a node assembled by hand", () => {
   it("a value the core would take but never connect with is called out", () => {
@@ -501,5 +501,26 @@ describe("a node assembled by hand", () => {
       const keys = fieldsOf(item.id).map((field) => field.key);
       expect(new Set(keys).size, `repeat in ${item.id}: ${keys}`).toBe(keys.length);
     }
+  });
+
+  /// The editor enables Save only for a real change: a vless+TLS node read back by the form
+  /// puts `tls` last, and comparing text called the untouched node edited.
+  it("an untouched node is the same entry whatever the key order", () => {
+    const entry = {
+      name: "V",
+      type: "vless",
+      server: "a",
+      port: 443,
+      uuid: "u",
+      tls: true,
+      servername: "s",
+      network: "ws",
+      "ws-opts": { path: "/" },
+    };
+    const { kind, values, extra } = fromEntry(entry);
+    const built = toEntry(kind, values, extra);
+    expect(JSON.stringify(built)).not.toBe(JSON.stringify(entry));
+    expect(sameEntry(built, entry)).toBe(true);
+    expect(sameEntry(toEntry(kind, { ...values, uuid: "w" }, extra), entry)).toBe(false);
   });
 });

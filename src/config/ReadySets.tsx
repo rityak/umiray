@@ -1,5 +1,5 @@
 import { Package, Plus, Save, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Button,
   Card,
@@ -26,6 +26,8 @@ type Props = {
   /// "Where to" — the same choices a rule has.
   targets: string[];
   nodes: string[];
+  /// Names nothing answers to (D-156).
+  lost: (target: string) => boolean;
   onMessage: (message: Message | null) => void;
 };
 
@@ -38,7 +40,7 @@ function name(set: api.Ruleset): string {
  * into this route; its exit is the one its lines share and can be overridden. Expanding
  * opens an editor of the file itself (D-104) — "Save" there writes the file, not the route.
  */
-export default function ReadySets({ ready, onChange, targets, nodes, onMessage }: Props) {
+export default function ReadySets({ ready, onChange, targets, nodes, lost, onMessage }: Props) {
   const [sets, setSets] = useCached<api.Ruleset[]>("rulesets", []);
   const [shown, setShown] = useState<string | null>(null);
   /// The draft of the expanded set. One: only one is ever open.
@@ -46,6 +48,9 @@ export default function ReadySets({ ready, onChange, targets, nodes, onMessage }
   const [saving, setSaving] = useState(false);
   /// The new set's name. `null` — there is no field at all.
   const [naming, setNaming] = useState<string | null>(null);
+  /// The set whose text is being read. A slow read of the previously opened set must not
+  /// land in this one's editor — "Save" would write it into the wrong file.
+  const reading = useRef<string | null>(null);
 
   useEffect(() => {
     api.rulesetsList().then(setSets, () => setSets([]));
@@ -61,11 +66,13 @@ export default function ReadySets({ ready, onChange, targets, nodes, onMessage }
     }
     setShown(set.id);
     setDraft(null);
+    reading.current = set.id;
     try {
-      setDraft(await api.rulesetsRead(set.id));
+      const text = await api.rulesetsRead(set.id);
+      if (reading.current === set.id) setDraft(text);
     } catch (e) {
       onMessage(failure(e));
-      setShown(null);
+      if (reading.current === set.id) setShown(null);
     }
   };
 
@@ -91,7 +98,10 @@ export default function ReadySets({ ready, onChange, targets, nodes, onMessage }
       setSets(await api.rulesetsList());
       setNaming(null);
       setShown(id);
-      setDraft(await api.rulesetsRead(id));
+      setDraft(null);
+      reading.current = id;
+      const text = await api.rulesetsRead(id);
+      if (reading.current === id) setDraft(text);
     } catch (e) {
       onMessage(failure(e));
     }
@@ -193,6 +203,7 @@ export default function ReadySets({ ready, onChange, targets, nodes, onMessage }
                       value={use.target ?? set.target}
                       groups={targets}
                       nodes={nodes}
+                      lost={lost}
                       label={t("Where to send «{name}»", { name: name(set) })}
                       onChange={(target) => aim(set, target)}
                     />

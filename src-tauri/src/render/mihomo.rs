@@ -65,6 +65,7 @@ impl MihomoRenderer {
         if let Some(port) = probe {
             probe_seam(&mut map, sources, port);
         }
+        bare_flags(&mut map);
         // Последним: к этому месту заведены все группы, в которые правило может целиться.
         missing_targets(&mut map);
 
@@ -344,6 +345,15 @@ fn groups(
             "Группа «{name}» служебная. Переименуйте её в groups.yaml"
         )));
     }
+    if let Some(name) = names
+        .iter()
+        .enumerate()
+        .find_map(|(at, name)| names[..at].contains(name).then_some(name))
+    {
+        return Err(AppError::invalid(format!(
+            "Две группы называются «{name}». Переименуйте одну в groups.yaml"
+        )));
+    }
 
     let mut all = Vec::new();
     // Без источников автогруппе не из чего выбирать, а пустой список ядро отвергнет.
@@ -584,6 +594,35 @@ const EXITS: [&str; 6] = [
     "COMPATIBLE",
     "GLOBAL",
 ];
+
+/// `no-resolve` в хвосте regex и составных правил (B-035). Цель у них — последняя часть
+/// строки, и ядро прочло бы флаг целью; у доменного правила он ничего не значит. Документ
+/// человека не трогаем — снимаем хвост только с того, что уходит ядру.
+fn bare_flags(map: &mut Mapping) {
+    let Some(rules) = map
+        .get_mut(Value::from("rules"))
+        .and_then(Value::as_sequence_mut)
+    else {
+        return;
+    };
+    for line in rules.iter_mut() {
+        let Some(text) = line.as_str() else {
+            continue;
+        };
+        let parts: Vec<&str> = text.split(',').map(str::trim).collect();
+        if !RulesCodec::flag_after_exit(&parts) {
+            continue;
+        }
+        // Снимаем только хвост: середина — регулярка, и пробел после запятой в ней — её
+        // часть (B-045).
+        let bare = text
+            .rsplit_once(',')
+            .map_or(text, |(head, _)| head)
+            .trim_end()
+            .to_string();
+        *line = Value::from(bare);
+    }
+}
 
 /// Цель, которой нет, — на псевдоним (D-156).
 ///
@@ -886,6 +925,46 @@ mod tests {
             "под несуществующий узел группы быть не должно: пустую ядро не примет"
         );
         assert!(!names.contains(&"DIRECT"), "концы маршрута — не узлы");
+    }
+
+    /// `no-resolve` в хвосте regex-правила человек пишет сам (B-035). Ядро у regex берёт целью
+    /// последнюю часть строки — флаг отдаём без хвоста, иначе правило ушло бы в `umiray`
+    /// с `,DIRECT` внутри регулярки и не совпало бы никогда. У доменных правил он ничего
+    /// не значит, у адресных — остаётся.
+    #[test]
+    fn no_resolve_after_a_regex_rule_does_not_become_its_target() {
+        let rules = "rules:
+  - DOMAIN-REGEX,^(.+[.])?ozon[.](by|kz)$,DIRECT,no-resolve
+  - GEOIP,RU,DIRECT,no-resolve
+  - MATCH,DIRECT
+";
+        let out = parsed(&config(&[rules.to_string()], &[], &[], None).unwrap());
+        let lines: Vec<&str> = out["rules"]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        assert_eq!(
+            lines,
+            [
+                "DOMAIN-REGEX,^(.+[.])?ozon[.](by|kz)$,DIRECT",
+                "GEOIP,RU,DIRECT,no-resolve",
+                "MATCH,DIRECT",
+            ]
+        );
+    }
+
+    /// B-045: снятие хвоста резало строку по запятым, обрезало части и склеивало обратно —
+    /// пробел после запятой внутри регулярки пропадал, и она переставала совпадать.
+    #[test]
+    fn a_space_after_a_comma_inside_a_regex_reaches_the_core() {
+        let rules = "rules:
+  - DOMAIN-REGEX,^a, b$,DIRECT,no-resolve
+  - MATCH,DIRECT
+";
+        let out = parsed(&config(&[rules.to_string()], &[], &[], None).unwrap());
+        assert_eq!(out["rules"][0].as_str(), Some("DOMAIN-REGEX,^a, b$,DIRECT"));
     }
 
     /// B-018, D-156: узел пропал из подписки — правило в него уходит в псевдоним, а не валит
@@ -1263,6 +1342,16 @@ mod tests {
             .err()
             .expect("конфликт должен быть ошибкой");
         assert!(error.to_string().contains("umiray"));
+    }
+
+    /// Две группы с одним именем ядро не примет; говорим это своими словами и до запуска.
+    #[test]
+    fn two_groups_with_one_name_are_refused_before_start() {
+        let mine = "proxy-groups:\n  - name: Европа\n    type: select\n    proxies: [DIRECT]\n  - name: Европа\n    type: select\n    proxies: [DIRECT]\n";
+        let error = config(&[mine.to_string()], &[], &nodes(&["a1"]), None)
+            .err()
+            .expect("повтор имени должен быть ошибкой");
+        assert!(error.to_string().contains("Европа"));
     }
 
     /// Служебный вход под замер: он есть, только когда порт попросили, и слушает **петлю**.

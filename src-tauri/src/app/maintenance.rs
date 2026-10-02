@@ -14,9 +14,32 @@ use crate::config::presets::PresetStore;
 use crate::core::EngineId;
 use crate::error::{AppError, Result};
 
+/// С этим аргументом клиента зовёт удаление (хук `NSIS_HOOK_PREUNINSTALL`, B-044).
+pub const UNINSTALL: &str = "--uninstall";
+
 pub struct Maintenance;
 
 impl Maintenance {
+    /// Прибраться перед удалением (B-044): после него клиента, который вернул бы Windows как
+    /// было, больше не будет. Работающая копия уходит штатно — гасит ядро, снимает прокси
+    /// и запрет, права у неё для этого есть. Упавшая раньше оставила снимок — снимаем его
+    /// сами; запрет брандмауэра без прав не снять, и это лучшее, что можно сделать.
+    ///
+    /// Хук стоит до того, как установщик закрывает клиента сам — принудительно, без уборки.
+    pub fn uninstall(identifier: &str) {
+        crate::system::instance::Instance::send_away(
+            identifier,
+            std::time::Duration::from_secs(15),
+        );
+        // Базы нет — клиент не запускался, и снимать нечего; открыть её значило бы завести.
+        if !crate::db::Db::exists() {
+            return;
+        }
+        let state = AppState::new();
+        let _ = state.proxy.release(&state);
+        let _ = state.kill_switch.release(&state);
+    }
+
     /// Сброс всего, кроме скачанных ядер и идентификатора устройства.
     ///
     /// Нужен именно как одна кнопка: разбираться, какой из файлов на диске испортился,

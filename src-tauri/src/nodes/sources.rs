@@ -45,6 +45,10 @@ pub struct Source {
     /// не идут: узел, собранный наполовину, ядро примет молча и пойдёт не туда.
     #[serde(default)]
     pub skipped: Vec<String>,
+    /// Почему последнее обновление подписки не удалось. Пусто — удалось или не обновляли.
+    /// Помнит источник, а не память клиента: жалоба переживает перезапуск (D-038).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failed: Option<String>,
 }
 
 /// Проставить признак, который не хранится, а выводится из содержимого.
@@ -181,6 +185,15 @@ impl SourceStore {
         Ok(())
     }
 
+    /// Запомнить, почему обновление не удалось, — только в описании: узлы остаются как были.
+    pub fn mark_failed(id: &str, why: &str) -> Result<()> {
+        let mut source = SourceStore::get(id)?;
+        source.failed = Some(why.to_string());
+        let meta = serde_json::to_string_pretty(&source)
+            .map_err(|e| AppError::io(format!("Не удалось записать источник: {e}")))?;
+        Db::put(Table::Sources, id, META, &meta)
+    }
+
     /// Пересобрать все источники из сырья и выложить ядру заново: разбор мог научиться
     /// новому, а `run/` — пропасть. Части без `meta` и файлы без источника убираются.
     pub fn repair_all() -> Result<()> {
@@ -256,21 +269,37 @@ pub(super) fn rebuild(
     publish(source, id, &SourceStore::raw(id), mask)
 }
 
-/// Записать три части одной транзакцией и выложить собранное ядру. Упасть между базой
-/// и файлом не страшно: файл пересобирается из базы на запуске.
 fn publish(
     source: &mut Source,
     id: &str,
     raw: &str,
     mask: &crate::config::awg::Mask,
 ) -> Result<()> {
-    let lines: Vec<String> = raw.lines().map(str::to_string).collect();
+    let text = assemble(source, id, raw, mask)?;
+    commit(source, id, raw, &text)
+}
 
-    let text = if lines.iter().any(|line| line.contains("://")) {
+/// Ссылки сырья такими, какими их разбирает сборка: `mierus://` развёрнута, имена
+/// вычищены и разведены с другими источниками. Редактор считает по тем же строкам —
+/// иначе позиции узлов разошлись бы со сборкой.
+pub(super) fn links_of(id: &str, raw: &str) -> Vec<String> {
+    let lines: Vec<String> = raw.lines().map(str::to_string).collect();
+    LinkParser::clean(&LinkParser::split(&lines), &mut taken_by_others(id))
+}
+
+/// Собрать то, что читает ядро, ничего не записывая: сырьё + чистка имён + правки
+/// пользователя. Источнику ставит `skipped` и `nodes` — по ним вызывающий решает, писать ли.
+pub(super) fn assemble(
+    source: &mut Source,
+    id: &str,
+    raw: &str,
+    mask: &crate::config::awg::Mask,
+) -> Result<String> {
+    let text = if raw.lines().any(|line| line.contains("://")) {
         let (document, skipped) = crate::nodes::source_build::converted(
-            id,
-            LinkParser::clean(&LinkParser::split(&lines), &mut taken_by_others(id)),
+            links_of(id, raw),
             mask,
+            &crate::nodes::entries::EntryPatch::load(id),
         )?;
         source.skipped = skipped;
         document
@@ -278,21 +307,26 @@ fn publish(
         // Источник записей: сырьё и есть документ. Разницы от присланного у него нет —
         // присылать было некому (D-120), и правка ложится прямо в него.
         source.skipped = Vec::new();
-        lines.join(NL)
+        raw.lines().collect::<Vec<_>>().join(NL)
     };
-
     source.nodes = count(&text);
+    Ok(text)
+}
+
+/// Записать три части одной транзакцией и выложить собранное ядру. Упасть между базой
+/// и файлом не страшно: файл пересобирается из базы на запуске.
+pub(super) fn commit(source: &Source, id: &str, raw: &str, text: &str) -> Result<()> {
     let meta = serde_json::to_string_pretty(source)
         .map_err(|e| AppError::io(format!("Не удалось записать источник: {e}")))?;
     Db::batch(|batch| {
         batch.put(Table::Sources, id, RAW, raw)?;
-        batch.put(Table::Sources, id, PROVIDER, &text)?;
+        batch.put(Table::Sources, id, PROVIDER, text)?;
         batch.put(Table::Sources, id, META, &meta)
     })?;
     std::fs::create_dir_all(Paths::sources_dir())?;
     Ok(crate::atomic::AtomicFile::write(
         Paths::source_provider(id),
-        &text,
+        text,
     )?)
 }
 
@@ -361,6 +395,7 @@ mod tests {
             nodes: 99,
             records: false,
             skipped: Vec::new(),
+            failed: None,
         };
         let meta = serde_json::to_string(&source).unwrap();
         Db::batch(|batch| {
@@ -428,7 +463,7 @@ mod tests {
         assert!(
             names.iter().all(|name| name
                 .chars()
-                .all(|c| { c.is_alphanumeric() || " -_.()[]:+/,|@#".contains(c) })),
+                .all(|c| { c.is_alphanumeric() || " -_.()[]:+/|@#".contains(c) })),
             "в именах остался мусор: {names:?}"
         );
         let unique: std::collections::HashSet<_> = names.iter().collect();
@@ -541,6 +576,7 @@ Endpoint = a.example:51820
             nodes: 0,
             records: false,
             skipped: Vec::new(),
+            failed: None,
         };
         write(
             &mut source,
@@ -616,6 +652,7 @@ remote-dns-resolve: true",
             nodes: 0,
             records: false,
             skipped: Vec::new(),
+            failed: None,
         };
         write(
             &mut source,
@@ -657,6 +694,7 @@ remote-dns-resolve: true",
             nodes: 0,
             records: false,
             skipped: Vec::new(),
+            failed: None,
         };
         write(
             &mut source,
@@ -723,6 +761,121 @@ remote-dns-resolve: true",
             built.contains("client-fingerprint: chrome"),
             "откат вернул присланное: {built}"
         );
+    }
+
+    /// Подписка из двух узлов — для проверок редактора ниже.
+    fn subscription(id: &str, lines: &[&str]) {
+        let mut source = Source {
+            id: id.into(),
+            name: "Панель".into(),
+            url: Some("https://example.org/sub".into()),
+            updated: None,
+            nodes: 0,
+            records: false,
+            skipped: Vec::new(),
+            failed: None,
+        };
+        let lines = lines.iter().map(|line| line.to_string()).collect();
+        write(&mut source, lines, id, &crate::config::awg::Mask::default()).unwrap();
+    }
+
+    fn entry_of(id: &str, name: &str) -> serde_yaml::Mapping {
+        built_proxies(id)
+            .into_iter()
+            .find(|entry| entry.get("name").and_then(|value| value.as_str()) == Some(name))
+            .unwrap_or_else(|| panic!("нет узла {name}: {}", SourceStore::content(id)))
+    }
+
+    fn edit(id: &str, name: &str, change: impl FnOnce(&mut serde_yaml::Mapping)) -> Result<()> {
+        let mut entry = entry_of(id, name);
+        change(&mut entry);
+        let text = serde_yaml::to_string(&serde_yaml::Value::Mapping(entry)).unwrap();
+        SourceEditor::edit_node_code(id, name, &text)
+    }
+
+    /// B-036: другой адрес — это другой узел (D-036). Правка искала основу по адресу
+    /// **правки** и ложилась на соседа с этим адресом: два «Alpha», Beta пропадал.
+    #[test]
+    fn a_new_address_is_refused_instead_of_landing_on_another_node() {
+        let _sandbox = Sandbox::new("edit-address");
+        let id = "00000000000000a1";
+        subscription(id, &[
+            "vless://11111111-1111-1111-1111-111111111111@a.example:443?encryption=none&security=tls&sni=a.example#Alpha",
+            "vless://22222222-2222-2222-2222-222222222222@b.example:443?encryption=none&security=tls&sni=b.example#Beta",
+        ]);
+
+        let refused = edit(id, "Alpha", |entry| {
+            crate::yaml::Yaml::set(entry, "server", serde_yaml::Value::from("b.example"));
+        });
+        assert!(refused.is_err(), "{}", SourceStore::content(id));
+        assert_eq!(names(&SourceStore::content(id)), ["Alpha", "Beta"]);
+        assert_eq!(
+            entry_of(id, "Beta")["uuid"],
+            serde_yaml::Value::from("22222222-2222-2222-2222-222222222222"),
+            "сосед не тронут"
+        );
+        assert!(EntryPatch::load(id).is_empty(), "отказ ничего не записал");
+    }
+
+    /// B-036: два узла за одним адресом (разные uuid и sni) — одно тождество D-036.
+    /// Правка второго считалась от первого и ложилась на оба: первый становился копией.
+    #[test]
+    fn twins_behind_one_address_are_edited_apart() {
+        let _sandbox = Sandbox::new("edit-twins");
+        let id = "00000000000000a2";
+        subscription(id, &[
+            "vless://11111111-1111-1111-1111-111111111111@a.example:443?encryption=none&security=tls&sni=one.example#One",
+            "vless://22222222-2222-2222-2222-222222222222@a.example:443?encryption=none&security=tls&sni=two.example#Two",
+        ]);
+
+        edit(id, "Two", |entry| {
+            crate::yaml::Yaml::set(entry, "udp", serde_yaml::Value::from(false));
+        })
+        .unwrap();
+        let one = entry_of(id, "One");
+        assert_eq!(
+            one["udp"],
+            serde_yaml::Value::from(true),
+            "первый не тронут"
+        );
+        assert_eq!(
+            one["uuid"],
+            serde_yaml::Value::from("11111111-1111-1111-1111-111111111111")
+        );
+        assert_eq!(entry_of(id, "Two")["udp"], serde_yaml::Value::from(false));
+
+        SourceEditor::reset_node(id, "Two").unwrap();
+        assert_eq!(entry_of(id, "Two")["udp"], serde_yaml::Value::from(true));
+    }
+
+    /// B-037: основа разницы бралась **с** наложенной правкой, а новая разница заменяла
+    /// старую целиком — вторая правка стирала первую.
+    #[test]
+    fn a_second_edit_keeps_the_first() {
+        let _sandbox = Sandbox::new("edit-twice");
+        let id = "00000000000000a3";
+        subscription(id, &[
+            "vless://11111111-1111-1111-1111-111111111111@a.example:443?encryption=none&security=tls&sni=a.example#Alpha",
+        ]);
+
+        edit(id, "Alpha", |entry| {
+            crate::yaml::Yaml::set(
+                entry,
+                "client-fingerprint",
+                serde_yaml::Value::from("safari"),
+            );
+        })
+        .unwrap();
+        edit(id, "Alpha", |entry| {
+            crate::yaml::Yaml::set(entry, "udp", serde_yaml::Value::from(false));
+        })
+        .unwrap();
+        let alpha = entry_of(id, "Alpha");
+        assert_eq!(
+            alpha["client-fingerprint"],
+            serde_yaml::Value::from("safari")
+        );
+        assert_eq!(alpha["udp"], serde_yaml::Value::from(false));
     }
 
     /// Ядро складывает узлы всех источников в одну группу, и одноимённый второй узел там

@@ -27,7 +27,7 @@ import {
 import * as api from "../api";
 import { t, tn } from "../i18n";
 import ProcessPicker from "../shell/ProcessPicker";
-import { targetLook } from "./kinds";
+import { lostLook, targetLook } from "./kinds";
 import { resolves, retyped, ruleValues, withNoResolve } from "./rule-values";
 import TargetPicker from "./TargetPicker";
 
@@ -69,6 +69,8 @@ type Props = {
   kinds: string[];
   targets: string[];
   nodes: string[];
+  /// Names nothing answers to (D-156).
+  lost: (target: string) => boolean;
   /// Downloaded rule sets (D-157): a `RULE-SET` rule offers them instead of making you
   /// remember the name.
   lists: string[];
@@ -91,6 +93,7 @@ export default function RuleRow({
   kinds,
   targets,
   nodes,
+  lost,
   lists,
   first,
   last,
@@ -100,7 +103,7 @@ export default function RuleRow({
   onMove,
   onRemove,
 }: Props) {
-  const look = targetLook(rule.target, nodes);
+  const look = lost(rule.target) ? lostLook() : targetLook(rule.target, nodes);
   const panelId = useId();
   const [text, setText] = useState(() => rule.values.join("\n"));
   const [armed, setArmed] = useState(false);
@@ -152,6 +155,7 @@ export default function RuleRow({
           value={rule.target}
           groups={targets}
           nodes={nodes}
+          lost={lost}
           label={t("Where to send, rule {no}", { no })}
           onChange={(target) => onChange({ ...rule, target })}
         />

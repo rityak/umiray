@@ -42,14 +42,29 @@ const STRATEGIES: { id: string; about: string }[] = [
   { id: "sticky-sessions", about: tk("keep each client on one server") },
 ];
 
-/// Имена, которые клиент собирает сам (D-053) и держит в актуальном состоянии. Своя группа
-/// с таким именем по правилу «своё авторитетнее нашего» его заменит — и замороженный
-/// `umiray` перестанет переключаться вместе с направлением (D-075).
-const RESERVED = ["AUTO", "umiray", "probe"];
+/// Имена групп, которые клиент собирает сам (D-053, D-113, D-072). Своя группа с таким
+/// именем останавливает сборку (D-135) — говорим об этом у поля, а не при подключении.
+const RESERVED = ["AUTO", "umiray", "umiray-udp", "probe"];
+
+/// Что не так с именем группы — то, из-за чего ядро не поднимется. Пусто — всё в порядке.
+function nameError(name: string, taken: string[]): string | undefined {
+  const trimmed = name.trim();
+  if (trimmed === "") return t("Name the group — the core won't accept one without a name.");
+  if (RESERVED.includes(trimmed))
+    return t("The client uses this name for its own group. Pick another one.");
+  if (taken.includes(trimmed))
+    return t("Another group already has this name. The core won't accept two.");
+  // Ядро режет строку правила по запятой: правило в такую группу не направить (B-043).
+  if (trimmed.includes(","))
+    return t("A rule can't lead to a name with a comma — the core cuts rules at it.");
+  return undefined;
+}
 
 type Props = {
   group: api.Group;
   selection: Selection;
+  /// Names of the other groups: two groups with one name break the whole config.
+  taken: string[];
   choices: Choices;
   open: boolean;
   onToggle: () => void;
@@ -80,6 +95,7 @@ function pickedParts(choices: Choices, picked: Set<string>): string[] {
 export default function GroupRow({
   group,
   selection,
+  taken,
   choices,
   open,
   onToggle,
@@ -113,6 +129,7 @@ export default function GroupRow({
     });
 
   const look = GROUP_KIND[group.kind] ?? UNKNOWN_KIND;
+  const badName = nameError(group.name, taken);
   const country = (name: string) =>
     choices.nodes.find((node) => node.name === name)?.country ?? null;
   // В заголовке — страны состава: по ним группу узнают быстрее, чем по имени.
@@ -142,6 +159,12 @@ export default function GroupRow({
       }`}
       actions={
         <span className="flex items-center gap-2">
+          {/* Свёрнутая группа тоже говорит, что с ней ядро не поднимется. */}
+          {badName && (
+            <Badge tone="danger" size="sm">
+              {t("check the name")}
+            </Badge>
+          )}
           <span className="flex items-center gap-1" aria-hidden="true">
             {flags.map((code) => (
               <Flag key={code} country={code} />
@@ -156,16 +179,7 @@ export default function GroupRow({
     >
       <div className="flex flex-col gap-4">
         <div className="grid grid-cols-[minmax(0,1fr)] gap-3">
-          <Field
-            label={t("Group name")}
-            error={
-              RESERVED.includes(group.name.trim())
-                ? t(
-                    "The client uses this name for its own group. Yours would replace it and break exit selection in Connection. Pick another name.",
-                  )
-                : undefined
-            }
-          >
+          <Field label={t("Group name")} error={badName}>
             <Input value={group.name} onChange={(event) => set({ name: event.target.value })} />
           </Field>
         </div>
@@ -327,7 +341,7 @@ export default function GroupRow({
         <Divider />
         <div className="flex items-center gap-2">
           <Text tone="muted" size="xs" className="block">
-            {t("The group joins umiray and can be a rule target.")}
+            {t("Pick the group as a rule target in Routing.")}
           </Text>
           <span className="flex-1" />
           <ConfirmButton

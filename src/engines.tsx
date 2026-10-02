@@ -3,6 +3,7 @@ import * as api from "./api";
 import { t } from "./i18n";
 import type * as qd from "./qd/api";
 import Uptime from "./shell/Uptime";
+import type { AddKind } from "./sources/AddMenu";
 
 /// Документ «Настройки qd»: своя форма (`QdSettings`), файла за ним нет.
 export const QD_SETTINGS = "qd";
@@ -24,6 +25,8 @@ type Engine = {
   sections: (all: api.ConfigSection[]) => api.ConfigSection[];
   /// Настройки клиента (`id` групп, частей и полей формы), которых у этого ядра нет.
   hiddenClientSettings: ReadonlySet<string>;
+  /// Что предлагает «+» на виде этого ядра (D-160). Одно — меню нет, «+» открывает его сразу.
+  adds: AddKind[];
 };
 
 /**
@@ -45,6 +48,8 @@ export const ENGINES: Record<api.Engine, Engine> = {
     },
     sections: (all) => all,
     hiddenClientSettings: new Set(),
+    adds: ["link", "file", "node", "warp"],
+    // Без явного списка `AddMenu` предлагает то же самое — виды mihomo его не передают.
   },
   qd: {
     label: "qd",
@@ -81,6 +86,8 @@ export const ENGINES: Record<api.Engine, Engine> = {
       "device",
       "flush",
     ]),
+    // qd берёт только свою ссылку `qd://` (D-161): файл, форма и WARP — узлы mihomo.
+    adds: ["link"],
   },
 };
 

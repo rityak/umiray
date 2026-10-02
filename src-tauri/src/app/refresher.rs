@@ -3,22 +3,24 @@
 //! Когда именно спрашивать — не здесь: часы завела фаза `tick` (D-101), а этот модуль
 //! отвечает на её вопрос «не пора ли» и обновляет то, чему пора.
 
+use crate::app::notice::{Notice, SOURCES};
 use crate::app::settings::Refresh;
 use crate::app::state::AppState;
 use crate::error::{AppError, Result};
 use crate::nodes::source_import::SourceImporter;
-use crate::nodes::sources::SourceStore;
+use crate::nodes::sources::{Source, SourceStore};
 
 pub struct Refresher;
 
 impl Refresher {
     /// Заход фазы `tick`: обновить то, чему подошёл срок.
     ///
-    /// Отказ отдаём одной строкой, а не окном: провайдер мог просто не ответить, узлы остались
-    /// прежними, и всплывающее окно посреди работы раздражало бы сильнее, чем помогало. Что
-    /// источник не обновился, видно по дате в его карточке — и по строке в логе.
+    /// Отказ — не всплывающее окно посреди работы, а жалоба строкой (D-038): узлы остались
+    /// прежними, но стареют, и молчать об этом нельзя. Первый заход ставит её и тогда, когда
+    /// обновлять нечего: отказ прошлого запуска помнит сам источник.
     pub async fn due(state: &AppState, first: bool) -> Result<()> {
         let Some(period) = period(state.settings.get().refresh, first) else {
+            Refresher::complain(state);
             return Ok(());
         };
         let failures = Refresher::refresh_all(state, Some(period)).await;
@@ -52,8 +54,37 @@ impl Refresher {
                 }
             }
         }
+        Refresher::complain(state);
         failures
     }
+
+    /// Жалоба об обновлении подписок — из того, что помнят сами источники (`failed`): висит,
+    /// пока хоть одна не обновилась, и уходит с первым удачным обновлением или удалением.
+    pub fn complain(state: &AppState) {
+        let hidden = state.settings.get().private;
+        state.notices.set(
+            SOURCES,
+            complaint(&SourceStore::list(), hidden).map(Notice::plain),
+        );
+    }
+}
+
+/// Строка жалобы: первая подписка, которая не обновилась, и сколько ещё таких. В режиме
+/// «на людях» без имени — имена подписок там закрыты.
+fn complaint(sources: &[Source], hidden: bool) -> Option<String> {
+    let failed: Vec<(&str, &str)> = sources
+        .iter()
+        .filter_map(|source| Some((source.name.as_str(), source.failed.as_deref()?)))
+        .collect();
+    let (name, why) = failed.first()?;
+    let head = match hidden {
+        true => "Подписка не обновилась".to_string(),
+        false => format!("Подписка «{name}» не обновилась"),
+    };
+    Some(match failed.len() {
+        1 => format!("{head}: {why}"),
+        n => format!("{head}: {why}. Не обновились ещё {}", n - 1),
+    })
 }
 
 /// Сколько минут источник считается свежим на этом заходе — и стоит ли вообще заходить.
@@ -71,6 +102,10 @@ fn period(refresh: Refresh, first: bool) -> Option<u64> {
 }
 
 /// Пора ли. Источник, который не обновлялся ни разу, пора всегда.
+///
+/// Отметка дальше периода в будущем — её ставили при убежавших вперёд часах. Ждать до неё
+/// значило бы молча не обновлять подписку весь перекос (B-040); перекос меньше периода
+/// не в счёт.
 fn is_due(updated: Option<u64>, period_minutes: u64) -> bool {
     let Some(updated) = updated else {
         return true;
@@ -79,7 +114,8 @@ fn is_due(updated: Option<u64>, period_minutes: u64) -> bool {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|since| since.as_secs())
         .unwrap_or(0);
-    now.saturating_sub(updated) >= period_minutes * 60
+    let period = period_minutes * 60;
+    updated > now.saturating_add(period) || now.saturating_sub(updated) >= period
 }
 
 #[cfg(test)]
@@ -143,9 +179,51 @@ mod tests {
     }
 
     /// Часы у машины могут уехать назад; отрицательная разница не должна становиться огромной.
+    /// Небольшой перекос — меньше периода — не повод обновлять.
     #[test]
     fn a_clock_from_the_future_does_not_force_an_update() {
-        let future = ago(0).map(|now| now + 10_000);
+        let future = ago(0).map(|now| now + 600);
         assert!(!is_due(future, 60));
+    }
+
+    /// B-040: отметку поставили, когда часы убежали вперёд, и вернули их. Ждать до этой
+    /// отметки значило бы молча не обновлять подписку весь перекос — хоть год.
+    #[test]
+    fn a_stamp_far_in_the_future_does_not_freeze_the_schedule() {
+        let year_ahead = ago(0).map(|now| now + 365 * 24 * 3600);
+        assert!(is_due(year_ahead, 24 * 60));
+    }
+
+    fn failing(name: &str, why: Option<&str>) -> Source {
+        Source {
+            id: "0123456789abcdef".into(),
+            name: name.into(),
+            url: Some("https://panel.example/sub".into()),
+            updated: None,
+            nodes: 1,
+            records: false,
+            skipped: Vec::new(),
+            failed: why.map(str::to_string),
+        }
+    }
+
+    /// Жалоба называет первую подписку, которая не обновилась, и сколько ещё таких; в режиме
+    /// «на людях» — без имени. Все обновились — жалобы нет.
+    #[test]
+    fn the_complaint_names_the_first_stale_subscription() {
+        let sources = [
+            failing("Живая", None),
+            failing("Панель", Some("Подписка ответила 502")),
+            failing("Вторая", Some("таймаут")),
+        ];
+        assert_eq!(
+            complaint(&sources, false).as_deref(),
+            Some("Подписка «Панель» не обновилась: Подписка ответила 502. Не обновились ещё 1")
+        );
+        assert_eq!(
+            complaint(&sources[..2], true).as_deref(),
+            Some("Подписка не обновилась: Подписка ответила 502")
+        );
+        assert_eq!(complaint(&sources[..1], false), None);
     }
 }

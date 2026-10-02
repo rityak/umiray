@@ -84,11 +84,17 @@ export default function CoreForm({ onMessage, onSaved, start, hint, onUnsavedCha
   const [dnsFilter, setDnsFilter] = useState<api.DnsFilter>("clean");
   const [picking, setPicking] = useState(false);
 
+  // An unsaved edit outlives leaving the section, as a document draft does (`fromDisk`):
+  // the fresh file replaces only an untouched draft. `disk` is the snapshot the cached
+  // draft was made against — read once, on opening.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: snapshot at opening
   useEffect(() => {
     api.advancedGet().then(
       (options) => {
+        setDraft((was) =>
+          was !== null && JSON.stringify(was) !== JSON.stringify(disk) ? was : options,
+        );
         setDisk(options);
-        setDraft(options);
       },
       (e) => onMessage(failure(e)),
     );

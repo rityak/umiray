@@ -89,8 +89,15 @@ const ru: Record<string, Entry> = {
   "nothing selected": "ничего не выбрано",
   "{n} members": "в составе: {n}",
   "Group name": "Имя группы",
-  "The client uses this name for its own group. Yours would replace it and break exit selection in Connection. Pick another name.":
-    "Это имя занято группой клиента. Ваша группа её заменит, и выбор выхода в «Соединении» сломается. Выберите другое имя.",
+  "Name the group — the core won't accept one without a name.":
+    "Дайте группе имя — без имени ядро её не примет.",
+  "The client uses this name for its own group. Pick another one.":
+    "Это имя занято группой клиента. Выберите другое.",
+  "Another group already has this name. The core won't accept two.":
+    "Это имя уже у другой группы. Две группы с одним именем ядро не примет.",
+  "A rule can't lead to a name with a comma — the core cuts rules at it.":
+    "Правило не сможет вести в имя с запятой — ядро режет правила по ней.",
+  "check the name": "проверьте имя",
   "Node selection": "Выбор узла",
   "How the group selects a node": "Как группа выбирает узел",
   "Health check": "Проверка доступности",
@@ -117,8 +124,8 @@ const ru: Record<string, Entry> = {
     "Выбрана часть источника, поэтому в файле записаны точные имена: новые узлы подписки в группу не попадут. Отметьте источник целиком, чтобы список обновлялся сам.",
   "The form doesn't know these fields and keeps them as is: {fields}. Edit them in Code.":
     "Форма не знает полей: {fields}. Они сохранятся как есть; правятся в коде.",
-  "The group joins umiray and can be a rule target.":
-    "Группа появится в umiray — её можно выбрать целью правила.",
+  "Pick the group as a rule target in Routing.":
+    "Группу можно выбрать целью правила в «Маршрутизации».",
   "Delete group": "Удалить группу",
   Find: "Найти",
   Replace: "Заменить",
@@ -239,6 +246,8 @@ const ru: Record<string, Entry> = {
   "Read-only.": "Только для чтения.",
   "groups, rules and the exit choice find this node by name — it can't be renamed here":
     "по имени узел находят группы, правила и выбор маршрута — здесь его не изменить",
+  "another address is another node — add it separately":
+    "с другим адресом это другой узел — добавьте его отдельно",
   "{n} fields aren't shown: {fields}. They're kept as is; edit them in Code.":
     "Форма не показывает полей: {n} — {fields}. Они сохранятся как есть; правятся в коде.",
   "All the node's fields are shown. Add others in Code.":
@@ -594,6 +603,9 @@ const ru: Record<string, Entry> = {
   "bypass VPN": "без VPN",
   block: "блокировать",
   "through VPN": "через VPN",
+  "the exit chosen in Connection": "выход, выбранный в «Соединении»",
+  "not found · goes to the exit chosen in Connection":
+    "не найдено · уйдёт в выход, выбранный в «Соединении»",
   "node · through VPN": "узел · через VPN",
   "group · through VPN": "группа · через VPN",
   Node: "Узел",
@@ -643,8 +655,8 @@ const ru: Record<string, Entry> = {
   "{url} · every 300 s": "{url} · каждые 300 с",
   members: "состав",
   "all nodes of all sources, as a live list": "все узлы всех источников, живым списком",
-  "The client uses this name. Create your own group called AUTO and yours wins.":
-    "Имя занято клиентом. Если создать свою группу AUTO, будет использоваться ваша.",
+  "The name is taken by the client: a group of yours can't use it.":
+    "Имя занято клиентом: своя группа так называться не может.",
   "the exit MATCH points at": "выход, на который указывает MATCH",
   "who picks": "кто выбирает",
   "the choice in Connection — it points this group":
@@ -886,6 +898,8 @@ const ru: Record<string, Entry> = {
   Delay: "Задержка",
   "Add the qd:// link from your provider. A new link replaces the current one.":
     "Добавьте ссылку qd:// от провайдера. Новая ссылка заменяет текущую.",
+  "qd takes only a qd:// link. Add other links on the mihomo view.":
+    "qd принимает только ссылку qd://. Остальные ссылки добавляются на виде mihomo.",
   "qd picks the entry node itself.": "Входной узел qd выбирает сам.",
   "through the exit node": "через выходной узел",
   "through VPN, never the exit node": "через VPN, но не через выходной узел",
@@ -1027,7 +1041,8 @@ const ru: Record<string, Entry> = {
   "what GEOIP and GEOSITE rules read": "их читают правила GEOIP и GEOSITE",
   "everything not matched above · umiray is the exit chosen in Connection":
     "всё, что не совпало выше · umiray — выход, выбранный в «Соединении»",
-  "above rule sets and ready-made sets": "выше rule sets и готовых наборов",
+  "checked before rule sets, top to bottom; the first match wins":
+    "проверяются раньше rule sets, сверху вниз; срабатывает первое совпавшее",
   "Routing is off: all traffic goes to the exit chosen in Connection.":
     "Маршрутизация выключена: весь трафик идёт в выход, выбранный в «Соединении».",
   "No custom rules": "Своих правил нет",
@@ -1037,12 +1052,12 @@ const ru: Record<string, Entry> = {
   High: "Высокий",
   Medium: "Средний",
   Low: "Низкий",
-  "above everything but your rules": "выше всего, кроме своих правил",
-  "rule sets above ready-made sets": "rule sets выше готовых наборов",
-  "just above MATCH": "сразу над MATCH",
+  "checked right after your rules": "проверяется сразу после своих правил",
+  "checked after high": "проверяется после высокого",
+  "checked last, before MATCH": "проверяется последним, перед MATCH",
   "Priority of «{name}»": "Приоритет «{name}»",
-  "Top to bottom: your rules → high → medium → low → MATCH. Within a level, rule sets go before ready-made sets.":
-    "Сверху вниз: свои правила → высокий → средний → низкий → MATCH. На одном уровне rule sets выше готовых наборов.",
+  "Checked top to bottom, the first match wins: your rules → high → medium → low → MATCH. On one level, rule sets go first.":
+    "Проверка сверху вниз, срабатывает первое совпадение: свои правила → высокий → средний → низкий → MATCH. На одном уровне rule sets раньше.",
   "Updated: {names}": "Обновлено: {names}",
   "The databases are up to date — nothing new at the source.":
     "Базы уже свежие — у источника нового нет.",

@@ -36,7 +36,7 @@ export default function BuiltinGroups({ choices, mine }: Props) {
         [t("members"), t("all nodes of all sources, as a live list")],
       ],
       order: [] as { name: string; tone: Tone }[],
-      note: t("The client uses this name. Create your own group called AUTO and yours wins."),
+      note: t("The name is taken by the client: a group of yours can't use it."),
     },
     {
       id: "umiray",

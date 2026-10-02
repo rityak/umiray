@@ -48,6 +48,7 @@ impl Migration {
         }
         // Коллекции раздаются только в пустую таблицу: переехавшее раздача не тронет (D-100).
         crate::collections::Collections::seed()?;
+        crate::collections::Collections::offer()?;
         refresh_stale_templates()?;
         ensure_first_preset()?;
         adopt_ready_sets()?;

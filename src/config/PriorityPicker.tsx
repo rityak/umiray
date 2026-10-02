@@ -10,9 +10,9 @@ type Props = {
 };
 
 const LEVELS: { value: api.Priority; label: string; hint: string }[] = [
-  { value: "high", label: tk("High"), hint: tk("above everything but your rules") },
-  { value: "medium", label: tk("Medium"), hint: tk("rule sets above ready-made sets") },
-  { value: "low", label: tk("Low"), hint: tk("just above MATCH") },
+  { value: "high", label: tk("High"), hint: tk("checked right after your rules") },
+  { value: "medium", label: tk("Medium"), hint: tk("checked after high") },
+  { value: "low", label: tk("Low"), hint: tk("checked last, before MATCH") },
 ];
 
 /**

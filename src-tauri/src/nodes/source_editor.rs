@@ -3,15 +3,14 @@
 use serde::Serialize;
 
 use crate::error::{AppError, Result};
-use crate::nodes::entries::EntryPatch;
-use crate::nodes::link::LinkParser;
+use crate::nodes::entries::{Entries, EntryPatch};
 use crate::nodes::source_build::converted;
 use crate::nodes::source_build::SourceBuilder;
 use crate::nodes::source_id::SourceId;
 use crate::nodes::sources::built_proxies;
+use crate::nodes::sources::links_of;
 use crate::nodes::sources::own_proxies;
 use crate::nodes::sources::rebuild;
-use crate::nodes::sources::taken_by_others;
 use crate::nodes::sources::write;
 use crate::nodes::sources::SourceStore;
 
@@ -57,9 +56,9 @@ impl SourceEditor {
 
     pub fn reset_node(id: &str, node: &str) -> Result<()> {
         SourceId::parse(id)?;
-        let identity = identity(id, node)?;
+        let (key, _) = pristine(id, node)?;
         let mut written = EntryPatch::load(id);
-        written.remove(&identity);
+        written.remove(&key);
         EntryPatch::save(id, &written)?;
         rebuild(
             &mut SourceStore::get(id)?,
@@ -105,9 +104,9 @@ impl SourceEditor {
             &crate::config::awg::Mask::get(),
         )?;
         // Правки удалённого узла уходят вместе с ним: иначе они ждали бы одноимённого.
-        if let Ok(identity) = identity(id, node) {
+        if let Ok((key, _)) = pristine(id, node) {
             let mut written = EntryPatch::load(id);
-            written.remove(&identity);
+            written.remove(&key);
             EntryPatch::save(id, &written)?;
         }
         Ok(())
@@ -184,30 +183,23 @@ impl SourceEditor {
             );
         }
 
-        // Разницу считаем от **разобранного без правок**: иначе вторая правка легла бы
-        // поверх первой и «Откатить» вернул бы не туда.
-        let (clean, _) = converted(
-            id,
-            LinkParser::clean(&raw_lines(id), &mut taken_by_others(id)),
-            &crate::config::awg::Mask::get(),
-        )?;
-        let built = serde_yaml::from_str::<serde_yaml::Value>(&clean)
-            .ok()
-            .and_then(|value| value.get("proxies")?.as_sequence().cloned())
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|proxy| proxy.as_mapping().cloned())
-            .find(|entry| SourceBuilder::identity_of(entry) == SourceBuilder::identity_of(&edited))
-            .ok_or_else(|| AppError::invalid(format!("Узел не найден: {node}")))?;
-
-        let identity = SourceBuilder::identity_of(&built)
-            .ok_or_else(|| AppError::invalid(format!("Не удалось опознать узел: {node}")))?;
+        // Разницу считаем от **разобранного без правок** (B-037): от собранного с правкой
+        // вторая правка заменяла бы первую, а «Откатить» вернул бы не туда.
+        let (key, built) = pristine(id, node)?;
+        // Другой адрес — другой узел (D-036). Правка искала основу по адресу правки
+        // и ложилась на соседа с этим адресом (B-036).
+        if SourceBuilder::identity_of(&built) != SourceBuilder::identity_of(&edited) {
+            return Err(AppError::invalid(
+                "Адрес, порт и путь узла подписки здесь не меняются: с другим адресом это \
+другой узел. Его можно добавить отдельно — «Вручную».",
+            ));
+        }
         let mut all = EntryPatch::load(id);
         let patch = EntryPatch::diff(&built, &edited);
         if patch.is_empty() {
-            all.remove(&identity);
+            all.remove(&key);
         } else {
-            all.insert(identity, patch);
+            all.insert(key, patch);
         }
         EntryPatch::save(id, &all)?;
         rebuild(
@@ -223,11 +215,6 @@ fn object(entry: &serde_yaml::Mapping) -> Option<serde_json::Value> {
     serde_json::to_value(serde_yaml::Value::Mapping(entry.clone())).ok()
 }
 
-/// Сырьё построчно — им пользуются и пересборка, и подсчёт разницы.
-fn raw_lines(id: &str) -> Vec<String> {
-    SourceStore::raw(id).lines().map(str::to_string).collect()
-}
-
 /// Запись узла в источнике записей — вместе с её местом в списке.
 fn own_entry(id: &str, node: &str) -> Result<(usize, serde_yaml::Mapping)> {
     own_proxies(id)
@@ -240,17 +227,38 @@ fn own_entry(id: &str, node: &str) -> Result<(usize, serde_yaml::Mapping)> {
         .ok_or_else(|| AppError::invalid(format!("Узел не найден: {node}")))
 }
 
-/// Тождество узла по его нынешнему имени. Считается от **сырья**: имя в ключ не входит,
-/// но найти нужную строку в собранном списке проще всего именно по имени, а порядок строк
-/// сырья и результата совпадает — результат из сырья и получен.
-fn identity(id: &str, node: &str) -> Result<String> {
-    // Читаем **собранное**, а не сырьё: у подписки сырьё — это ссылки, а тождество
-    // с D-122 считается от записи.
-    built_proxies(id)
-        .into_iter()
-        .find_map(|entry| {
-            (entry.get(serde_yaml::Value::from("name"))?.as_str()? == node)
-                .then(|| SourceBuilder::identity_of(&entry))?
+/// Узел подписки так, как его прислала панель, без правок, — и ключ его правки.
+///
+/// Узел находим по имени в **собранном** списке, а берём по тому же месту из разобранного
+/// без правок: оба получены из одних строк сырья в одном порядке, и правка числа узлов
+/// не меняет. Ключ — от записи без правок, как его считает сборка (`SourceBuilder::keys`).
+fn pristine(id: &str, node: &str) -> Result<(String, serde_yaml::Mapping)> {
+    let at = built_proxies(id)
+        .iter()
+        .position(|entry| {
+            entry
+                .get(serde_yaml::Value::from("name"))
+                .and_then(serde_yaml::Value::as_str)
+                == Some(node)
         })
-        .ok_or_else(|| AppError::invalid(format!("Не удалось опознать узел: {node}")))
+        .ok_or_else(|| AppError::invalid(format!("Узел не найден: {node}")))?;
+    let (clean, _) = converted(
+        links_of(id, &SourceStore::raw(id)),
+        &crate::config::awg::Mask::get(),
+        &Entries::new(),
+    )?;
+    let entries: Vec<serde_yaml::Mapping> = serde_yaml::from_str::<serde_yaml::Value>(&clean)
+        .ok()
+        .and_then(|value| value.get("proxies")?.as_sequence().cloned())
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|proxy| proxy.as_mapping().cloned())
+        .collect();
+    let key = SourceBuilder::keys(&entries).get(at).cloned().flatten();
+    match (key, entries.get(at)) {
+        (Some(key), Some(entry)) => Ok((key, entry.clone())),
+        _ => Err(AppError::invalid(format!(
+            "Не удалось опознать узел: {node}"
+        ))),
+    }
 }

@@ -64,7 +64,7 @@ pub struct Status {
     /// Что сейчас не так — важнейшей строкой из реестра жалоб (D-115): сторож, часы,
     /// исчезнувший брандмауэр. Пусто — жаловаться не на что. Как и `restart_reason`,
     /// это состояние, а не событие: висит, пока есть повод, и пропадает само.
-    trouble: Option<String>,
+    trouble: Option<Trouble>,
     /// Стоит ли **сейчас** запрет выхода мимо туннеля (D-073). Именно стоит, а не выбран:
     /// тумблер живёт в настройках, а здесь факт, и разойтись им можно — включённый тумблер
     /// в режиме local не запирает ничего.
@@ -99,7 +99,10 @@ impl Status {
             mode: core.mode,
             desired_mode,
             restart_reason: restart_reason(state),
-            trouble: state.notices.top(core.started),
+            trouble: state.notices.top(core.started).map(|notice| Trouble {
+                text: notice.text,
+                restart: notice.restart,
+            }),
             port: core.port,
             started: running.as_ref().and_then(|(_, engine)| engine.started),
             core_present: crate::core::mihomo::Mihomo::binary().exists(),
@@ -131,8 +134,16 @@ impl Status {
     /// Важнейшая жалоба. Тоже только для живых проверок.
     #[cfg(test)]
     pub fn trouble(&self) -> Option<&str> {
-        self.trouble.as_deref()
+        self.trouble.as_ref().map(|trouble| trouble.text.as_str())
     }
+}
+
+/// Жалоба, какой её видит окно: строка и то, предлагать ли рядом перезапуск VPN.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Trouble {
+    text: String,
+    restart: bool,
 }
 
 /// Как должен выглядеть значок. Отдельная функция, потому что состояние меняется в четырёх

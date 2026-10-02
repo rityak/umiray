@@ -1729,7 +1729,7 @@ async fn live_kill_switch_heals_itself_after_the_client_dies() {
     assert_eq!(doomed.mihomo.status().mode, Some(Mode::Tun));
     doomed
         .kill_switch
-        .engage(&doomed, &doomed.mihomo)
+        .follow(&doomed, &doomed.mihomo)
         .expect("защита должна встать");
 
     // Страховка на случай, если проверка развалится посередине: сеть обязана вернуться.

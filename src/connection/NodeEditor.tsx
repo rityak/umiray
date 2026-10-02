@@ -6,7 +6,15 @@ import Editor from "../config/Editor";
 import { t } from "../i18n";
 import { failure } from "../shell/Banner";
 import ProxyForm from "../sources/ProxyForm";
-import { type Entry, fromEntry, missing, toEntry, type Values, wrong } from "../sources/proxy";
+import {
+  type Entry,
+  fromEntry,
+  missing,
+  sameEntry,
+  toEntry,
+  type Values,
+  wrong,
+} from "../sources/proxy";
 
 type Props = {
   node: api.Node;
@@ -17,6 +25,17 @@ type Props = {
 /// Шапка кода у узла, который клиент написал сам. Её же признак — что узел можно убрать:
 /// заводили его здесь, а не подпиской.
 const MINE = "# Ваш узел";
+
+/// По этим полям узел подписки узнаётся (D-036): с другим адресом это другой узел,
+/// и бэкенд такую правку отвергнет (B-036). У своего узла они правятся.
+const ADDRESS = [
+  "server",
+  "port",
+  "ws-opts.path",
+  "h2-opts.path",
+  "xhttp-opts.path",
+  "grpc-opts.grpc-service-name",
+];
 
 /**
  * Узел: та же форма, что при добавлении, только заполненная (D-121).
@@ -86,7 +105,7 @@ export default function NodeEditor({ node, onClose, onChanged }: Props) {
   const gaps = form ? missing(kind, values) : [];
   const bad = form ? wrong(kind, values) : [];
   const recoded = code !== null && text !== null && code.editable && text !== base;
-  const reshaped = built !== null && JSON.stringify(built) !== JSON.stringify(entry);
+  const reshaped = built !== null && !sameEntry(built, entry);
   const dirty = recoded || reshaped;
   const leftover = Object.keys(extra);
 
@@ -250,10 +269,19 @@ export default function NodeEditor({ node, onClose, onChanged }: Props) {
             <ProxyForm
               kind={kind}
               values={values}
-              locked={["name"]}
-              why={t(
-                "groups, rules and the exit choice find this node by name — it can't be renamed here",
-              )}
+              locked={{
+                name: t(
+                  "groups, rules and the exit choice find this node by name — it can't be renamed here",
+                ),
+                ...(mine
+                  ? {}
+                  : Object.fromEntries(
+                      ADDRESS.map((key) => [
+                        key,
+                        t("another address is another node — add it separately"),
+                      ]),
+                    )),
+              }}
               onChange={(key, value) => setValues((was) => ({ ...was, [key]: value }))}
             />
             {gaps.length > 0 && (

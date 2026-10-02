@@ -23,6 +23,9 @@ const KEY: &str = "rules";
 /// Последнее правило: куда идёт всё, что не совпало.
 const MATCH: &str = "MATCH";
 
+/// Флаг, который люди пишут в хвост правила, в том числе доменного.
+const NO_RESOLVE: &str = "no-resolve";
+
 /// Правило так, как его видит окно.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -86,10 +89,8 @@ impl RulesCodec {
 
         let last = lines.len().saturating_sub(1);
         for (at, line) in lines.iter().enumerate() {
-            let parts: Vec<String> = line
-                .split(',')
-                .map(|part| part.trim().to_string())
-                .collect();
+            let raw: Vec<&str> = line.split(',').collect();
+            let parts: Vec<String> = raw.iter().map(|part| part.trim().to_string()).collect();
             if parts[0] == MATCH {
                 if at != last {
                     return Err(AppError::invalid(
@@ -107,24 +108,17 @@ impl RulesCodec {
                     "Правило «{line}» не похоже на «вид,значение,куда» — поправьте кодом"
                 )));
             }
-            let literal_payload = literal_payload(&parts[0]);
+            // Цель — там, где её ищет сборка; у `SUB-RULE` её нет, и последняя часть —
+            // имя набора `sub-rules`.
+            let refs: Vec<&str> = parts.iter().map(String::as_str).collect();
+            let at = Self::exit_at(&refs).unwrap_or(parts.len() - 1);
             let rule = Rule {
                 kind: parts[0].clone(),
-                values: vec![if literal_payload {
-                    parts[1..parts.len() - 1].join(",")
-                } else {
-                    parts[1].clone()
-                }],
-                target: if literal_payload {
-                    parts.last().unwrap().clone()
-                } else {
-                    parts[2].clone()
-                },
-                options: if literal_payload {
-                    Vec::new()
-                } else {
-                    parts[3..].to_vec()
-                },
+                // Значение — как написано: пробел после запятой внутри регулярки — её часть,
+                // обрезанные части склеивались в другую регулярку (B-045).
+                values: vec![raw[1..at].join(",").trim().to_string()],
+                target: parts[at].clone(),
+                options: parts[at + 1..].to_vec(),
             };
             // Соседнее правило того же вида и с тем же назначением — это второе значение
             // того же правила окна, а не вторая строка списка.
@@ -148,9 +142,35 @@ impl RulesCodec {
     /// решает не этот документ.
     pub fn render(text: &str, routing: &Routing) -> Result<String> {
         let mut map = Yaml::top_mapping(text)?;
+        // Ядро режет строку правила по запятой, и цель с ней стала бы своим началом —
+        // правило молча ушло бы в `umiray` (B-043). Отказ словами лучше тихого увода.
+        if let Some(target) = routing
+            .rules
+            .iter()
+            .map(|rule| rule.target.trim())
+            .chain(routing.rule_sets.iter().map(|set| set.target.trim()))
+            .chain(routing.ready.iter().filter_map(|set| set.target.as_deref()))
+            .chain([routing.fallback.trim()])
+            .find(|target| target.contains(','))
+        {
+            return Err(AppError::invalid(format!(
+                "Правило не может вести в «{target}»: ядро режет правило по запятой. \
+Переименуйте группу или узел без запятой."
+            )));
+        }
         let mut lines: Vec<Value> = Vec::new();
         for rule in &routing.rules {
-            for value in &rule.values {
+            // У обычного правила запятая делит строку ядра: значение с ней — это несколько
+            // значений, иначе часть его стала бы целью. У regex и составных запятая своя.
+            let literal = literal_payload(rule.kind.trim());
+            let values = rule.values.iter().flat_map(|value| {
+                if literal {
+                    vec![value.as_str()]
+                } else {
+                    value.split(',').collect()
+                }
+            });
+            for value in values {
                 let value = value.trim();
                 // Правило без значения ядро не примет: пустая строка формы в конфиг не едет.
                 if value.is_empty() || rule.kind.trim().is_empty() || rule.target.trim().is_empty()
@@ -189,10 +209,17 @@ impl RulesCodec {
             return None;
         }
         Some(if literal_payload(kind) {
-            parts.len() - 1
+            parts.len() - 1 - usize::from(Self::flag_after_exit(parts))
         } else {
             2
         })
+    }
+
+    /// `no-resolve` в хвосте правила, у которого цель — последняя часть строки (regex,
+    /// составные). Человек пишет его флагом и у доменных правил (B-035); ядро прочло бы его
+    /// целью — сборка отдаёт такую строку без хвоста.
+    pub fn flag_after_exit(parts: &[&str]) -> bool {
+        parts.len() > 3 && literal_payload(parts[0]) && parts.last() == Some(&NO_RESOLVE)
     }
 }
 
@@ -266,6 +293,23 @@ mod tests {
         );
     }
 
+    /// B-045: разбор резал строку по запятым и обрезал части — пробел после запятой внутри
+    /// регулярки пропадал, и после правки формой она переставала совпадать.
+    #[test]
+    fn a_space_after_a_comma_inside_a_regex_survives_the_form() {
+        let text = "rules:
+  - DOMAIN-REGEX,^a, b$,DIRECT
+  - MATCH,umiray
+";
+        let routing = RulesCodec::parse(text).unwrap();
+        assert_eq!(routing.rules[0].values, vec!["^a, b$"]);
+        let out = RulesCodec::render(text, &routing).unwrap();
+        assert_eq!(
+            Yaml::top_mapping(&out).unwrap()["rules"][0],
+            Value::from("DOMAIN-REGEX,^a, b$,DIRECT")
+        );
+    }
+
     #[test]
     fn a_new_value_becomes_a_new_line_next_to_its_own() {
         let mut routing = RulesCodec::parse(MINE).unwrap();
@@ -326,6 +370,82 @@ mod tests {
         let out = RulesCodec::render("", &routing).unwrap();
         let rules = Yaml::top_mapping(&out).unwrap()["rules"].clone();
         assert_eq!(rules.as_sequence().unwrap().len(), 2, "правило и MATCH");
+    }
+
+    /// Запятая в значении обычного правила делит строку ядра: `a.ru, b.ru` стало бы
+    /// значением `a.ru` с целью `b.ru`. Такое значение — два значения, а не одно.
+    #[test]
+    fn a_comma_inside_a_plain_value_splits_it_instead_of_shifting_the_target() {
+        let routing = Routing {
+            rules: vec![
+                Rule {
+                    kind: "DOMAIN-SUFFIX".into(),
+                    values: vec!["a.ru, b.ru".into(), "c.ru,".into()],
+                    target: "DIRECT".into(),
+                    options: Vec::new(),
+                },
+                Rule {
+                    kind: "DOMAIN-REGEX".into(),
+                    values: vec!["^x{1,3}\\.ru$".into()],
+                    target: "DIRECT".into(),
+                    options: Vec::new(),
+                },
+            ],
+            fallback: "umiray".into(),
+            rule_sets: Vec::new(),
+            ready: Vec::new(),
+        };
+        let out = RulesCodec::render("", &routing).unwrap();
+        let back = RulesCodec::parse(&out).unwrap();
+        assert_eq!(back.rules[0].values, vec!["a.ru", "b.ru", "c.ru"], "{out}");
+        assert_eq!(back.rules[0].target, "DIRECT");
+        assert_eq!(
+            back.rules[1].values,
+            vec!["^x{1,3}\\.ru$"],
+            "у regex запятая своя"
+        );
+    }
+
+    /// `no-resolve` пишут и у доменных правил — у regex и составных цель последняя часть
+    /// строки, и хвост читался целью. Целью остаётся `DIRECT`, хвост — опцией и переживает
+    /// правку формой.
+    #[test]
+    fn no_resolve_after_a_regex_rule_is_a_flag_not_its_target() {
+        let text = "rules:
+  - DOMAIN-REGEX,^(.+[.])?ozon[.](by|kz)$,DIRECT,no-resolve
+  - MATCH,DIRECT
+";
+        let routing = RulesCodec::parse(text).unwrap();
+        assert_eq!(routing.rules[0].target, "DIRECT");
+        assert_eq!(routing.rules[0].values, vec!["^(.+[.])?ozon[.](by|kz)$"]);
+        assert_eq!(routing.rules[0].options, vec!["no-resolve"]);
+        let back = RulesCodec::parse(&RulesCodec::render(text, &routing).unwrap()).unwrap();
+        assert_eq!(back, routing);
+
+        let parts = ["DOMAIN-REGEX", "^a$", "DIRECT", "no-resolve"];
+        assert_eq!(RulesCodec::exit_at(&parts), Some(2));
+    }
+
+    /// B-043: цель с запятой ядро режет — `Европа, быстрые` стала бы целью `Европа`,
+    /// и правило молча ушло бы в `umiray`. Такую запись отвергаем словами.
+    #[test]
+    fn a_target_with_a_comma_is_refused_instead_of_cut() {
+        let rule = |target: &str| Routing {
+            rules: vec![Rule {
+                kind: "DOMAIN-SUFFIX".into(),
+                values: vec!["netflix.com".into()],
+                target: target.into(),
+                options: Vec::new(),
+            }],
+            fallback: "umiray".into(),
+            rule_sets: Vec::new(),
+            ready: Vec::new(),
+        };
+        assert!(RulesCodec::render("", &rule("Европа, быстрые")).is_err());
+        assert!(RulesCodec::render("", &rule("Европа")).is_ok());
+        let mut fallback = rule("DIRECT");
+        fallback.fallback = "Европа, быстрые".into();
+        assert!(RulesCodec::render("", &fallback).is_err(), "и у MATCH");
     }
 
     #[test]

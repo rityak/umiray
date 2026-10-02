@@ -226,7 +226,7 @@ fn start_proxy<'a>(state: &'a AppState, engine: &'a mut EngineId) -> Job<'a> {
 
 fn start_lock<'a>(state: &'a AppState, engine: &'a mut EngineId) -> Job<'a> {
     let engine = *engine;
-    Box::pin(async move { state.kill_switch.engage(state, state.engine(engine)) })
+    Box::pin(async move { state.kill_switch.follow(state, state.engine(engine)) })
 }
 
 fn stop_lock<'a>(state: &'a AppState, _engine: &'a mut EngineId) -> Job<'a> {

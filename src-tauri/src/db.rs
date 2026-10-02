@@ -128,6 +128,14 @@ impl Db {
     /// Копия базы в `to`, где осталось только `keep` (D-163): таблица целиком (`None`)
     /// или одна её строка. Остальное в копии пусто.
     pub fn copy(to: &Path, keep: &[(Table, Option<&str>)]) -> Result<()> {
+        // Поверх самой базы копия подменила бы её урезанной — без HWID, rule sets, архива
+        // (B-046). Файла нет — это не база.
+        let base = std::fs::canonicalize(Paths::db()).ok();
+        if base.is_some() && std::fs::canonicalize(to).ok() == base {
+            return Err(AppError::invalid(
+                "Это сама база клиента — сохраните копию в другое место",
+            ));
+        }
         let staged = to.with_extension("db.part");
         let _ = std::fs::remove_file(&staged);
         open()?
@@ -326,5 +334,19 @@ mod tests {
                 "{name} без владельца"
             );
         }
+    }
+
+    /// B-046: экспорт, сохранённый поверх самой базы, подменял её урезанной копией —
+    /// без HWID (новый займёт слот в подписке), rule sets и архива.
+    #[test]
+    fn a_copy_never_replaces_the_base_itself() {
+        let _sandbox = crate::paths::Sandbox::new("copy-onto-base");
+        Db::put(Table::State, "hwid", "", "0123456789abcdef").unwrap();
+        assert!(Db::copy(&Paths::db(), &[(Table::State, Some("settings"))]).is_err());
+        assert_eq!(
+            Db::get(Table::State, "hwid", "").unwrap().as_deref(),
+            Some("0123456789abcdef"),
+            "база цела"
+        );
     }
 }
