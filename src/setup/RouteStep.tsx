@@ -30,8 +30,6 @@ export default function RouteStep({ direction, node, onChange }: Props) {
         <NodeTiles
           nodes={[...exits(nodes.length), ...nodes]}
           selected={chosen(direction, node)}
-          // Источники мастер не называет: их тут один-два, и все только что добавлены.
-          sourceName={() => ""}
           hidden={false}
           rates={{}}
           onSelect={(name) => {

@@ -218,7 +218,6 @@ export default function QdConnection({
               <NodeTiles
                 nodes={shown}
                 selected={nodes.find((item) => item.selected && connected)?.name ?? null}
-                sourceName={() => "qd"}
                 hidden={false}
                 rates={{}}
                 plain

@@ -1,14 +1,3 @@
-import { formatBytes } from "../api";
-import type { NodeSpeed } from "../hooks/useTraffic";
-import { t } from "../i18n";
-
-/// What goes through the node right now: a rate, "connected" or a dash (S-018).
-export function nowText(speed: NodeSpeed | undefined): string {
-  if (speed === undefined) return "—";
-  const rate = speed.down + speed.up;
-  return rate > 0 ? t("{rate}/s", { rate: formatBytes(rate) }) : t("connected");
-}
-
 /// Binomial weights over seven samples: a peak keeps its place and height order, but its
 /// edges round off — the chart reads as a wave, not a saw.
 const KERNEL = [1, 6, 15, 20, 15, 6, 1];

@@ -38,7 +38,6 @@ const ru: Record<string, Entry> = {
   "WireGuard .conf, OpenVPN .ovpn or usque config.json":
     "WireGuard .conf, OpenVPN .ovpn или config.json от usque",
   "A node field by field": "Узел по полям",
-  "Nodes or sources": "Узлы или источники",
   "Source code": "Код источника",
   "Subscription refresh schedule": "Как часто обновлять подписки",
   "Custom…": "Своё…",
@@ -71,10 +70,10 @@ const ru: Record<string, Entry> = {
   "the full core config; capture controls also write here":
     "полный конфиг ядра; переключатель перехвата пишет сюда же",
   "client settings; this file is never sent to the core": "настройки клиента; ядру не передаются",
-  "your node groups, shared by all routes; the client builds AUTO and umiray itself":
-    "ваши группы узлов, общие для всех маршрутов; AUTO и umiray клиент собирает сам",
-  "where traffic goes; MATCH handles everything else":
-    "куда идёт трафик; всё остальное решает MATCH",
+  "your node groups, shared by all routes; the client builds AUTO and auto groups itself":
+    "ваши группы узлов, общие для всех маршрутов; AUTO и автогруппы клиент собирает сам",
+  "top to bottom, the first match wins: your rules → high → medium → low → MATCH; rule sets first within a level":
+    "сверху вниз, решает первое совпадение: свои правила → высокий → средний → низкий → MATCH; на одном уровне rule sets раньше",
   "you choose manually": "вы выбираете сами",
   "fastest response": "самый быстрый ответ",
   "first reachable in order": "первый доступный по порядку",
@@ -82,7 +81,7 @@ const ru: Record<string, Entry> = {
   "the same address always uses the same server": "один адрес — всегда один и тот же сервер",
   "rotate servers for each connection": "по очереди на каждое соединение",
   "keep each client on one server": "один клиент держится одного сервера",
-  "all of «{name}» ({n})": "«{name}» целиком ({n})",
+  "all of «{name}»": "«{name}» целиком",
   "«{name}»: {n} of {total}": "«{name}»: {n} из {total}",
   unnamed: "без имени",
   "by name: {n}": "по именам: {n}",
@@ -108,8 +107,6 @@ const ru: Record<string, Entry> = {
   "Strategy: {strategy}": "Стратегия: {strategy}",
   "Switch only when the difference exceeds the tolerance":
     "Переключаться, только если разница больше допуска",
-  "The group uses this URL to check node availability":
-    "по этому адресу группа проверяет доступность узла",
   Members: "Состав",
   "Also in the group: {names} — other groups, DIRECT or names typed by hand. Edit them in Code.":
     "Ещё в группе: {names}. Это другие группы, прямое соединение или имена, введённые вручную; правятся в коде.",
@@ -124,8 +121,6 @@ const ru: Record<string, Entry> = {
     "Выбрана часть источника, поэтому в файле записаны точные имена: новые узлы подписки в группу не попадут. Отметьте источник целиком, чтобы список обновлялся сам.",
   "The form doesn't know these fields and keeps them as is: {fields}. Edit them in Code.":
     "Форма не знает полей: {fields}. Они сохранятся как есть; правятся в коде.",
-  "Pick the group as a rule target in Routing.":
-    "Группу можно выбрать целью правила в «Маршрутизации».",
   "Delete group": "Удалить группу",
   Find: "Найти",
   Replace: "Заменить",
@@ -282,19 +277,10 @@ const ru: Record<string, Entry> = {
   "Add a subscription or a link.": "Добавьте подписку или ссылку.",
   "Add source": "Добавить источник",
   Nodes: "Узлы",
-  "Node order": "Порядок узлов",
-  "by source": "по источнику",
-  "by name": "по имени",
-  "by latency": "по задержке",
-  "List view": "Вид списка",
-  Tiles: "Плитки",
   Table: "Таблица",
   "Show addresses and subscription names": "Показать адреса и имена подписок",
   "Hide addresses and subscription names": "Скрыть адреса и имена подписок",
   "Refresh subscriptions and measure latency again": "Обновить подписки и перемерить задержки",
-  "Latency to each server: {method}. Change the method in Settings":
-    "Задержка до каждого сервера: {method}. Способ — в «Настройках»",
-  "Check latency": "Проверить задержку",
   "ICMP: regular ping to the host": "ICMP: обычный ping до хоста",
   "TCP: time to connect to the node's port": "TCP: за сколько открывается соединение с портом узла",
   "through the node: best of two requests": "через сам узел: лучший из двух запросов",
@@ -331,7 +317,6 @@ const ru: Record<string, Entry> = {
   "spread across working nodes": "по всем рабочим узлам",
   "assigned by your rules": "назначен вашими правилами",
   "bypass VPN — no server": "в обход VPN, сервер не нужен",
-  "the core spreads sites across working servers": "ядро раскладывает сайты по рабочим серверам",
   "select a node from the list": "выберите узел в списке",
   "selected automatically": "выбран автоматически",
   "selected manually": "выбран вручную",
@@ -389,10 +374,8 @@ const ru: Record<string, Entry> = {
   "Add a subscription or a link": "Добавить подписку или ссылку",
   "Developer mode": "Режим разработчика",
   Loading: "Загрузка",
-  "{n} conn.": "{n} соед.",
   "not supported": "не поддерживается",
   edited: "изменён",
-  "Edit {name}": "Изменить {name}",
   "0 for anything newer than 2021": "0 для всего новее 2021 года",
   "Brutal: upload": "Brutal: отдача",
   "Brutal: download": "Brutal: приём",
@@ -603,15 +586,10 @@ const ru: Record<string, Entry> = {
   "bypass VPN": "без VPN",
   block: "блокировать",
   "through VPN": "через VPN",
-  "the exit chosen in Connection": "выход, выбранный в «Соединении»",
   "not found · goes to the exit chosen in Connection":
     "не найдено · уйдёт в выход, выбранный в «Соединении»",
   "node · through VPN": "узел · через VPN",
   "group · through VPN": "группа · через VPN",
-  Node: "Узел",
-  "Delay · {method}": "Задержка · {method}",
-  Source: "Источник",
-  Now: "Сейчас",
   "No sources": "Источников нет",
   "Add a subscription or a link — the provider's response will show up here.":
     "Добавьте подписку или ссылку — здесь появится ответ провайдера.",
@@ -646,28 +624,17 @@ const ru: Record<string, Entry> = {
     "Уже подобранное останется. Поменять его можно в «Настройках mihomo».",
   "The core has more fields than the form — add the rest in code. A node added this way can be edited as a whole config.":
     "У ядра больше полей, чем в форме; остальные добавляются в коде — у такого узла правится весь конфиг.",
-  "all nodes of all sources · {n}": "все узлы всех источников · {n}",
   type: "тип",
   strategy: "стратегия",
   "consistent-hashing — one address always through one server":
     "consistent-hashing — один адрес всегда через один сервер",
   check: "проверка",
-  "{url} · every 300 s": "{url} · каждые 300 с",
   members: "состав",
-  "all nodes of all sources, as a live list": "все узлы всех источников, живым списком",
   "The name is taken by the client: a group of yours can't use it.":
     "Имя занято клиентом: своя группа так называться не может.",
-  "the exit MATCH points at": "выход, на который указывает MATCH",
   "who picks": "кто выбирает",
-  "the choice in Connection — it points this group":
-    "выбор в «Соединении» — он и наводит эту группу",
   why: "зачем",
-  "the target of the final MATCH rule: whatever nothing else caught goes here":
-    "цель последнего правила MATCH: сюда идёт всё, что не совпало выше",
   "nodes of «{source}»": "узлы «{source}»",
-  "Your groups, in the same order as the list above.":
-    "Здесь ваши группы — в том же порядке, что в списке выше.",
-  "names taken by the client": "имена, занятые клиентом",
   "assembled by the client": "собирает клиент",
   "Settings sections": "Разделы настроек",
   "Custom set": "Свой набор",
@@ -712,8 +679,6 @@ const ru: Record<string, Entry> = {
     "Клиент уже собрал AUTO из всех источников. Своя группа нужна, чтобы отделить часть узлов — например одну страну.",
   "connections {n}": "соединений {n}",
   "session {size}": "за сеанс {size}",
-  "last 90 seconds": "последние 90 секунд",
-  "VPN is off": "VPN выключен",
   Traffic: "Трафик",
   "Speed over the last 90 seconds": "Скорость за последние 90 секунд",
   "The chart shows up once you connect.": "График появится после подключения.",
@@ -780,8 +745,6 @@ const ru: Record<string, Entry> = {
   "Reading nodes…": "Загрузка узлов…",
   "No compatible nodes: add a hysteria2, tuic or wireguard source":
     "нет узлов hysteria2, tuic или wireguard",
-  "Country flag": "Флаг страны",
-  "Look up server country": "Определять страну сервера",
   "Off: no addresses are sent anywhere, so no flags":
     "выключено: адреса никуда не отправляются, флагов не будет",
   "Only the server address is sent to ipinfo.io, at most once per selected interval":
@@ -895,7 +858,6 @@ const ru: Record<string, Entry> = {
   "traffic leaves through the entry node": "трафик выходит через входной узел",
   Ads: "Реклама",
   Allow: "Показывать",
-  Delay: "Задержка",
   "Add the qd:// link from your provider. A new link replaces the current one.":
     "Добавьте ссылку qd:// от провайдера. Новая ссылка заменяет текущую.",
   "qd takes only a qd:// link. Add other links on the mihomo view.":
@@ -1039,8 +1001,6 @@ const ru: Record<string, Entry> = {
   "build-in — what the client adds itself": "build-in — то, что клиент ставит сам",
   "core databases": "базы ядра",
   "what GEOIP and GEOSITE rules read": "их читают правила GEOIP и GEOSITE",
-  "everything not matched above · umiray is the exit chosen in Connection":
-    "всё, что не совпало выше · umiray — выход, выбранный в «Соединении»",
   "checked before rule sets, top to bottom; the first match wins":
     "проверяются раньше rule sets, сверху вниз; срабатывает первое совпавшее",
   "Routing is off: all traffic goes to the exit chosen in Connection.":
@@ -1056,12 +1016,91 @@ const ru: Record<string, Entry> = {
   "checked after high": "проверяется после высокого",
   "checked last, before MATCH": "проверяется последним, перед MATCH",
   "Priority of «{name}»": "Приоритет «{name}»",
-  "Checked top to bottom, the first match wins: your rules → high → medium → low → MATCH. On one level, rule sets go first.":
-    "Проверка сверху вниз, срабатывает первое совпадение: свои правила → высокий → средний → низкий → MATCH. На одном уровне rule sets раньше.",
   "Updated: {names}": "Обновлено: {names}",
   "The databases are up to date — nothing new at the source.":
     "Базы уже свежие — у источника нового нет.",
   "{n} days old": ["{n} день", "{n} дня", "{n} дней"],
+  "Auto groups": "Автогруппы",
+  "By location": "По локациям",
+  "A group for every country with two or more nodes":
+    "Группа на каждую страну, где два узла и больше",
+  "By protocol": "По протоколам",
+  "A group for every protocol with two or more nodes":
+    "Группа на каждый протокол, где два узла и больше",
+  "UDP over UDP": "UDP over UDP",
+  "No nodes carry UDP as datagrams — nothing to group":
+    "Нет узлов, которые несут UDP датаграммой, — собирать не из чего",
+  "Check latency: {method}. Change the method in Settings":
+    "Замерить задержку: {method}. Способ меняется в настройках",
+  Fold: "Свернуть",
+  "Show nodes": "Показать узлы",
+  "Icon of {name}": "Значок «{name}»",
+  "Rename group": "Переименовать группу",
+  "Traffic through": "Трафик через",
+  "Icon kind": "Вид значка",
+  Icons: "Значки",
+  Flags: "Флаги",
+  "Search in English: shield, game…": "Поиск по-английски: shield, game…",
+  Country: "Страна",
+  "{n} more — narrow the search": "Ещё {n} — уточните поиск",
+  "Default icon": "Значок по умолчанию",
+  "{name} in AUTO": "{name} в AUTO",
+  Idle: "Ожидание",
+  "conn.": "соед.",
+  Load: "Нагрузка",
+  "Direct, without VPN": "Напрямую, без VPN",
+  "{n} of {total} nodes": "{n} узлов из {total}",
+  "{n} chosen of {total}": "{n} выбрано из {total}",
+  "Choose nodes for AUTO": "Выбрать узлы для AUTO",
+  "Leave at least one node in AUTO": "Оставьте в AUTO хотя бы один узел",
+  "Rename source": "Переименовать источник",
+  "Nodes, groups or sources": "Узлы, группы или источники",
+  "Source settings": "Настройки источника",
+  connections: ["соединение", "соединения", "соединений"],
+  "all nodes except the ones taken out in Connection, as a live list":
+    "все узлы, кроме вынутых в «Соединении», живым списком",
+  "Auto groups on the Groups tab of Connection": "«Автогруппы» во вкладке «Группы» в «Соединении»",
+  "Disconnecting…": "Отключение…",
+  "establishing the connection": "устанавливаем соединение",
+  "closing the connection": "закрываем соединение",
+  "Nodes whose protocol carries UDP itself, not inside TCP":
+    "Узлы, чей протокол передаёт UDP сам, а не внутри TCP",
+  "Nodes whose protocol carries UDP itself, not inside TCP. All UDP goes here: a rule in Settings":
+    "Узлы, чей протокол передаёт UDP сам, а не внутри TCP. Весь UDP идёт сюда — правилом в «Настройках»",
+  ads: "реклама",
+  "Failed: {what}": "Не вышло: {what}",
+  "Selected exit": "Выбранный выход",
+  "whatever you pick in Connection": "то, что выбрано в «Соединении»",
+  "everything not matched above · now {exit}": "всё, что не поймано выше · сейчас {exit}",
+  "everything not matched above": "всё, что не поймано выше",
+  "Connect through it": "Подключиться",
+  "Connected through it": "Подключено",
+  "Edit group": "Изменить группу",
+  "Show details": "Подробнее",
+  "nodes whose protocol carries UDP itself, not inside TCP":
+    "узлы, чей протокол передаёт UDP сам, а не внутри TCP",
+  "nodes of one country, two or more": "узлы одной страны, если их два и больше",
+  "nodes of one protocol, two or more": "узлы одного протокола, если их два и больше",
+  "who turns it on": "кто включает",
+  "where MATCH and «Selected exit» rules lead": "куда ведут MATCH и правила «Выбранный выход»",
+  "the choice in Connection — switched live, without reloading the core":
+    "выбор в «Соединении» — переключается на лету, без перезагрузки ядра",
+  "rules pointing here follow your choice in Connection, so changing it rewrites nothing":
+    "правила, ведущие сюда, идут за выбором в «Соединении»: смена выхода ничего не переписывает",
+  "name in the core config": "имя в конфиге ядра",
+  "{url} · every {n} s": "{url} · каждые {n} с",
+  Updates: "Обновление",
+  Subscriptions: "Подписки",
+  "New nodes from a subscription go into AUTO and auto groups by themselves":
+    "Новые узлы подписки попадают в AUTO и автогруппы сами",
+  "Group re-check": "Перепроверка групп",
+  "How often AUTO and auto groups check their nodes and set dead ones aside. Your own groups have their own interval":
+    "Как часто AUTO и автогруппы проверяют узлы и откладывают мёртвые. У своих групп — свой интервал",
+  "Group re-check interval": "Как часто перепроверять группы",
+  "Every minute": "Каждую минуту",
+  "Every 5 minutes": "Каждые 5 минут",
+  "Every 15 minutes": "Каждые 15 минут",
+  "Country flags": "Флаги стран",
 };
 
 export default ru;

@@ -1,6 +1,6 @@
 import { Gauge, SlidersHorizontal } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Button, Callout, ChoiceCards, Dialog, Stepper, toast } from "rootik";
+import { Button, Callout, ChoiceCards, Dialog, Stepper, Toaster, toast } from "rootik";
 import * as api from "../api";
 import { MODES } from "../connection/ConnectionPath";
 import { t, tk } from "../i18n";
@@ -159,18 +159,19 @@ export default function Setup({
       }
     }
     if (told.length === 0) return;
-    const fine = told.every((report) => report.verdict === "ok");
+    // Одной строкой: что подобрано или что не вышло. Подробности — в «Настройках mihomo».
+    const name = (report: api.Report) =>
+      report.tool === "ads"
+        ? t("ads")
+        : (TUNING.find((item) => item.id === report.tool)?.title ?? report.tool);
+    const failed = told.filter((report) => report.verdict !== "ok");
     toast({
-      title: fine ? t("Settings picked") : t("Not everything was picked"),
-      tone: fine ? "success" : "warn",
-      duration: 10_000,
-      description: (
-        <ul className="m-0 flex list-none flex-col gap-1 p-0">
-          {told.map((report) => (
-            <li key={report.tool}>{report.headline}</li>
-          ))}
-        </ul>
-      ),
+      title: failed.length === 0 ? t("Settings picked") : t("Not everything was picked"),
+      tone: failed.length === 0 ? "success" : "warn",
+      description:
+        failed.length === 0
+          ? told.map(name).join(" · ")
+          : t("Failed: {what}", { what: failed.map(name).join(", ") }),
     });
   };
 
@@ -315,6 +316,9 @@ export default function Setup({
         </>
       }
     >
+      {/* Свои тосты на время мастера: модальное окно делает всё вне себя инертным, и тост
+          из App, хоть и виден поверх, не закрывается крестиком (ROOTIK §2). */}
+      <Toaster position="bottom-right" />
       <div className="flex min-h-0 flex-col gap-4">
         <Stepper
           size="sm"

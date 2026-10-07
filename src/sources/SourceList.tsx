@@ -1,27 +1,22 @@
-import { Eye, EyeOff, Plus, Rss } from "lucide-react";
-import { type ReactNode, useCallback, useState } from "react";
-import { Button, Card, EmptyState, IconButton, Text } from "rootik";
+import { Plus, Rss } from "lucide-react";
+import { useCallback, useState } from "react";
+import { Button, EmptyState, IconButton, Text } from "rootik";
 import * as api from "../api";
 import type { Drafts } from "../config/draft";
 import { useNow } from "../hooks/useNow";
 import { t } from "../i18n";
 import { failure, type Message, notice } from "../shell/Banner";
 import AddMenu, { type AddKind } from "./AddMenu";
-import RefreshSchedule from "./RefreshSchedule";
 import SourceCard from "./SourceCard";
 import SourceCodeDialog from "./SourceCodeDialog";
 
 type Props = {
-  /// Заголовок карточки — переключатель «Узлы · Источники» (D-160).
-  head: ReactNode;
   sources: api.Source[];
   /// Узлы всех источников — из опроса «Соединения»: состав источника виден без второго запроса.
   nodes: api.Node[];
   /// Режим «на людях» (D-127): имена подписок и адреса под точками.
   hidden: boolean;
-  onHidden: () => void;
   schedule: api.Refresh;
-  onSchedule: (schedule: api.Refresh) => void;
   drafts: Drafts;
   onDraft: (id: string, text: string) => void;
   onDisk: (id: string, text: string) => void;
@@ -47,16 +42,13 @@ function nextRefresh(sources: api.Source[], schedule: api.Refresh, now: number):
   });
 }
 
-/// Источники mihomo — вид карточки справа в «Соединении» (D-160): откуда узлы и как часто
-/// они обновляются.
+/// Источники mihomo — вкладка карточки справа в «Соединении» (D-160, D-172): откуда узлы
+/// и как часто они обновляются. Заголовок и «скрыть» — у карточки, общие на три вкладки.
 export default function SourceList({
-  head,
   sources,
   nodes,
   hidden,
-  onHidden,
   schedule,
-  onSchedule,
   drafts,
   onDraft,
   onDisk,
@@ -110,10 +102,10 @@ export default function SourceList({
   const code = sources.find((source) => source.id === coding);
 
   return (
-    <Card padding="sm" className="h-full min-h-0" title={head}>
-      <div className="flex h-full min-h-0 flex-col gap-2">
+    <>
+      <div className="flex flex-col gap-2">
         <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-          <RefreshSchedule schedule={schedule} onSchedule={onSchedule} />
+          {/* Расписание — в «Настройках» → «Обновление», рядом с флагами и проверкой групп. */}
           <Text tone="muted" size="xs">
             {nextRefresh(
               sources.filter((source) => source.url !== null),
@@ -122,18 +114,6 @@ export default function SourceList({
             )}
           </Text>
           <span className="flex-1" />
-          <IconButton
-            size="sm"
-            variant="ghost"
-            icon={hidden ? <EyeOff /> : <Eye />}
-            active={hidden}
-            label={
-              hidden
-                ? t("Show addresses and subscription names")
-                : t("Hide addresses and subscription names")
-            }
-            onClick={onHidden}
-          />
           <AddMenu
             onPick={onAdd}
             trigger={
@@ -141,7 +121,7 @@ export default function SourceList({
             }
           />
         </div>
-        <div className="-mx-1 flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-1 pb-1">
+        <div className="flex flex-col gap-2">
           {sources.length === 0 ? (
             <EmptyState
               icon={<Rss />}
@@ -185,6 +165,6 @@ export default function SourceList({
           onClose={() => setCoding(null)}
         />
       )}
-    </Card>
+    </>
   );
 }

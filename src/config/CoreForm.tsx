@@ -1,4 +1,3 @@
-import { Cable, Globe, ScrollText } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
   Button,
@@ -152,7 +151,6 @@ export default function CoreForm({ onMessage, onSaved, start, hint, onUnsavedCha
     {
       id: "catch",
       label: t("Capture"),
-      icon: Cable,
       parts: [
         {
           id: "catch-proxy",
@@ -292,7 +290,6 @@ export default function CoreForm({ onMessage, onSaved, start, hint, onUnsavedCha
     {
       id: "names",
       label: t("Names"),
-      icon: Globe,
       parts: [
         {
           id: "names-dns",
@@ -407,7 +404,6 @@ export default function CoreForm({ onMessage, onSaved, start, hint, onUnsavedCha
     {
       id: "log",
       label: t("Logging"),
-      icon: ScrollText,
       parts: [
         {
           id: "log-level",

@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import { call, done } from "./call";
+import { Status } from "./core";
 import { PingMethod } from "./nodes";
 
 /// Чем мерить задержку (D-069). Живёт в `client.yaml`, а не в настройках: это документ,
@@ -51,6 +52,10 @@ export const clientPingSet = (method: PingMethod) => call(done, "client_ping_set
 /// Куда бьёт проверка живости — одна цель на ядро и на замер клиента (D-108).
 export const clientHealthGet = () => call(z.string(), "client_health_get");
 export const clientHealthSet = (url: string) => call(done, "client_health_set", { url });
+/// Как часто группы перепроверяют узлы, секунд (AUTO, автогруппы, источники).
+export const clientHealthIntervalGet = () => call(z.number(), "client_health_interval_get");
+export const clientHealthIntervalSet = (seconds: number) =>
+  call(Status, "client_health_interval_set", { seconds });
 
 /// Готовые цели. Все трое отдают 204 без тела; какую из них не режут в конкретной
 /// стране, знает только пользователь — оттого это список, а не константа. Свою можно

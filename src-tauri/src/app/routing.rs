@@ -9,6 +9,7 @@ use serde::Serialize;
 
 use crate::app::settings::Settings;
 use crate::app::state::AppState;
+use crate::config::auto::{AutoGroups, Exclude};
 use crate::config::direction::Direction;
 use crate::config::presets::{Preset, PresetStore, RULES};
 use crate::config::route::{Priority, ReadyUse};
@@ -16,6 +17,7 @@ use crate::config::rules::RulesCodec;
 use crate::error::{AppError, Result};
 use crate::nodes::ping::Method;
 use crate::nodes::Node;
+use crate::render::mihomo_groups::Built;
 use crate::render::plan::Route;
 
 pub struct Routing;
@@ -29,9 +31,13 @@ pub struct Snapshot {
     nodes: Vec<Node>,
     /// Куда идёт трафик — с поправкой на исчезнувший выбранный узел (D-056).
     direction: Direction,
-    /// Узел, на который наведён псевдоним в `manual`. Вне него пусто: выбран `DIRECT`
-    /// или `AUTO`, и отметку в списке ставит направление (D-166).
+    /// Узел или группа, на которые наведён псевдоним в `manual` (D-172). Вне него пусто:
+    /// выбран `DIRECT` или `AUTO`, и отметку в списке ставит направление (D-166).
     node: Option<String>,
+    /// Группы клиента с составом: `AUTO`, UDP-группа, автогруппы (D-172).
+    groups: Vec<Built>,
+    /// Кого человек вынул из `AUTO` (D-172).
+    exclude: Exclude,
     /// Куда маршрутизация шлёт непойманное, когда `MATCH` набора не за выбором (D-166):
     /// выбор в «Соединении» тогда действует только на правила в `umiray`.
     fallback: Option<String>,
@@ -55,13 +61,22 @@ impl Routing {
     pub async fn snapshot(&self, state: &AppState) -> Result<Snapshot> {
         let settings = state.settings.get();
         let names = state.catalog.names();
+        let built = state.groups.built(&self.document(state)?)?;
+        let groups = state.groups.exits(&built);
         // С поправкой на то, что есть: выбранный узел мог исчезнуть из подписки,
         // и показывать `manual` тогда было бы враньём.
-        let direction =
-            Direction::resolve(settings.direction, settings.selected.as_deref(), &names);
+        let direction = Direction::resolve(
+            settings.direction,
+            settings.selected.as_deref(),
+            &names,
+            &groups,
+        );
         Ok(Snapshot {
-            node: (direction == Direction::Manual)
-                .then(|| Direction::target(direction, settings.selected.as_deref(), &names)),
+            node: (direction == Direction::Manual).then(|| {
+                Direction::target(direction, settings.selected.as_deref(), &names, &groups)
+            }),
+            groups: built,
+            exclude: AutoGroups::exclude(),
             fallback: self.fallback(state),
             nodes: state.catalog.nodes(),
             direction,
@@ -193,6 +208,9 @@ impl Routing {
             settings.direction,
             settings.selected.as_deref(),
             &state.catalog.names(),
+            &state
+                .groups
+                .exits(&state.groups.built(&self.document(state)?)?),
         );
         let moved = state.mihomo.selected().await.as_deref() != Some(target.as_str());
         state.mihomo.select(&target).await?;

@@ -14,6 +14,9 @@ pub const AUTO: &str = "AUTO";
 pub const DIRECT: &str = "DIRECT";
 pub const UDP: &str = "umiray-udp";
 pub const PROBE: &str = "probe";
+/// Группы, которые клиент собирает сам (D-172): `umiray-geo-pl`, `umiray-proto-vless`.
+pub const GEO_PREFIX: &str = "umiray-geo-";
+pub const PROTO_PREFIX: &str = "umiray-proto-";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -25,7 +28,7 @@ pub enum Direction {
     /// псевдоним там вёл на `AUTO`, а свои правила теперь включает тумблер (D-166).
     #[serde(alias = "rules")]
     Auto,
-    /// Конкретный узел. Какой именно — в `Settings::selected`.
+    /// Конкретный узел или группа (D-172). Что именно — в `Settings::selected`.
     Manual,
 }
 
@@ -34,9 +37,15 @@ impl Direction {
     ///
     /// Подписка обновилась, выбранного сервера в ней больше нет — направление уходит
     /// в `Auto`, а не остаётся указывать в пустоту. Тот же принцип, что у D-039: выбор
-    /// помним, но не притворяемся, что он ещё существует.
-    pub fn resolve(direction: Direction, selected: Option<&str>, nodes: &[String]) -> Direction {
-        let vanished = |name: &str| !nodes.iter().any(|node| node == name);
+    /// помним, но не притворяемся, что он ещё существует. Группа исчезает так же —
+    /// переименовали или выключили автогруппы.
+    pub fn resolve(
+        direction: Direction,
+        selected: Option<&str>,
+        nodes: &[String],
+        groups: &[String],
+    ) -> Direction {
+        let vanished = |name: &str| !nodes.iter().chain(groups).any(|node| node == name);
         match direction {
             // Выбирать не из чего: и автовыбор, и ручной выбор при пустых источниках — это
             // прямое соединение, как бы они ни назывались.
@@ -52,12 +61,17 @@ impl Direction {
     ///
     /// `Manual` без выбранного узла берёт первый: пользователь нажал «вручную», значит хочет
     /// конкретный сервер, а не отказ. Какой именно — он поменяет следующим нажатием.
-    pub fn target(direction: Direction, selected: Option<&str>, nodes: &[String]) -> String {
-        match Direction::resolve(direction, selected, nodes) {
+    pub fn target(
+        direction: Direction,
+        selected: Option<&str>,
+        nodes: &[String],
+        groups: &[String],
+    ) -> String {
+        match Direction::resolve(direction, selected, nodes, groups) {
             Direction::Direct => DIRECT.to_string(),
             Direction::Auto => AUTO.to_string(),
             Direction::Manual => selected
-                .filter(|name| nodes.iter().any(|node| node == name))
+                .filter(|name| nodes.iter().chain(groups).any(|node| node == name))
                 .map(str::to_string)
                 .or_else(|| nodes.first().cloned())
                 .unwrap_or_else(|| AUTO.to_string()),
@@ -89,7 +103,10 @@ mod tests {
     #[test]
     fn out_of_the_box_everything_goes_direct() {
         assert_eq!(Direction::default(), Direction::Direct);
-        assert_eq!(Direction::target(Direction::default(), None, &[]), DIRECT);
+        assert_eq!(
+            Direction::target(Direction::default(), None, &[], &[]),
+            DIRECT
+        );
     }
 
     /// «Первый источник переводит в auto» — но выбор пользователя остаётся за ним.
@@ -119,16 +136,16 @@ mod tests {
     fn a_vanished_node_falls_back_to_auto() {
         let live = nodes(&["Poland", "Sweden 0"]);
         assert_eq!(
-            Direction::resolve(Direction::Manual, Some("Netherlands"), &live),
+            Direction::resolve(Direction::Manual, Some("Netherlands"), &live, &[]),
             Direction::Auto
         );
         assert_eq!(
-            Direction::target(Direction::Manual, Some("Netherlands"), &live),
+            Direction::target(Direction::Manual, Some("Netherlands"), &live, &[]),
             AUTO,
             "псевдоним не должен вести на несуществующий узел"
         );
         assert_eq!(
-            Direction::resolve(Direction::Manual, Some("Poland"), &live),
+            Direction::resolve(Direction::Manual, Some("Poland"), &live, &[]),
             Direction::Manual,
             "живой выбор трогать незачем"
         );
@@ -139,10 +156,13 @@ mod tests {
     fn without_sources_there_is_only_direct() {
         for direction in [Direction::Auto, Direction::Manual] {
             assert_eq!(
-                Direction::resolve(direction, Some("Poland"), &[]),
+                Direction::resolve(direction, Some("Poland"), &[], &[]),
                 Direction::Direct
             );
-            assert_eq!(Direction::target(direction, Some("Poland"), &[]), DIRECT);
+            assert_eq!(
+                Direction::target(direction, Some("Poland"), &[], &[]),
+                DIRECT
+            );
         }
     }
 
@@ -150,10 +170,28 @@ mod tests {
     #[test]
     fn manual_without_a_choice_takes_the_first_server() {
         let live = nodes(&["Poland", "Sweden 0"]);
-        assert_eq!(Direction::target(Direction::Manual, None, &live), "Poland");
         assert_eq!(
-            Direction::target(Direction::Manual, Some("Sweden 0"), &live),
+            Direction::target(Direction::Manual, None, &live, &[]),
+            "Poland"
+        );
+        assert_eq!(
+            Direction::target(Direction::Manual, Some("Sweden 0"), &live, &[]),
             "Sweden 0"
+        );
+    }
+
+    /// D-172: выход — и группа; пропала группа — как пропавший узел, в `AUTO`.
+    #[test]
+    fn a_group_is_an_exit_until_it_is_gone() {
+        let live = nodes(&["Poland", "Sweden 0"]);
+        let groups = nodes(&["POLAND", "umiray-geo-pl"]);
+        assert_eq!(
+            Direction::target(Direction::Manual, Some("umiray-geo-pl"), &live, &groups),
+            "umiray-geo-pl"
+        );
+        assert_eq!(
+            Direction::resolve(Direction::Manual, Some("umiray-geo-pl"), &live, &[]),
+            Direction::Auto
         );
     }
 
@@ -164,6 +202,6 @@ mod tests {
         let old: Direction = serde_json::from_str(r#""rules""#).unwrap();
         assert_eq!(old, Direction::Auto);
         assert_eq!(serde_json::to_string(&old).unwrap(), r#""auto""#);
-        assert_eq!(Direction::target(old, None, &nodes(&["Poland"])), AUTO);
+        assert_eq!(Direction::target(old, None, &nodes(&["Poland"]), &[]), AUTO);
     }
 }

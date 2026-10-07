@@ -7,8 +7,10 @@ use crate::config::{awg, files};
 use crate::error::{AppError, Result};
 
 use super::mihomo::Effective;
+use super::mihomo_groups::Built;
 use super::mihomo_lists::MihomoLists;
-use super::plan::{Client, NodeSource, Route, RuleSet};
+use super::plan::{Client, NodeFact, NodeSource, Route, RuleSet};
+use crate::config::auto::{AutoGroups, Exclude, Grouping};
 use crate::config::awg::Mask;
 use crate::config::files::Documents;
 use crate::config::route::{Priority, Sections};
@@ -53,15 +55,18 @@ impl ConfigRenderer {
             &sets(route.text.as_deref())?,
             &node_sources(),
             probe,
-            &Client {
-                health: crate::nodes::health::HealthCheck::url()?,
-                // `NETWORK,udp` — тоже маршрут: выключенная маршрутизация шлёт всё
-                // в выбранный выход, UDP тоже (D-166).
-                udp: UdpGroup::on() && route.text.is_some(),
-                mask: Mask::get(),
-                lists: rule_sets(),
-            },
+            &client(route)?,
         )
+    }
+
+    /// Группы клиента с составом (D-172) — такими, какими их соберёт `effective`.
+    /// `taken` — имена своих групп: с тем же именем клиент свою не заводит.
+    pub fn built(route: &Route, taken: &[String]) -> Result<Vec<Built>> {
+        Ok(super::mihomo_groups::built(
+            &node_sources(),
+            &client(route)?,
+            taken,
+        ))
     }
 
     pub fn generated_rules() -> Result<String> {
@@ -72,10 +77,12 @@ impl ConfigRenderer {
                 &node_sources(),
                 None,
                 &Client {
-                    health: crate::nodes::health::DEFAULT.to_string(),
+                    health: crate::nodes::health::Check::default(),
                     udp: false,
                     mask: awg::Mask::default(),
                     lists: Vec::new(),
+                    exclude: Exclude::default(),
+                    grouping: Grouping::default(),
                 },
             )?
             .yaml,
@@ -94,6 +101,29 @@ impl ConfigRenderer {
 
     pub fn udp_nodes() -> usize {
         node_sources().iter().map(|source| source.udp.len()).sum()
+    }
+}
+
+/// Решения клиента о сборке.
+fn client(route: &Route) -> Result<Client> {
+    Ok(Client {
+        health: crate::nodes::health::HealthCheck::check()?,
+        // `NETWORK,udp` — тоже маршрут: выключенная маршрутизация шлёт всё
+        // в выбранный выход, UDP тоже (D-166).
+        udp: UdpGroup::on() && route.text.is_some(),
+        mask: Mask::get(),
+        lists: rule_sets(),
+        exclude: AutoGroups::exclude(),
+        grouping: udp_group(AutoGroups::grouping()),
+    })
+}
+
+/// Правило без группы невозможно: включённое правило — и группа, даже если её галки в
+/// документе нет (документ старше разделения, D-113).
+fn udp_group(grouping: Grouping) -> Grouping {
+    Grouping {
+        udp: grouping.udp || UdpGroup::on(),
+        ..grouping
     }
 }
 
@@ -184,6 +214,8 @@ pub(crate) fn datagram(kind: &str) -> bool {
 
 fn node_sources() -> Vec<NodeSource> {
     let nodes = crate::nodes::source_catalog::SourceCatalog::nodes();
+    // Страна — по адресу из кэша (D-084): автогруппы по локации видят то же, что флаг.
+    let geo = crate::nodes::geo::GeoCache::load();
     SourceStore::list()
         .into_iter()
         .map(|source| NodeSource {
@@ -197,6 +229,19 @@ fn node_sources() -> Vec<NodeSource> {
                 .iter()
                 .filter(|node| node.source == source.id && node.supported && datagram(&node.kind))
                 .map(|node| node.name.clone())
+                .collect(),
+            facts: nodes
+                .iter()
+                .filter(|node| node.source == source.id && node.supported)
+                .map(|node| NodeFact {
+                    name: node.name.clone(),
+                    kind: node.kind.clone(),
+                    country: node
+                        .address
+                        .as_ref()
+                        .and_then(|address| geo.get(address))
+                        .and_then(|known| known.country.clone()),
+                })
                 .collect(),
             id: source.id,
         })

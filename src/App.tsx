@@ -15,6 +15,7 @@ import * as api from "./api";
 import TitleBar from "./chrome/TitleBar";
 import ClientUpdate from "./config/ClientUpdate";
 import ConfigEditor from "./config/ConfigEditor";
+import { requestNewGroup } from "./config/GroupsForm";
 import Connection from "./connection/Connection";
 import { useAdding } from "./controllers/useAdding";
 import { useConnectionActions } from "./controllers/useConnectionActions";
@@ -327,8 +328,9 @@ export default function App() {
         />
       }
     >
-      {/* Тосты живут в верхнем слое: видны и поверх мастера (D-161). */}
-      <Toaster position="bottom-right" />
+      {/* Тосты живут в верхнем слое. Пока открыт мастер, их показывает он сам: вне модального
+          окна тост инертен и не закрывается (ROOTIK §2). */}
+      {!setupOpen && <Toaster position="bottom-right" />}
       <ConfirmHost />
       {/* Окна добавления — одни на все кнопки «+» (D-160). */}
       {adding.open === "link" && (
@@ -470,11 +472,16 @@ export default function App() {
                       onAdd={adding.pick}
                       onMessage={setMessage}
                       schedule={settings.refresh}
-                      onSchedule={(refresh) => update({ refresh })}
                       drafts={drafts.sources}
                       onDraft={drafts.onSourceDraft}
                       onDisk={drafts.onSourceDisk}
                       onSourcesChanged={reloadSources}
+                      icons={settings.groupIcons}
+                      onIcons={(groupIcons) => update({ groupIcons })}
+                      onCreateGroup={() => {
+                        requestNewGroup();
+                        navigate("groups");
+                      }}
                     />
                   )}
                   {config()}

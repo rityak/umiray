@@ -1,5 +1,5 @@
 import { ArrowDown, ArrowUp } from "lucide-react";
-import { Card, EmptyState, LineChart, Stat, seriesColor, useElementSize } from "rootik";
+import { Card, LineChart, Stat, seriesColor, Text, useElementSize } from "rootik";
 import { formatBytes } from "../api";
 import type { Speed as Rate } from "../hooks/useTraffic";
 import { t } from "../i18n";
@@ -54,6 +54,8 @@ export default function Speed({ running, history, current, totals, connections }
   const up = smooth(history.map((point) => point.up));
   const scale = axis(Math.max(0, ...down, ...up));
   const stats = body.height >= STATS;
+  // Подпись — только о живом: «последние 90 секунд» и «VPN выключен» повторяли то, что
+  // уже видно по графику и по шапке.
   const summary = running
     ? [
         !stats && `↓ ${perSecond(current.down)} ↑ ${perSecond(current.up)}`,
@@ -62,9 +64,7 @@ export default function Speed({ running, history, current, totals, connections }
       ]
         .filter(Boolean)
         .join(" · ")
-    : body.height >= EMPTY
-      ? t("last 90 seconds")
-      : t("VPN is off");
+    : undefined;
   return (
     <Card padding="sm" title={t("Traffic")} description={summary} className="min-h-0 flex-1">
       <div ref={body.ref} className="h-full overflow-hidden">
@@ -114,12 +114,11 @@ export default function Speed({ running, history, current, totals, connections }
               </div>
             )
           : body.height >= EMPTY && (
+              // Одна строка: что VPN выключен, уже сказано питанием и шапкой.
               <div className="grid h-full place-items-center">
-                <EmptyState
-                  size="sm"
-                  title={t("VPN is off")}
-                  hint={t("The chart shows up once you connect.")}
-                />
+                <Text tone="muted" size="sm">
+                  {t("The chart shows up once you connect.")}
+                </Text>
               </div>
             )}
       </div>

@@ -62,6 +62,8 @@ export const Settings = z.object({
   /// Работает ли маршрутизация (D-166). Меняется своей командой, не `SettingsPatch`:
   /// переключение доезжает до ядра.
   routing: z.boolean(),
+  /// Значок группы по имени (D-172): `lucide:globe` или `flag:pl`. Вид окна, не сборки.
+  groupIcons: z.record(z.string(), z.string()),
 });
 export type Settings = z.infer<typeof Settings>;
 
@@ -78,6 +80,7 @@ export type SettingsPatch = {
   launch?: Launch;
   adminOffer?: boolean;
   setup?: boolean;
+  groupIcons?: Record<string, string>;
 };
 
 /// Готовые варианты для выпадающего списка. «Своё» — не пресет, его считает форма.

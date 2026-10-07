@@ -6,6 +6,7 @@ import {
   Code,
   ConfirmButton,
   Disclosure,
+  Divider,
   Input,
   Spinner,
   Switch,
@@ -169,22 +170,25 @@ export default function ReadySets({ ready, onChange, targets, nodes, lost, onMes
       title={t("Ready-made sets")}
       description={t("ready rules, each with its own exit you can change")}
     >
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-3">
         {sets.length === 0 && (
           <Text tone="muted" size="xs" className="block">
             {t("No ready-made sets yet. A set is a document with the fields")} <Code>title</Code>{" "}
             {t("and")} <Code>rules</Code>.
           </Text>
         )}
-        {sets.map((set) => {
+        {sets.map((set, at) => {
           const use = ready.find((item) => item.id === set.id);
+          // Строки, а не карточка в карточке: рамка на рамке и тень на тени делали список тяжелее
+          // того, что в нём лежит. Между строками — та же линия, что у rule sets.
           return (
-            <Card key={set.id} padding="sm" variant={use ? "default" : "outline"}>
+            <div key={set.id} className="flex flex-col gap-1">
+              {at > 0 && <Divider className="mb-2" />}
               <div className="flex items-center gap-2.5">
                 <Switch
                   className="min-w-0 flex-1"
                   label={name(set)}
-                  description={`${set.id} · ${tn(set.rules.length, "{n} rule", "{n} rules")}`}
+                  description={tn(set.rules.length, "{n} rule", "{n} rules")}
                   checked={use !== undefined}
                   onChange={() => toggle(set, use === undefined)}
                 />
@@ -221,9 +225,7 @@ export default function ReadySets({ ready, onChange, targets, nodes, lost, onMes
                   confirmLabel={t("Delete for sure?")}
                   aria-label={t("Delete set {title}", { title: name(set) })}
                   onConfirm={() => remove(set)}
-                >
-                  {t("Delete")}
-                </ConfirmButton>
+                />
               </div>
               <Disclosure
                 title={t("What is inside")}
@@ -251,7 +253,7 @@ export default function ReadySets({ ready, onChange, targets, nodes, lost, onMes
                   </div>
                 </div>
               </Disclosure>
-            </Card>
+            </div>
           );
         })}
         {adder}

@@ -108,3 +108,9 @@ pub async fn sources_delete(
 ) -> Result<Option<String>> {
     state.sources.delete(&app, &state, &id).await
 }
+
+/// Переименовать источник (D-172): только название, сборка от него не зависит.
+#[tauri::command]
+pub fn sources_rename(id: String, name: String) -> Result<Source> {
+    SourceStore::rename(&id, &name)
+}

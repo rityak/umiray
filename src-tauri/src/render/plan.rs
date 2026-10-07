@@ -9,15 +9,28 @@ pub struct NodeSource {
     pub path: std::path::PathBuf,
     pub names: Vec<String>,
     pub udp: Vec<String>,
+    /// Протокол и страна каждого узла: из них клиент собирает свои группы (D-172).
+    pub facts: Vec<NodeFact>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeFact {
+    pub name: String,
+    pub kind: String,
+    pub country: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Client {
-    pub health: String,
+    pub health: crate::nodes::health::Check,
     pub udp: bool,
     pub mask: crate::config::awg::Mask,
     /// Скачанные списки, уже собранные ядром (D-157).
     pub lists: Vec<RuleSet>,
+    /// Кого нет в `AUTO` (D-172).
+    pub exclude: crate::config::auto::Exclude,
+    /// Какие группы клиент собирает сам (D-172).
+    pub grouping: crate::config::auto::Grouping,
 }
 
 /// Маршрут выбранного набора (D-158): свои правила, rule sets, готовые наборы и `MATCH`.

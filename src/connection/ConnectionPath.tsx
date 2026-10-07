@@ -1,11 +1,12 @@
 import { AppWindow, MonitorCog, Network, Server } from "lucide-react";
-import { memo } from "react";
+import { memo, useRef } from "react";
 import { Badge, Card, CopyButton, Field, Item, SegmentedControl } from "rootik";
 import * as api from "../api";
 import { t, tk } from "../i18n";
 import Flag from "../shell/Flag";
 import { hide } from "../shell/secret";
 import Uptime from "../shell/Uptime";
+import { groupName } from "./groups";
 import { delayTone } from "./NodeDelay";
 import PowerRow from "./PowerRow";
 
@@ -69,7 +70,7 @@ const WAITING: Record<api.Direction, string> = {
   direct: tk("bypass VPN — no server"),
   // AUTO — `load-balance` по живым узлам (D-053): «лучший» был бы неправдой —
   // медленный узел получает сайты наравне с быстрым.
-  auto: tk("the core spreads sites across working servers"),
+  auto: tk("spread across working nodes"),
   manual: tk("select a node from the list"),
 };
 
@@ -92,8 +93,8 @@ function what(status: api.Status): string {
 }
 
 /// Connection state next to the power button.
-function headline(status: api.Status, powering: boolean): string {
-  if (powering) return t("Connecting…");
+function headline(status: api.Status, powering: boolean, stopping: boolean): string {
+  if (powering) return stopping ? t("Disconnecting…") : t("Connecting…");
   if (!status.corePresent) return t("Core missing");
   return status.running ? t("Connected") : t("Disconnected");
 }
@@ -120,6 +121,11 @@ export default memo(function ConnectionPath({
   onMode,
 }: Props) {
   const view = api.statusView(status, powering);
+  // Which way the button went, taken when it was pressed: by the end of a start the core
+  // already reports running, and the words would flip to "Disconnecting…".
+  const wasOn = useRef(status.running);
+  if (!powering) wasOn.current = status.running;
+  const stopping = powering && wasOn.current;
   // System listens on the same port as Proxy: Windows points apps at it, and an app that
   // ignores the system proxy takes the address from here. Only TUN has no address.
   const address = mode !== "tun" ? api.proxyAddress(status) : null;
@@ -132,7 +138,11 @@ export default memo(function ConnectionPath({
     fallback !== null
       ? t("assigned by your rules")
       : `${t(CHOSEN[direction])}${direction === "auto" && total > 0 ? ` ${t("out of {n}", { n: total })}` : ""}`;
+  // Группа — заголовком, узел, который везёт трафик, — первым словом строки ниже: цепочка
+  // «группа → узел» в заголовок не помещалась.
+  const carrier = route.length > 1 ? `${route.at(-1)}${more > 0 ? ` +${more}` : ""}` : null;
   const why = [
+    carrier,
     selected && `${selected.kind}${selected.address ? ` · ${hide(selected.address, hidden)}` : ""}`,
     how,
     !status.running && t("core is not running"),
@@ -149,9 +159,15 @@ export default memo(function ConnectionPath({
           powering={powering}
           failed={view.tone === "error"}
           disabled={busy && !powering}
-          headline={headline(status, powering)}
+          headline={headline(status, powering, stopping)}
           detail={
-            running !== null ? (
+            powering ? (
+              stopping ? (
+                t("closing the connection")
+              ) : (
+                t("establishing the connection")
+              )
+            ) : running !== null ? (
               <>
                 {api.MODE_LABEL[running]} ·{" "}
                 <Uptime started={status.started} fallback={t("just now")} />
@@ -170,13 +186,14 @@ export default memo(function ConnectionPath({
           title={
             live ? (
               <span className="inline-flex items-center gap-1.5">
-                {selected && <Flag country={selected.country} />}
-                {/* Show the group and its exit: AUTO → Poland 1. */}
-                {route.join(" → ")}
-                {more > 0 && ` +${more}`}
+                {route.length === 1 && selected && <Flag country={selected.country} />}
+                {groupName(route[0])}
               </span>
             ) : direction === "direct" ? (
               t("Direct connection")
+            ) : direction === "auto" ? (
+              // AUTO выбран и до подключения: «не выбран» было бы неправдой.
+              "AUTO"
             ) : (
               t("No exit selected")
             )

@@ -3,6 +3,7 @@
 import { z } from "zod";
 import { tk } from "../i18n";
 import { call, done } from "./call";
+import { Exclude } from "./config";
 import { Status } from "./core";
 
 /// Чем мерить, сколько до сервера (D-069). Способ выбирает человек — в «Настройках»,
@@ -99,18 +100,30 @@ export const nodesCodeSet = (source: string, node: string, text: string) =>
 
 export const nodesReset = (source: string, node: string) =>
   call(done, "nodes_reset", { source, node });
+/// Группа, которую собирает клиент (D-172), — с составом, каким его соберёт ядро.
+export const BuiltGroup = z.object({
+  name: z.string(),
+  kind: z.string(),
+  members: z.array(z.string()),
+});
+export type BuiltGroup = z.infer<typeof BuiltGroup>;
+
 /// Всё, что опрашивает «Соединение», одним ответом (D-145): узлы, направление — с поправкой
 /// на исчезнувший выбранный узел, — способ замера и выход от выбранного до узла.
 export const ConnectionSnapshot = z.object({
   nodes: z.array(Node),
   direction: Direction,
-  /// Узел, выбранный в `manual`; вне него пусто (D-166).
+  /// Узел или группа, выбранные в `manual`; вне него пусто (D-166, D-172).
   node: z.string().nullable(),
   /// Куда маршрутизация шлёт непойманное, когда `MATCH` набора не за выбором (D-166).
   fallback: z.string().nullable(),
   ping: PingMethod,
   /// `["AUTO", "Poland 1"]`: что выбрано и куда оно ведёт на самом деле. Пусто — выхода нет.
   route: z.array(z.string()),
+  /// Группы клиента с составом: `AUTO`, UDP-группа, автогруппы (D-172).
+  groups: z.array(BuiltGroup),
+  /// Кого человек вынул из `AUTO` (D-172).
+  exclude: Exclude,
 });
 export type ConnectionSnapshot = z.infer<typeof ConnectionSnapshot>;
 export const connectionSnapshot = () => call(ConnectionSnapshot, "connection_snapshot");

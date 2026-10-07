@@ -6,19 +6,18 @@
 
 use serde_yaml::{Mapping, Value};
 
+use crate::config::auto::Exclude;
 use crate::config::direction::{AUTO, DIRECT, PROBE, SELECTOR, UDP};
 use crate::config::mode::Mode;
 use crate::config::rules::RulesCodec;
 use crate::error::{AppError, Result};
-use crate::nodes::health::EXPECTED;
+use crate::nodes::health::{Check, EXPECTED};
+use crate::render::mihomo_groups::{auto_pick, own_groups, AutoPick};
 use crate::render::plan::{Client, NodeSource};
 use crate::yaml::Yaml;
 
 /// Имя служебного входа. Отдельное от группы: в логе ядра видно, что это вход, а не выход.
 const PROBE_INBOUND: &str = "probe-in";
-
-/// Как часто ядро перепроверяет узлы провайдера в фоне.
-const HEALTH_INTERVAL: u32 = 300;
 
 /// Готовый конфиг, режим, который из него получился, и порт, по которому видно, что ядро
 /// действительно поднялось. В TUN слушающего порта нет — там `port` пустой.
@@ -289,7 +288,7 @@ fn baseline(map: &mut Mapping, mode: Mode) {
 
 /// Источники узлов — провайдеры ядра. Ссылки разбирает оно само (D-031), поэтому здесь
 /// только путь к файлу и проверка живости, по которой автогруппа обходит мёртвые узлы.
-fn providers(map: &mut Mapping, sources: &[NodeSource], target: &str) {
+fn providers(map: &mut Mapping, sources: &[NodeSource], check: &Check) {
     let mine: Vec<&NodeSource> = sources.iter().filter(|source| provides(source)).collect();
     if mine.is_empty() {
         return;
@@ -306,8 +305,8 @@ fn providers(map: &mut Mapping, sources: &[NodeSource], target: &str) {
 
         let health = Yaml::sub(entry, "health-check");
         Yaml::set(health, "enable", Value::from(true));
-        Yaml::set(health, "url", Value::from(target));
-        Yaml::set(health, "interval", Value::from(HEALTH_INTERVAL));
+        Yaml::set(health, "url", Value::from(check.url.as_str()));
+        Yaml::set(health, "interval", Value::from(check.interval));
         // Без него ответом считается любой: заглушка провайдера и страница captive
         // portal отвечают двухсотым, и мёртвый выход остаётся в группе (D-108).
         Yaml::set(health, "expected-status", Value::from(EXPECTED.to_string()));
@@ -355,19 +354,30 @@ fn groups(
         )));
     }
 
+    let own = own_groups(sources, client.grouping, &names, &client.health);
+    let own_names: Vec<String> = own
+        .iter()
+        .filter_map(|group| name_of(&Value::Mapping(group.clone())))
+        .collect();
     let mut all = Vec::new();
     // Без источников автогруппе не из чего выбирать, а пустой список ядро отвергнет.
     if !sources.is_empty() {
-        all.push(Value::Mapping(auto(sources, ours, &client.health)));
+        all.push(Value::Mapping(auto(
+            sources,
+            ours,
+            &client.health,
+            &client.exclude,
+        )));
     }
-    all.push(Value::Mapping(selector(&names, sources, ours)));
+    all.push(Value::Mapping(selector(&names, &own_names, sources, ours)));
     // Группа с нативным UDP — только если такие узлы правда есть: пустую группу ядро
     // не принимает и не стартует вовсе (D-113).
-    if client.udp {
+    if client.grouping.udp {
         if let Some(group) = udp_group(sources, ours, &client.health) {
             all.push(Value::Mapping(group));
         }
     }
+    all.extend(own.into_iter().map(Value::Mapping));
     all.extend(theirs);
     Yaml::set(map, "proxy-groups", Value::Sequence(all));
     Ok(())
@@ -379,30 +389,43 @@ fn named(ours: &[String]) -> Vec<Value> {
     ours.iter().map(|name| Value::from(name.clone())).collect()
 }
 
-fn auto(sources: &[NodeSource], ours: &[String], health: &str) -> Mapping {
+/// `AUTO` без того, что человек из него вынул (D-172): источник — из `use`, узел —
+/// `exclude-filter`, потому что поимённо узел провайдера не адресуется (S-012).
+/// Вынуто всё — исключения не действуют: пустую группу ядро не примет и не стартует.
+fn auto(sources: &[NodeSource], ours: &[String], health: &Check, exclude: &Exclude) -> Mapping {
+    let AutoPick { kept, out, mine } = auto_pick(sources, ours, exclude);
     let mut group = Mapping::new();
     Yaml::set(&mut group, "name", Value::from(AUTO));
     // consistent-hashing, а не round-robin: один и тот же адрес обязан уходить через один
     // и тот же сервер, иначе сессия рвётся на каждом запросе.
     Yaml::set(&mut group, "type", Value::from("load-balance"));
     Yaml::set(&mut group, "strategy", Value::from("consistent-hashing"));
-    set_use(&mut group, sources);
-    if !ours.is_empty() {
-        Yaml::set(&mut group, "proxies", Value::Sequence(named(ours)));
+    set_use(&mut group, &kept);
+    if !mine.is_empty() {
+        Yaml::set(&mut group, "proxies", Value::Sequence(named(&mine)));
     }
-    Yaml::set(&mut group, "url", Value::from(health));
-    Yaml::set(&mut group, "interval", Value::from(HEALTH_INTERVAL));
-    Yaml::set(
-        &mut group,
-        "expected-status",
-        Value::from(EXPECTED.to_string()),
-    );
+    if !out.is_empty() {
+        Yaml::set(&mut group, "exclude-filter", Value::from(any(&out)));
+    }
+    checked(&mut group, health);
     group
+}
+
+/// Проверка живости группы — та же цель и тот же ожидаемый код, что у остальных (D-108).
+pub(super) fn checked(group: &mut Mapping, health: &Check) {
+    Yaml::set(group, "url", Value::from(health.url.as_str()));
+    Yaml::set(group, "interval", Value::from(health.interval));
+    Yaml::set(group, "expected-status", Value::from(EXPECTED.to_string()));
 }
 
 /// Псевдоним. Прямое соединение в списке всегда: оно же делает конфиг рабочим до первой
 /// подписки — `MATCH,umiray` без единого узла иначе некуда было бы направить.
-fn selector(user_groups: &[String], sources: &[NodeSource], ours: &[String]) -> Mapping {
+fn selector(
+    user_groups: &[String],
+    own: &[String],
+    sources: &[NodeSource],
+    ours: &[String],
+) -> Mapping {
     let mut options: Vec<Value> = Vec::new();
     if !sources.is_empty() {
         options.push(Value::from(AUTO));
@@ -412,6 +435,7 @@ fn selector(user_groups: &[String], sources: &[NodeSource], ours: &[String]) -> 
     // уже отклонены выше понятной ошибкой (D-135).
     for name in user_groups
         .iter()
+        .chain(own)
         .map(|name| Value::from(name.clone()))
         .chain(std::iter::once(Value::from(DIRECT)))
     {
@@ -438,7 +462,7 @@ fn selector(user_groups: &[String], sources: &[NodeSource], ours: &[String]) -> 
 /// `load-balance`: у UDP-узлов проверка живости всё равно меряет TCP, и раскладывать
 /// датаграммы по узлам, о живости которых мы знаем только это, было бы хуже, чем
 /// держаться одного.
-fn udp_group(sources: &[NodeSource], ours: &[String], health: &str) -> Option<Mapping> {
+fn udp_group(sources: &[NodeSource], ours: &[String], health: &Check) -> Option<Mapping> {
     let from: Vec<Value> = sources
         .iter()
         .filter(|source| provides(source) && !source.udp.is_empty())
@@ -471,13 +495,7 @@ fn udp_group(sources: &[NodeSource], ours: &[String], health: &str) -> Option<Ma
     // Та же цель и тот же ожидаемый код, что у остальных проверок живости (D-108):
     // без `url` группа осталась бы без обхода вовсе. Что этот обход меряет **TCP** —
     // ограничение, названное в D-113: глухой по UDP узел из группы не выпадет.
-    Yaml::set(&mut group, "url", Value::from(health));
-    Yaml::set(&mut group, "interval", Value::from(HEALTH_INTERVAL));
-    Yaml::set(
-        &mut group,
-        "expected-status",
-        Value::from(EXPECTED.to_string()),
-    );
+    checked(&mut group, health);
     Some(group)
 }
 
@@ -666,7 +684,7 @@ fn names(map: &Mapping, key: &str) -> Vec<String> {
 
 /// Несколько имён одним фильтром: `^(одно|другое)$`. Каждое экранируется тем же
 /// способом, что и одиночное, — иначе `Node (1)` стал бы скобочной группой.
-fn any(names: &[String]) -> String {
+pub(super) fn any(names: &[String]) -> String {
     let inner: Vec<String> = names
         .iter()
         .map(|name| {
@@ -716,7 +734,7 @@ fn set_use(group: &mut Mapping, sources: &[NodeSource]) {
 /// конвертер отвергает целиком (`format invalid`), и ядро не поднимается вовсе. Узлы такого
 /// источника доезжают записями `proxies:` (D-063). Источник в формате clash-YAML ссылок
 /// не содержит по определению — его провайдер нужен всегда.
-fn provides(_source: &NodeSource) -> bool {
+pub(super) fn provides(_source: &NodeSource) -> bool {
     true
 }
 
@@ -731,7 +749,10 @@ fn name_of(group: &Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::auto::Grouping;
     use crate::config::files::LOCAL_PROXY_PORT;
+    use crate::render::mihomo_groups::built;
+    use crate::render::plan::NodeFact;
 
     /// Цель проверки живости приходит из документа клиента, и почти ни одному тесту здесь
     /// не интересна: заслоняем её умолчанием, чтобы не повторять пятым аргументом везде.
@@ -750,10 +771,12 @@ mod tests {
     /// у нового клиента (D-118).
     fn plain() -> Client {
         Client {
-            health: crate::nodes::health::DEFAULT.to_string(),
+            health: Check::default(),
             udp: false,
             mask: crate::config::awg::Mask::default(),
             lists: Vec::new(),
+            exclude: Exclude::default(),
+            grouping: Grouping::default(),
         }
     }
 
@@ -777,6 +800,7 @@ mod tests {
             path: std::path::PathBuf::from(format!("/tmp/{id}.txt")),
             names: names.iter().map(|name| (*name).to_string()).collect(),
             udp: Vec::new(),
+            facts: Vec::new(),
         }
     }
 
@@ -1155,10 +1179,15 @@ mod tests {
             path: std::path::PathBuf::from(format!("/tmp/{id}.txt")),
             names: all.iter().map(|name| (*name).to_string()).collect(),
             udp: udp.iter().map(|name| (*name).to_string()).collect(),
+            facts: Vec::new(),
         }
     }
 
     fn with_udp(sources: &[NodeSource]) -> Value {
+        udp_render(sources, true)
+    }
+
+    fn udp_render(sources: &[NodeSource], rule: bool) -> Value {
         parsed(
             &super::MihomoRenderer::config(
                 &[],
@@ -1166,10 +1195,15 @@ mod tests {
                 sources,
                 None,
                 &Client {
-                    health: crate::nodes::health::DEFAULT.to_string(),
-                    udp: true,
+                    health: Check::default(),
+                    udp: rule,
                     mask: crate::config::awg::Mask::default(),
                     lists: Vec::new(),
+                    exclude: Exclude::default(),
+                    grouping: Grouping {
+                        udp: true,
+                        ..Grouping::default()
+                    },
                 },
             )
             .unwrap(),
@@ -1232,6 +1266,25 @@ mod tests {
         );
     }
 
+    /// Галка группы без правила (D-113): группа есть, весь UDP по-прежнему идёт в выход.
+    #[test]
+    fn the_udp_group_alone_routes_nothing() {
+        let out = udp_render(
+            &[udp_source("s1", &["vless-1", "hy2-1"], &["hy2-1"])],
+            false,
+        );
+        assert!(out["proxy-groups"]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .any(|group| name_of(group).as_deref() == Some(UDP)));
+        assert!(!out["rules"]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .any(|line| line.as_str() == Some("NETWORK,udp,umiray-udp")));
+    }
+
     /// Выключенная галка не оставляет следов: ни группы, ни строки.
     #[test]
     fn the_switch_off_changes_nothing() {
@@ -1268,10 +1321,15 @@ mod tests {
                 &nodes(&["a1"]),
                 None,
                 &Client {
-                    health: mine.to_string(),
+                    health: Check {
+                        url: mine.to_string(),
+                        interval: 600,
+                    },
                     udp: false,
                     mask: crate::config::awg::Mask::default(),
                     lists: Vec::new(),
+                    exclude: Exclude::default(),
+                    grouping: Grouping::default(),
                 },
             )
             .unwrap(),
@@ -1282,6 +1340,12 @@ mod tests {
         );
         assert_eq!(out["proxy-groups"][0]["name"], Value::from(AUTO));
         assert_eq!(out["proxy-groups"][0]["url"], Value::from(mine));
+        // И частота — одна на обе проверки (поле «Перепроверка групп» в настройках).
+        assert_eq!(
+            out["proxy-providers"]["a1"]["health-check"]["interval"],
+            Value::from(600)
+        );
+        assert_eq!(out["proxy-groups"][0]["interval"], Value::from(600));
     }
 
     /// Без `expected-status` заглушка провайдера и страница captive portal отвечают
@@ -1490,6 +1554,7 @@ mod tests {
                 path: links,
                 names: vec!["Test 0".into()],
                 udp: Vec::new(),
+                facts: Vec::new(),
             }],
             None,
         )
@@ -1515,6 +1580,7 @@ mod tests {
                 path: dir.join("s1.txt"),
                 names: vec!["Test 0".into()],
                 udp: Vec::new(),
+                facts: Vec::new(),
             }],
             None,
         )
@@ -1566,6 +1632,7 @@ mod tests {
                 path: dir.join("s1.txt"),
                 names: Vec::new(),
                 udp: Vec::new(),
+                facts: Vec::new(),
             }],
             None,
         )
@@ -1580,5 +1647,121 @@ mod tests {
             !check("broken.yaml", "proxy-groups:\n  - name: [\n"),
             "контрольный прогон обязан падать, иначе проверка ничего не значит"
         );
+    }
+
+    /// Источник, где у каждого узла известны протокол и страна (D-172).
+    fn facts_source(id: &str, nodes: &[(&str, &str, &str)]) -> NodeSource {
+        NodeSource {
+            names: nodes
+                .iter()
+                .map(|(name, _, _)| (*name).to_string())
+                .collect(),
+            facts: nodes
+                .iter()
+                .map(|(name, kind, country)| NodeFact {
+                    name: (*name).to_string(),
+                    kind: (*kind).to_string(),
+                    country: Some((*country).to_string()),
+                })
+                .collect(),
+            ..source(id, &[])
+        }
+    }
+
+    fn group<'a>(out: &'a Value, name: &str) -> Option<&'a Value> {
+        out["proxy-groups"]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .find(|group| group["name"] == name)
+    }
+
+    fn built_with(sources: &[NodeSource], client: &Client, user: &[&str]) -> Value {
+        let user: Vec<String> = user.iter().map(|d| (*d).to_string()).collect();
+        parsed(&super::MihomoRenderer::config(&user, &[], sources, None, client).unwrap())
+    }
+
+    /// D-172: вынутый источник уходит из `use`, вынутый узел — в `exclude-filter`; окно
+    /// видит тот же состав, что ядро.
+    #[test]
+    fn auto_leaves_out_what_was_taken_out() {
+        let sources = [source_of("a", &["A1", "A2"]), source_of("b", &["B1"])];
+        let client = Client {
+            exclude: Exclude {
+                sources: vec!["b".into()],
+                nodes: vec!["A2".into()],
+            },
+            ..plain()
+        };
+        let out = built_with(&sources, &client, &[]);
+        let auto = group(&out, AUTO).unwrap();
+        assert_eq!(auto["use"], Value::Sequence(vec![Value::from("a")]));
+        assert_eq!(auto["exclude-filter"], Value::from("^(A2)$"));
+        assert_eq!(built(&sources, &client, &[])[0].members, ["A1"]);
+    }
+
+    /// Вынуто всё — исключения не действуют: пустую группу ядро не примет.
+    #[test]
+    fn taking_everything_out_of_auto_takes_nothing() {
+        let sources = [source_of("a", &["A1"])];
+        let client = Client {
+            exclude: Exclude {
+                sources: Vec::new(),
+                nodes: vec!["A1".into()],
+            },
+            ..plain()
+        };
+        let out = built_with(&sources, &client, &[]);
+        let auto = group(&out, AUTO).unwrap();
+        assert_eq!(auto["use"], Value::Sequence(vec![Value::from("a")]));
+        assert!(auto.get("exclude-filter").is_none());
+    }
+
+    /// D-172: группа по стране и по протоколу — только где узлов два и больше; они
+    /// в псевдониме, а своя группа с тем же именем главнее.
+    #[test]
+    fn own_groups_come_only_where_there_is_a_choice() {
+        let sources = [
+            facts_source("a", &[("P1", "Vless", "PL"), ("R1", "Vless", "RU")]),
+            facts_source("b", &[("P2", "TUIC", "pl")]),
+        ];
+        let client = Client {
+            grouping: Grouping {
+                location: true,
+                protocol: true,
+                udp: false,
+            },
+            ..plain()
+        };
+        let out = built_with(&sources, &client, &[]);
+        let pl = group(&out, "umiray-geo-pl").expect("две Польши — группа");
+        assert_eq!(pl["type"], Value::from("url-test"));
+        assert_eq!(pl["filter"], Value::from("^(P1|P2)$"));
+        assert_eq!(
+            pl["use"],
+            Value::Sequence(vec![Value::from("a"), Value::from("b")])
+        );
+        assert!(
+            group(&out, "umiray-geo-ru").is_none(),
+            "одна Россия — не группа"
+        );
+        assert!(group(&out, "umiray-proto-vless").is_some());
+        assert!(group(&out, "umiray-proto-tuic").is_none());
+        let options = alias_options_of(&out);
+        assert!(options.contains(&"umiray-geo-pl".to_string()));
+
+        let mine =
+            "proxy-groups:\n  - name: umiray-geo-pl\n    type: select\n    proxies: [DIRECT]\n";
+        let out = built_with(&sources, &client, &[mine]);
+        assert_eq!(
+            group(&out, "umiray-geo-pl").unwrap()["type"],
+            Value::from("select"),
+            "своя группа не подменяется"
+        );
+        let names: Vec<String> = built(&sources, &client, &["umiray-geo-pl".into()])
+            .into_iter()
+            .map(|group| group.name)
+            .collect();
+        assert!(!names.contains(&"umiray-geo-pl".to_string()));
     }
 }

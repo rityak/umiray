@@ -169,6 +169,10 @@ pub struct Settings {
     #[serde(default)]
     /// Какое ядро показывают разделы и поднимет кнопка питания (D-154).
     pub engine: EngineId,
+    /// Значок группы по имени (D-172): `lucide:globe` или `flag:pl`. Вид окна, а не сборки —
+    /// в groups.yaml значок поменял бы конфиг ядра, и смена картинки рвала бы соединения.
+    #[serde(default)]
+    pub group_icons: std::collections::BTreeMap<String, String>,
     /// Пройден ли мастер первого запуска (D-162). Закрытый мастер — тоже пройден: сам
     /// он больше не откроется, вызывают его из настроек.
     #[serde(default)]
@@ -196,11 +200,15 @@ pub struct Patch {
     pub launch: Option<Launch>,
     pub admin_offer: Option<bool>,
     pub setup: Option<bool>,
+    pub group_icons: Option<std::collections::BTreeMap<String, String>>,
 }
 
 impl Patch {
     /// Накладывает только то, что пришло: отсутствующее поле остаётся прежним.
     pub fn apply(self, settings: &mut Settings) {
+        if let Some(icons) = self.group_icons {
+            settings.group_icons = icons;
+        }
         if let Some(setup) = self.setup {
             settings.setup = setup;
         }
@@ -266,6 +274,7 @@ impl Default for Settings {
             admin_offer: true,
             engine: EngineId::default(),
             setup: false,
+            group_icons: Default::default(),
         }
     }
 }
@@ -388,6 +397,7 @@ mod tests {
             admin_offer: false,
             engine: EngineId::Qd,
             setup: true,
+            group_icons: [("AUTO".to_string(), "lucide:globe".to_string())].into(),
         };
         let json = serde_json::to_string_pretty(&settings).unwrap();
         assert_eq!(decode(&json), settings);

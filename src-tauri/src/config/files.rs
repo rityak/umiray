@@ -64,7 +64,8 @@ const FILES: [File; 3] = [
     File {
         id: GROUPS,
         label: "Groups",
-        hint: "your node groups, shared by all routes; the client builds AUTO and umiray itself",
+        hint:
+            "your node groups, shared by all routes; the client builds AUTO and auto groups itself",
         core: true,
         default: GROUPS_DEFAULT,
     },
@@ -82,7 +83,7 @@ struct Routing {
 const ROUTING: [Routing; 1] = [Routing {
     id: "rules",
     label: "Routing",
-    hint: "where traffic goes; MATCH handles everything else",
+    hint: "top to bottom, the first match wins: your rules → high → medium → low → MATCH; rule sets first within a level",
 }];
 
 /// Описание документа для окна. Содержимое не тащим: документов несколько, а открыт один.
@@ -284,11 +285,30 @@ ping: tcp
 # Только http:// и обязательно с путём: замер идёт через CONNECT на 80-й порт.
 health-url: http://cp.cloudflare.com/generate_204
 
+# Как часто группы перепроверяют узлы, секунд (60…86400): `AUTO`, автогруппы, UDP-группа
+# и проверка источников. Свои группы — своим `interval` в «Группах».
+health-interval: 300
+
 # Уводить ли весь UDP в узлы, которые несут его датаграммой — hysteria2, tuic, wireguard
-# (D-113). Клиент соберёт из них группу `umiray-udp` и поставит `NETWORK,udp` перед `MATCH`.
-# Таких узлов нет — ни группы, ни правила: пустую группу ядро не примет и не стартует.
+# (D-113): правило `NETWORK,udp,umiray-udp` перед `MATCH`. Включённое, оно включает и саму
+# группу (`auto-groups: udp`). Таких узлов нет — ни группы, ни правила: пустую группу ядро
+# не примет и не стартует.
 # Направление «Прямое» тумблер гасит: правило идёт мимо переключателя направления.
 udp-group: false
+
+# Группы, которые клиент соберёт сам (D-172): по стране узла (`umiray-geo-pl`), по протоколу
+# (`umiray-proto-vless`) — только где таких узлов два и больше, группа из одного узла ничего
+# не выбирает, — и `umiray-udp` из узлов, чей протокол несёт UDP сам, а не внутри TCP (D-113).
+# Все `url-test`. Группа сама трафик не уводит: выход выбирают в «Соединении» или правилом.
+auto-groups:
+  location: false
+  protocol: false
+  udp: false
+
+# Кого нет в AUTO (D-172): источники целиком — и их будущие узлы тоже — и узлы по имени.
+auto-exclude:
+  sources: []
+  nodes: []
 
 # Через сколько часов перепрашивать страну узла — тот самый флаг рядом с именем (D-084).
 # Страну определяет адрес сервера: он уходит к ipinfo.io, ответ кэшируется по

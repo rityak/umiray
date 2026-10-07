@@ -3,6 +3,16 @@
 The version comes from `package.json`, is mirrored in `Cargo.toml`, and appears in
 the subscription User-Agent as `umiray/<version>`.
 
+## 1.4.0
+
+### Changes
+
+- Update rootik 0.6.1, groups and settings cleanup
+- V1.4.0_pre
+
+For Windows x64, download `umiray_1.4.0_x64-setup.exe` from this release's assets.
+Existing installations can update from within the client.
+
 ## 1.3.2
 
 ### New

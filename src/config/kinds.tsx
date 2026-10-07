@@ -46,7 +46,7 @@ export function targetLook(
   // `umiray` follows the choice in Connection, and that choice can be DIRECT: "through
   // VPN" would be a lie there.
   if (target === "umiray")
-    return { Icon: Globe, tone: "accent", word: t("the exit chosen in Connection") };
+    return { Icon: Globe, tone: "accent", word: t("whatever you pick in Connection") };
   if (target === "AUTO") return { Icon: Globe, tone: "accent", word: t("through VPN") };
   if (nodes.includes(target))
     return { Icon: Server, tone: "accent", word: t("node · through VPN") };

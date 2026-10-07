@@ -25,6 +25,6 @@ pub async fn udp_set(
 ) -> Result<Status> {
     state
         .connection
-        .change(&app, &state, || crate::config::udp::UdpGroup::write(on))
+        .change(&app, &state, || state.groups.set_udp_rule(on))
         .await
 }

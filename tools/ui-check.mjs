@@ -42,9 +42,9 @@ const PAGE = `
   const byText = (selector, text) =>
     [...document.querySelectorAll(selector)].find((n) => n.textContent.trim().includes(text));
   const panel = () => document.getElementById('section-panel');
-  // Карточка справа в «Соединении»: узлы или источники (D-160).
+  // Карточка справа в «Соединении»: узлы, группы или источники (D-160, D-172).
   const side = async (name) => {
-    const item = [...document.querySelectorAll('[aria-label="Узлы или источники"] label')].find((l) => l.textContent.includes(name));
+    const item = [...document.querySelectorAll('[aria-label="Узлы, группы или источники"] label')].find((l) => l.textContent.includes(name));
     item?.click();
     await wait(500);
     return item !== undefined;
@@ -193,21 +193,46 @@ check(
 check("выход назван", conn.exit);
 check("нагрузка и узлы на месте", conn.load && conn.nodes);
 
+// D-172: узлы · группы · источники; таблицы нет; выход — щелчком по плитке.
 const views = await run(`
-  const toggle = document.querySelector('[aria-label="Вид списка"]');
-  if (!toggle) return { found: false };
-  const tiles = document.querySelectorAll('[data-node]').length;
-  toggle.querySelectorAll('input')[1].click();
-  await wait(400);
-  const table = !!panel().querySelector('tbody');
-  toggle.querySelectorAll('input')[0].click();
-  await wait(400);
-  return { found: true, tiles, table };
+  const out = { table: !!document.querySelector('[aria-label="Вид списка"]') };
+  out.tools =
+    !!document.querySelector('[aria-label$="адреса и имена подписок"]') &&
+    !!document.querySelector('[aria-label="Обновить подписки и перемерить задержки"]') &&
+    !!document.querySelector('[aria-label^="Замерить задержку"]');
+  // Плитка выбирается своей растянутой кнопкой (onAction карточки rootik).
+  const hit = [...document.querySelectorAll('[data-node] > .rk-card-hit')].find(
+    (b) => !['DIRECT', 'AUTO'].includes(b.parentElement.dataset.node) && b.getAttribute('aria-pressed') === 'false',
+  );
+  if (hit) {
+    const name = hit.parentElement.dataset.node;
+    hit.click();
+    await wait(600);
+    out.click = document.querySelector('[data-node="' + name + '"] > .rk-card-hit')?.getAttribute('aria-pressed');
+  }
+  const gear = document.querySelector('[aria-label="Выбрать узлы для AUTO"]');
+  gear?.click();
+  await wait(300);
+  out.switches = panel().querySelectorAll('[aria-label$=" в AUTO"]').length;
+  document.querySelector('[aria-label="Отмена"]')?.click();
+  await wait(300);
+  await side('Группы');
+  out.groups = [...document.querySelectorAll('[data-group]')].map((g) => g.dataset.group);
+  out.buttons = !!byText('button', 'Автогруппы') && !!byText('button', 'Создать');
+  await side('Узлы');
+  return out;
 `);
+check("таблицы нет; скрыть · обновить · замерить в заголовке", !views.table && views.tools);
+check("щелчок по узлу делает его выходом", views.click === "true", String(views.click));
 check(
-  "узлы плитками и таблицей (D-079)",
-  views.found !== false && (views.tiles === 0 || views.table),
-  JSON.stringify(views),
+  "шестерёнка AUTO — тумблеры у источников и узлов",
+  views.groups.length === 0 || views.switches > 0,
+  String(views.switches),
+);
+check(
+  "вкладка «Группы»: AUTO, «Автогруппы» и «Создать»",
+  views.buttons && (views.groups.length === 0 || views.groups.includes("AUTO")),
+  views.groups.join(" · "),
 );
 
 // «+» — одно меню на всё (D-160, D-165): ссылка, файл, вручную, WARP. Ссылка — окно с курсором в поле.
@@ -225,9 +250,10 @@ check("пункт «Подписка или ссылка» открывает о
 check("курсор в поле ссылки", add.focus === "url", add.focus);
 await session.key("Escape", 27);
 check("Esc закрывает окно", await run("return !document.querySelector('dialog[open]');"));
+await run("await side('Источники'); return 1;");
 await session.clickReal('#section-panel [aria-label="Добавить источник"]');
 check(
-  "«+» в карточке узлов открывает то же меню",
+  "«+» во вкладке источников открывает то же меню",
   await run(
     "await wait(400); return [...document.querySelectorAll('[role=\"menuitem\"]')].filter((i) => i.checkVisibility()).length === 4;",
   ),
@@ -266,10 +292,11 @@ const sections = await run(`
   const out = {};
   await dock('Соединение');
   await side('Источники');
-  out.sources = !!document.querySelector('[aria-label="Как часто обновлять подписки"]');
+  // Расписание подписок — в «Настройках» → «Обновление»; здесь — список и «+».
+  out.sources = !!document.querySelector('[aria-label="Добавить источник"]');
   await side('Узлы');
   await dock('Группы');
-  out.groups = !!byText('button', 'Группа') && !!byText('.rk-divider', 'имена, занятые клиентом');
+  out.groups = !!byText('button', 'Группа') && !!byText('.rk-divider', 'собирает клиент');
   await dock('Маршрутизация');
   out.routing =
     !!document.querySelector('[aria-label="Набор маршрутизации"]') &&
@@ -282,7 +309,12 @@ const sections = await run(`
     !!byText('.rk-card-title', 'Rule sets') &&
     !!byText('.rk-card-title', 'Готовые наборы');
   await dock('Настройки');
-  out.settings = !!document.querySelector('[aria-label="Разделы настроек"]') && !!document.querySelector('[aria-label="Документ настроек"]');
+  out.settings =
+    !!document.querySelector('[aria-label="Разделы настроек"]') &&
+    !!document.querySelector('[aria-label="Документ настроек"]') &&
+    // Обновление — рядом: подписки, перепроверка групп, флаги.
+    !!document.querySelector('[aria-label="Как часто обновлять подписки"]') &&
+    !!document.querySelector('[aria-label="Как часто перепроверять группы"]');
   [...document.querySelectorAll('[aria-label="Вид"] input')][1]?.click();
   await wait(1200);
   out.code = !!document.querySelector('.cm-editor');

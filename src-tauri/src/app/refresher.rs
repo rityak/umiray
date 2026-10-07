@@ -204,6 +204,7 @@ mod tests {
             records: false,
             skipped: Vec::new(),
             failed: why.map(str::to_string),
+            renamed: false,
         }
     }
 

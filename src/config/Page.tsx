@@ -1,4 +1,3 @@
-import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
 import {
   Card,
@@ -32,7 +31,7 @@ export type Setting = {
 export type Part = { id: string; label: string; hint?: string; settings: Setting[] };
 
 /// First level: "what about" — Startup, Anti-DPI, Capture. No deeper nesting (D-117).
-export type Group = { id: string; label: string; icon: LucideIcon; parts: Part[] };
+export type Group = { id: string; label: string; parts: Part[] };
 
 type Props = {
   groups: Group[];
@@ -59,16 +58,14 @@ export default function Page({ groups, bar }: Props) {
       <div className="grid min-h-0 flex-1 grid-cols-[200px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-3 max-[820px]:grid-cols-1">
         <Card padding="sm" className="min-h-0 max-[820px]:hidden">
           <div className="flex h-full min-h-0 flex-col gap-2 overflow-y-auto">
-            {/* The same look as the utility list in Tools: a group as a heading, a part
-                as an item with its group's icon. Two different tables of contents in
-                neighbouring sections read as two different apps. */}
+            {/* A group as a heading, its parts as plain items: the group's icon on every
+                part repeated the heading and cut the labels short. */}
             <nav aria-label={t("Settings sections")} className="flex flex-col gap-1">
               {groups.map((group) => (
                 <NavGroup key={group.id} label={group.label}>
                   {group.parts.map((part) => (
                     <NavItem
                       key={part.id}
-                      icon={<group.icon />}
                       label={part.label}
                       active={active === part.id}
                       onClick={() =>

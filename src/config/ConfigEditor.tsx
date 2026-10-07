@@ -342,6 +342,8 @@ export default function ConfigEditor({
               text={draft.text}
               onDraft={(text) => onDraft(doc.id, text)}
               onMessage={onMessage}
+              icons={client.settings.groupIcons}
+              onIcons={(groupIcons) => client.onChange({ groupIcons })}
             />
           ) : section.id === RULES ? (
             <RulesForm

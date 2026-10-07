@@ -212,3 +212,23 @@ export const Udp = z.object({ on: z.boolean(), nodes: z.number() });
 export type Udp = z.infer<typeof Udp>;
 export const udpGet = () => call(Udp, "udp_get");
 export const udpSet = (on: boolean) => call(Status, "udp_set", { on });
+
+/// Какие группы клиент собирает сам (D-172). Третья — UDP-группа — своей командой (`udp*`).
+/// `udp` — группа `umiray-udp`; правило «весь UDP туда» — `udpSet` (D-113).
+export const Grouping = z.object({
+  location: z.boolean(),
+  protocol: z.boolean(),
+  udp: z.boolean(),
+});
+export type Grouping = z.infer<typeof Grouping>;
+export const groupsAutoGet = () => call(Grouping, "groups_auto_get");
+export const groupsAutoSet = (grouping: Grouping) => call(Status, "groups_auto_set", { grouping });
+/// Кого нет в `AUTO` (D-172): источники целиком и узлы по имени.
+export const Exclude = z.object({ sources: z.array(z.string()), nodes: z.array(z.string()) });
+export type Exclude = z.infer<typeof Exclude>;
+export const groupsAutoExclude = (exclude: Exclude) =>
+  call(Status, "groups_auto_exclude", { exclude });
+/// Переименовать свою группу вместе с правилами, группами и выбором, которые на неё
+/// смотрят (D-172). Имя проверяет бэкенд: занятое, служебное, с запятой — отказ словами.
+export const groupsRename = (from: string, to: string) =>
+  call(Status, "groups_rename", { from, to });

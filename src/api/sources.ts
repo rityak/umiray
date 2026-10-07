@@ -57,3 +57,6 @@ export const sourcesAddFile = () => call(Import.nullable(), "sources_add_file");
 /// Cloudflare WARP, выпущенный самим клиентом (D-165): регистрация у Cloudflare и узел.
 export type WarpTunnel = "masque" | "wireguard";
 export const sourcesAddWarp = (tunnel: WarpTunnel) => call(Import, "sources_add_warp", { tunnel });
+/// Переименовать источник (D-172): только название — узлы и адрес не трогаются.
+export const sourcesRename = (id: string, name: string) =>
+  call(Source, "sources_rename", { id, name });

@@ -27,6 +27,27 @@ pub fn client_health_set(url: String) -> Result<()> {
     crate::nodes::health::HealthCheck::set_url(&url)
 }
 
+/// Как часто группы перепроверяют узлы, секунд.
+#[tauri::command]
+pub fn client_health_interval_get() -> u32 {
+    crate::nodes::health::HealthCheck::interval()
+}
+
+/// Записать частоту — и довести до живого ядра: она поле групп и провайдеров в конфиге.
+#[tauri::command]
+pub async fn client_health_interval_set(
+    seconds: u32,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<crate::app::status::Status> {
+    state
+        .connection
+        .change(&app, &state, || {
+            crate::nodes::health::HealthCheck::set_interval(seconds)
+        })
+        .await
+}
+
 /// Через сколько часов перепрашивать страну узла; 0 — не спрашивать вовсе (D-084).
 #[tauri::command]
 pub fn client_geo_get() -> u64 {

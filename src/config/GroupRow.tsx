@@ -1,12 +1,12 @@
-import { Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Trash2 } from "lucide-react";
 import {
   Badge,
   Callout,
   Card,
   ChoiceCards,
   ConfirmButton,
-  Divider,
   Field,
+  IconButton,
   Input,
   NumberInput,
   SectionLabel,
@@ -14,6 +14,7 @@ import {
   Text,
 } from "rootik";
 import type * as api from "../api";
+import IconPicker from "../connection/IconPicker";
 import { t, tk } from "../i18n";
 import Flag from "../shell/Flag";
 import { type Choices, live, nodesOf, preview, type Selection, whole, write } from "./groups";
@@ -50,7 +51,7 @@ const RESERVED = ["AUTO", "umiray", "umiray-udp", "probe"];
 function nameError(name: string, taken: string[]): string | undefined {
   const trimmed = name.trim();
   if (trimmed === "") return t("Name the group — the core won't accept one without a name.");
-  if (RESERVED.includes(trimmed))
+  if (RESERVED.includes(trimmed) || trimmed.startsWith("umiray-"))
     return t("The client uses this name for its own group. Pick another one.");
   if (taken.includes(trimmed))
     return t("Another group already has this name. The core won't accept two.");
@@ -68,6 +69,9 @@ type Props = {
   choices: Choices;
   open: boolean;
   onToggle: () => void;
+  /// Значок — общий с «Соединением» (`Settings.group_icons`, D-172).
+  icon: string | null;
+  onIcon: (id: string | null) => void;
   onChange: (group: api.Group, selection: Selection) => void;
   onRemove: () => void;
 };
@@ -80,7 +84,7 @@ function pickedParts(choices: Choices, picked: Set<string>): string[] {
     if (mine === 0) return [];
     return [
       whole(choices, source.id, picked)
-        ? t("all of «{name}» ({n})", { name: source.name, n: mine })
+        ? t("all of «{name}»", { name: source.name })
         : t("«{name}»: {n} of {total}", { name: source.name, n: mine, total: nodes.length }),
     ];
   });
@@ -99,6 +103,8 @@ export default function GroupRow({
   choices,
   open,
   onToggle,
+  icon,
+  onIcon,
   onChange,
   onRemove,
 }: Props) {
@@ -143,14 +149,20 @@ export default function GroupRow({
   ].slice(0, 6) as string[];
 
   return (
+    // Не `collapsible`: его заголовок — одна кнопка, и выбор значка в нём был бы кнопкой
+    // в кнопке. Раскрывает шеврон, как у карточки группы в «Соединении».
     <Card
-      collapsible
-      open={open}
-      onOpenChange={onToggle}
       headingLevel={3}
-      icon={<look.Icon />}
+      media={
+        <IconPicker
+          value={icon}
+          fallback={look.Icon}
+          label={t("Icon of {name}", { name: group.name || t("unnamed") })}
+          onChange={onIcon}
+        />
+      }
       title={group.name || t("unnamed")}
-      description={`${group.kind || t("no type")} · ${t(look.word)} · ${
+      description={`${t(look.word)} · ${
         parts.length > 0
           ? parts.join(" · ")
           : selection.others.length > 0
@@ -174,186 +186,193 @@ export default function GroupRow({
           <Badge tone={inside + selection.others.length === 0 ? "warn" : "neutral"}>
             {t("{n} members", { n: inside + selection.others.length })}
           </Badge>
+          <IconButton
+            size="sm"
+            variant="ghost"
+            icon={open ? <ChevronUp /> : <ChevronDown />}
+            label={open ? t("Fold") : t("Edit group")}
+            aria-expanded={open}
+            onClick={onToggle}
+          />
         </span>
       }
     >
-      <div className="flex flex-col gap-4">
-        <div className="grid grid-cols-[minmax(0,1fr)] gap-3">
+      {open && (
+        // Between sections twice the space inside one: the form reads as blocks, not a list.
+        <div className="um-swap flex flex-col gap-6">
           <Field label={t("Group name")} error={badName}>
             <Input value={group.name} onChange={(event) => set({ name: event.target.value })} />
           </Field>
-        </div>
 
-        <section className="flex flex-col gap-2">
-          <SectionLabel>{t("Node selection")}</SectionLabel>
-          <ChoiceCards
-            aria-label={t("How the group selects a node")}
-            minWidth={150}
-            value={group.kind}
-            onChange={kind}
-            options={KINDS.map((item) => ({
-              value: item.id,
-              label: item.id,
-              description: t(item.about),
-              icon: (() => {
-                const { Icon } = GROUP_KIND[item.id] ?? UNKNOWN_KIND;
-                return <Icon />;
-              })(),
-            }))}
-          />
-        </section>
-
-        {checks && (
           <section className="flex flex-col gap-2">
-            <SectionLabel>{t("Health check")}</SectionLabel>
-            <div className="grid grid-cols-[minmax(0,1fr)_120px_180px] items-start gap-2 max-[640px]:grid-cols-1">
-              <Field label={t("Check URL")}>
-                <Input
-                  mono
-                  value={group.url ?? ""}
-                  placeholder={HEALTH}
-                  onChange={(event) => set({ url: event.target.value || null })}
-                />
-              </Field>
-              <Field label={t("Interval, s")}>
-                <NumberInput
-                  allowEmpty
-                  min={1}
-                  value={group.interval}
-                  placeholder={String(INTERVAL)}
-                  onChange={(interval) => set({ interval })}
-                />
-              </Field>
-              {tolerance && (
-                <Field label={t("Tolerance, ms")}>
+            <SectionLabel>{t("Node selection")}</SectionLabel>
+            <ChoiceCards
+              aria-label={t("How the group selects a node")}
+              minWidth={150}
+              value={group.kind}
+              onChange={kind}
+              options={KINDS.map((item) => ({
+                value: item.id,
+                label: item.id,
+                description: t(item.about),
+                icon: (() => {
+                  const { Icon } = GROUP_KIND[item.id] ?? UNKNOWN_KIND;
+                  return <Icon />;
+                })(),
+              }))}
+            />
+          </section>
+
+          {checks && (
+            <section className="flex flex-col gap-2">
+              <SectionLabel>{t("Health check")}</SectionLabel>
+              <div className="grid grid-cols-[minmax(0,1fr)_120px_180px] items-start gap-2 max-[640px]:grid-cols-1">
+                <Field label={t("Check URL")}>
+                  <Input
+                    mono
+                    value={group.url ?? ""}
+                    placeholder={HEALTH}
+                    onChange={(event) => set({ url: event.target.value || null })}
+                  />
+                </Field>
+                <Field label={t("Interval, s")}>
                   <NumberInput
                     allowEmpty
-                    min={0}
-                    value={group.tolerance}
-                    placeholder={String(TOLERANCE)}
-                    onChange={(tolerance) => set({ tolerance })}
+                    min={1}
+                    value={group.interval}
+                    placeholder={String(INTERVAL)}
+                    onChange={(interval) => set({ interval })}
                   />
                 </Field>
-              )}
+                {tolerance && (
+                  <Field
+                    label={t("Tolerance, ms")}
+                    hint={t("Switch only when the difference exceeds the tolerance")}
+                  >
+                    <NumberInput
+                      allowEmpty
+                      min={0}
+                      value={group.tolerance}
+                      placeholder={String(TOLERANCE)}
+                      onChange={(tolerance) => set({ tolerance })}
+                    />
+                  </Field>
+                )}
+                {balance && (
+                  <Field label={t("Strategy")}>
+                    <Select
+                      value={group.strategy ?? STRATEGIES[0].id}
+                      onChange={(value) => set({ strategy: value })}
+                      options={STRATEGIES.map((item) => ({
+                        value: item.id,
+                        label: item.id,
+                        hint: t(item.about),
+                      }))}
+                    />
+                  </Field>
+                )}
+              </div>
               {balance && (
-                <Field label={t("Strategy")}>
-                  <Select
-                    value={group.strategy ?? STRATEGIES[0].id}
-                    onChange={(value) => set({ strategy: value })}
-                    options={STRATEGIES.map((item) => ({
-                      value: item.id,
-                      label: item.id,
-                      hint: t(item.about),
-                    }))}
-                  />
-                </Field>
+                <Text tone="muted" size="xs" className="block">
+                  {t("Strategy: {strategy}", {
+                    strategy: t(strategy?.about ?? STRATEGIES[0].about),
+                  })}
+                </Text>
               )}
-            </div>
-            <Text tone="muted" size="xs" className="block">
-              {balance
-                ? t("Strategy: {strategy}", { strategy: t(strategy?.about ?? STRATEGIES[0].about) })
-                : tolerance
-                  ? t("Switch only when the difference exceeds the tolerance")
-                  : t("The group uses this URL to check node availability")}
-            </Text>
-          </section>
-        )}
-
-        <section className="flex flex-col gap-2">
-          <SectionLabel>{t("Members")}</SectionLabel>
-          <NodeTree
-            choices={choices}
-            picked={selection.picked}
-            disabled={!selection.understood}
-            onPicked={(next) => pick({ ...selection, picked: next })}
-          />
-          {selection.others.length > 0 && (
-            <Text tone="muted" size="xs" className="block">
-              {t(
-                "Also in the group: {names} — other groups, DIRECT or names typed by hand. Edit them in Code.",
-                { names: selection.others.join(" · ") },
-              )}
-            </Text>
+            </section>
           )}
-          {selection.understood && isLive && parts.length > 0 && (
-            <Field label={t("Keep only nodes whose names contain this text")}>
-              <Input
-                value={selection.substring}
-                placeholder={t("e.g. Poland — leave empty to include all")}
-                onChange={(event) => pick({ ...selection, substring: event.target.value })}
-              />
-            </Field>
-          )}
-        </section>
 
-        <Card
-          variant="sunken"
-          padding="sm"
-          title={t("The group includes {n} of {total}", { n: inside, total: rows.length })}
-          actions={
-            <Badge tone={isLive ? "success" : "warn"} dot>
-              {isLive ? t("live list") : t("fixed list")}
-            </Badge>
-          }
-        >
-          <div className="flex flex-col gap-2">
-            <div className="flex flex-wrap gap-1">
-              {rows.map((row) => (
-                // Флаг — в слоте `media`: квадратный `icon` сплющил бы его. Входящий — обычный
-                // бейдж, срезанный — контур и зачёркнут.
-                <Badge
-                  key={row.name}
-                  size="sm"
-                  variant={row.out ? "outline" : "soft"}
-                  className={row.out ? "line-through" : undefined}
-                  media={country(row.name) && <Flag country={country(row.name)} />}
-                >
-                  {row.name}
-                </Badge>
-              ))}
-            </div>
-            {inside === 0 && (
-              <Callout tone="warn">
-                {t("No nodes matched — the core will reject this group.")}
-              </Callout>
-            )}
-            {!isLive && parts.length > 0 && (
+          <section className="flex flex-col gap-2">
+            <SectionLabel>{t("Members")}</SectionLabel>
+            <NodeTree
+              choices={choices}
+              picked={selection.picked}
+              disabled={!selection.understood}
+              onPicked={(next) => pick({ ...selection, picked: next })}
+            />
+            {selection.others.length > 0 && (
               <Text tone="muted" size="xs" className="block">
                 {t(
-                  "Part of a source is saved as exact names, so new subscription nodes won't join. Check the whole source to keep the list live.",
+                  "Also in the group: {names} — other groups, DIRECT or names typed by hand. Edit them in Code.",
+                  { names: selection.others.join(" · ") },
                 )}
               </Text>
             )}
-          </div>
-        </Card>
-
-        {coded.length > 0 && (
-          <Callout tone="warn">
-            {t(
-              "The form doesn't know these fields and keeps them as is: {fields}. Edit them in Code.",
-              {
-                fields: coded.join(", "),
-              },
+            {selection.understood && isLive && parts.length > 0 && (
+              <Field label={t("Keep only nodes whose names contain this text")}>
+                <Input
+                  value={selection.substring}
+                  placeholder={t("e.g. Poland — leave empty to include all")}
+                  onChange={(event) => pick({ ...selection, substring: event.target.value })}
+                />
+              </Field>
             )}
-          </Callout>
-        )}
+          </section>
 
-        <Divider />
-        <div className="flex items-center gap-2">
-          <Text tone="muted" size="xs" className="block">
-            {t("Pick the group as a rule target in Routing.")}
-          </Text>
-          <span className="flex-1" />
-          <ConfirmButton
-            variant="danger"
-            icon={<Trash2 />}
-            confirmLabel={t("Delete for sure?")}
-            onConfirm={onRemove}
+          <Card
+            variant="sunken"
+            padding="sm"
+            title={t("The group includes {n} of {total}", { n: inside, total: rows.length })}
+            actions={
+              <Badge tone={isLive ? "success" : "warn"} dot>
+                {isLive ? t("live list") : t("fixed list")}
+              </Badge>
+            }
           >
-            {t("Delete group")}
-          </ConfirmButton>
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-wrap gap-1">
+                {rows.map((row) => (
+                  // Флаг — в слоте `media`: квадратный `icon` сплющил бы его. Входящий — обычный
+                  // бейдж, срезанный — контур и зачёркнут.
+                  <Badge
+                    key={row.name}
+                    size="sm"
+                    variant={row.out ? "outline" : "soft"}
+                    className={row.out ? "line-through" : undefined}
+                    media={country(row.name) && <Flag country={country(row.name)} />}
+                  >
+                    {row.name}
+                  </Badge>
+                ))}
+              </div>
+              {inside === 0 && (
+                <Callout tone="warn">
+                  {t("No nodes matched — the core will reject this group.")}
+                </Callout>
+              )}
+              {!isLive && parts.length > 0 && (
+                <Text tone="muted" size="xs" className="block">
+                  {t(
+                    "Part of a source is saved as exact names, so new subscription nodes won't join. Check the whole source to keep the list live.",
+                  )}
+                </Text>
+              )}
+            </div>
+          </Card>
+
+          {coded.length > 0 && (
+            <Callout tone="warn">
+              {t(
+                "The form doesn't know these fields and keeps them as is: {fields}. Edit them in Code.",
+                {
+                  fields: coded.join(", "),
+                },
+              )}
+            </Callout>
+          )}
+
+          <div className="flex justify-end">
+            <ConfirmButton
+              variant="danger"
+              icon={<Trash2 />}
+              confirmLabel={t("Delete for sure?")}
+              onConfirm={onRemove}
+            >
+              {t("Delete group")}
+            </ConfirmButton>
+          </div>
         </div>
-      </div>
+      )}
     </Card>
   );
 }

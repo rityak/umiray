@@ -115,11 +115,10 @@ export default function SourceCard({
             size="sm"
             variant="ghost"
             icon={<Trash2 />}
+            aria-label={t("Delete")}
             confirmLabel={t("Delete for sure?")}
             onConfirm={onRemove}
-          >
-            {t("Delete")}
-          </ConfirmButton>
+          />
         </>
       }
     >

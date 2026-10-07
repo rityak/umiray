@@ -50,6 +50,7 @@ let settings: api.Settings = {
   adminOffer: true,
   setup: !fresh,
   routing: true,
+  groupIcons: { Europe: "flag:eu" },
 };
 
 const DEMO_SOURCES: api.Source[] = [
@@ -106,8 +107,44 @@ let selected: string | null = fresh ? null : "Poland 1";
 let direction: api.Direction = fresh ? "direct" : "auto";
 let ping: api.PingMethod = "tcp";
 let health = "http://www.gstatic.com/generate_204";
+let healthInterval = 300;
 let geo = 168;
 let udp: api.Udp = { on: false, nodes: 4 };
+let exclude: api.Exclude = { sources: [], nodes: ["Germany LTE"] };
+let grouping: api.Grouping = { location: false, protocol: false, udp: false };
+
+/// Группы клиента так, как их собирает бэкенд (D-172): AUTO без вынутого, UDP-группа,
+/// автогруппы там, где узлов два и больше.
+function built(): api.BuiltGroup[] {
+  const live = nodes.filter((item) => item.supported);
+  if (live.length === 0) return [];
+  const kept = live.filter(
+    (item) => !exclude.sources.includes(item.source) && !exclude.nodes.includes(item.name),
+  );
+  const out: api.BuiltGroup[] = [
+    {
+      name: "AUTO",
+      kind: "load-balance",
+      members: (kept.length > 0 ? kept : live).map((n) => n.name),
+    },
+  ];
+  const datagram = live.filter((item) => /hysteria2|tuic/i.test(item.kind));
+  if ((grouping.udp || udp.on) && datagram.length > 0)
+    out.push({ name: "umiray-udp", kind: "url-test", members: datagram.map((n) => n.name) });
+  const bucket = (prefix: string, key: (item: api.Node) => string | null) => {
+    const found = new Map<string, string[]>();
+    for (const item of live) {
+      const value = key(item);
+      if (value) found.set(value, [...(found.get(value) ?? []), item.name]);
+    }
+    for (const [value, members] of [...found].sort()) {
+      if (members.length >= 2) out.push({ name: prefix + value, kind: "url-test", members });
+    }
+  };
+  if (grouping.location) bucket("umiray-geo-", (item) => item.country?.toLowerCase() ?? null);
+  if (grouping.protocol) bucket("umiray-proto-", (item) => item.kind.toLowerCase());
+  return out;
+}
 let mask: api.Mask = {
   jc: 0,
   jmin: 0,
@@ -303,7 +340,7 @@ const sections = (): api.ConfigSection[] => [
       {
         id: "groups",
         label: "Groups",
-        hint: "your node groups, shared by all routes; the client builds AUTO and umiray itself",
+        hint: "your node groups, shared by all routes; the client builds AUTO and auto groups itself",
         core: true,
         applied: true,
       },
@@ -316,7 +353,7 @@ const sections = (): api.ConfigSection[] => [
     docs: presets.map((preset) => ({
       id: `rules/${preset.id}`,
       label: preset.name,
-      hint: "where traffic goes; MATCH handles everything else",
+      hint: "top to bottom, the first match wins: your rules → high → medium → low → MATCH; rule sets first within a level",
       core: true,
       applied: preset.applied,
     })),
@@ -341,8 +378,12 @@ const traffic = (): api.Traffic | null => {
   return {
     up,
     down,
-    connections: 5,
-    nodes: [{ node: "Poland 1", up, down, connections: 3 }],
+    connections: 9,
+    nodes: [
+      { node: "Poland 1", up, down, connections: 6 },
+      { node: "Finland 0", up: up / 3, down: down / 3, connections: 2 },
+      { node: "UAE", up: up / 9, down: down / 9, connections: 1 },
+    ],
   };
 };
 
@@ -581,6 +622,38 @@ const HANDLERS: Record<string, (args: Args) => unknown> = {
   sources_proxy_yaml: ({ entry }) => text(entry),
   sources_add_file: () => null,
   sources_add_warp: () => ({ notices: [], source: sources[1] }),
+  sources_rename: ({ id, name }) => {
+    sources = sources.map((item) => (item.id === id ? { ...item, name: String(name) } : item));
+    return sources.find((item) => item.id === id);
+  },
+  groups_auto_get: () => grouping,
+  groups_auto_set: ({ grouping: next }) => {
+    grouping = next as api.Grouping;
+    // Без группы правилу некуда вести UDP (D-113).
+    if (!grouping.udp) udp = { ...udp, on: false };
+    return status_();
+  },
+  groups_auto_exclude: ({ exclude: next }) => {
+    exclude = next as api.Exclude;
+    return status_();
+  },
+  groups_rename: ({ from, to }) => {
+    const name = String(to).trim();
+    if (name.includes(",") || groups.some((group) => group.name === name))
+      throw { kind: "badInput", message: `Имя «${name}» уже занято или с запятой`, details: [] };
+    for (const group of groups) {
+      if (group.name === from) group.name = name;
+      group.proxies = group.proxies.map((item) => (item === from ? name : item));
+    }
+    for (const doc of Object.values(routing)) {
+      for (const rule of doc.rules) if (rule.target === from) rule.target = name;
+      if (doc.fallback === from) doc.fallback = name;
+    }
+    if (selected === from) selected = name;
+    const { [String(from)]: icon, ...icons } = settings.groupIcons;
+    settings = { ...settings, groupIcons: icon ? { ...icons, [name]: icon } : icons };
+    return status_();
+  },
   nodes_list: () => nodes,
   nodes_ping: () => {
     nodes = nodes.map((item) =>
@@ -602,6 +675,8 @@ const HANDLERS: Record<string, (args: Args) => unknown> = {
       node: direction === "manual" ? selected : null,
       fallback,
       ping,
+      groups: built(),
+      exclude,
       route:
         fallback !== null
           ? [fallback]
@@ -753,6 +828,7 @@ const HANDLERS: Record<string, (args: Args) => unknown> = {
   udp_get: () => udp,
   udp_set: ({ on }) => {
     udp = { ...udp, on: Boolean(on) };
+    if (udp.on) grouping = { ...grouping, udp: true };
     return status_();
   },
   client_geo_get: () => geo,
@@ -771,6 +847,11 @@ const HANDLERS: Record<string, (args: Args) => unknown> = {
     return null;
   },
   client_health_get: () => health,
+  client_health_interval_get: () => healthInterval,
+  client_health_interval_set: ({ seconds }) => {
+    healthInterval = Number(seconds);
+    return status_();
+  },
   client_health_set: ({ url }) => {
     health = String(url);
     return null;

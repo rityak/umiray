@@ -36,6 +36,7 @@ impl SourceImporter {
             records: false,
             skipped: Vec::new(),
             failed: None,
+            renamed: false,
         };
         let notices = accept(source, &id, &fetched)?;
         Ok((SourceStore::get(&id)?, notices))
@@ -77,6 +78,7 @@ impl SourceImporter {
             records: false,
             skipped: Vec::new(),
             failed: None,
+            renamed: false,
         });
 
         let mut lines: Vec<String> = SourceStore::raw(&id).lines().map(str::to_string).collect();
@@ -184,8 +186,9 @@ fn refreshed(id: &str, fetched: Result<Fetched>) -> Result<(Source, Vec<String>)
 /// напрямую, при зелёном окне (B-039).
 fn accept(mut source: Source, id: &str, fetched: &Fetched) -> Result<Vec<String>> {
     let (lines, notices) = Subscription::links(&fetched.body);
-    // Панель обычно называет себя сама — это понятнее хоста из адреса.
-    if let Some(title) = &fetched.title {
+    // Панель обычно называет себя сама — это понятнее хоста из адреса. Имя, данное
+    // человеком, главнее (D-172).
+    if let Some(title) = fetched.title.as_ref().filter(|_| !source.renamed) {
         source.name = title.clone();
     }
     if lines.is_empty() {
@@ -247,6 +250,7 @@ fn own() -> Result<(String, Source)> {
         records: false,
         skipped: Vec::new(),
         failed: None,
+        renamed: false,
     };
     Ok((id, source))
 }
@@ -299,6 +303,7 @@ mod tests {
             records: false,
             skipped: Vec::new(),
             failed: None,
+            renamed: false,
         };
         write(
             &mut source,

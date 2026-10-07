@@ -13,8 +13,8 @@ type Props = {
   onPower: () => void;
 };
 
-/// The power button with the state next to it — the top of every engine's connection card
-/// (D-060, D-154). Compact, to leave height for Traffic.
+/// The power button with the state beside it — the top of every engine's connection card
+/// (D-060, D-154): one row, the button at the card's leading edge, the words right after it.
 export default function PowerRow({
   on,
   powering,
@@ -35,9 +35,11 @@ export default function PowerRow({
         disabled={disabled}
         onChange={onPower}
       />
-      <div className="flex min-w-0 flex-col gap-1">
-        <span className="um-headline">{headline}</span>
-        <Text tone="muted" size="xs" className="block">
+      {/* A new state fades in, so "Connecting…" → "Connected" reads as a step, not a blink.
+          The detail (uptime) ticks in place. */}
+      <div key={headline} className="um-swap flex min-w-0 flex-col gap-0.5">
+        <span className="um-headline truncate">{headline}</span>
+        <Text tone="muted" size="sm" truncate>
           {detail}
         </Text>
       </div>

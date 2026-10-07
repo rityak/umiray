@@ -2,6 +2,8 @@ import { CornerDownRight, Plus } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Card, ChipGroup, Divider, EmptyState, SegmentedControl, Text } from "rootik";
 import * as api from "../api";
+import { chosen } from "../connection/exits";
+import { groupName } from "../connection/groups";
 import { useCached } from "../hooks/useCached";
 import { t } from "../i18n";
 import { failure, type Message } from "../shell/Banner";
@@ -71,7 +73,11 @@ export default function RulesForm({ text, onDraft, onMessage, onPending, running
   kept = { text, routing };
   /// `null` — not read yet or unreadable: then no target is called lost.
   const [groupNames, setGroups] = useCached<string[] | null>("rules.groups", null);
-  const groups = groupNames ?? [];
+  /// Группы, которые собирает клиент (D-172): UDP и автогруппы — тоже цели, а не «не найдено».
+  const [clientGroups, setClientGroups] = useCached<string[]>("rules.client", []);
+  const groups = [...(groupNames ?? []), ...clientGroups];
+  /// Куда сейчас ведёт `umiray` — выбор в «Соединении» (D-172): MATCH называет его.
+  const [exit, setExit] = useCached<string | null>("rules.exit", null);
   /// Узлы как второй список «куда» (D-082). Спрашиваем у бэкенда, а не считаем из групп:
   /// состав узлов знает каталог источников, а не документ.
   const [nodeNames, setNodes] = useCached<string[] | null>("rules.nodes", null);
@@ -105,8 +111,12 @@ export default function RulesForm({ text, onDraft, onMessage, onPending, running
   useEffect(() => {
     // Узел, которого ядро не поднимет, целью быть не может (D-063): группа под него
     // получилась бы пустой, а такую ядро не принимает.
-    api.nodesList().then(
-      (list) => setNodes(list.filter((node) => node.supported).map((node) => node.name)),
+    api.connectionSnapshot().then(
+      (snapshot) => {
+        setNodes(snapshot.nodes.filter((node) => node.supported).map((node) => node.name));
+        setClientGroups(snapshot.groups.map((group) => group.name));
+        setExit(chosen(snapshot.direction, snapshot.node));
+      },
       () => setNodes(null),
     );
     api.listsList().then(
@@ -232,11 +242,6 @@ export default function RulesForm({ text, onDraft, onMessage, onPending, running
 
       {page === "route" ? (
         <>
-          <Text tone="muted" size="xs" className="block">
-            {t(
-              "Checked top to bottom, the first match wins: your rules → high → medium → low → MATCH. On one level, rule sets go first.",
-            )}
-          </Text>
           <RuleSets
             entries={routing.ruleSets}
             onChange={(ruleSets) => commit({ ...routing, ruleSets })}
@@ -262,9 +267,11 @@ export default function RulesForm({ text, onDraft, onMessage, onPending, running
             iconTone={fallback.tone}
             icon={<CornerDownRight />}
             title="MATCH"
-            description={t(
-              "everything not matched above · umiray is the exit chosen in Connection",
-            )}
+            description={
+              routing.fallback === "umiray" && exit !== null
+                ? t("everything not matched above · now {exit}", { exit: groupName(exit) })
+                : t("everything not matched above")
+            }
             actions={
               <div className="w-[230px]">
                 <TargetPicker
@@ -295,7 +302,7 @@ export default function RulesForm({ text, onDraft, onMessage, onPending, running
                 { value: "all", label: t("All"), count: routing.rules.length },
                 ...seen.map((id) => ({
                   value: id,
-                  label: id,
+                  label: groupName(id),
                   icon: (() => {
                     const { Icon } = lost(id) ? lostLook() : targetLook(id, nodes);
                     return <Icon />;
@@ -307,7 +314,9 @@ export default function RulesForm({ text, onDraft, onMessage, onPending, running
             <span className="flex-1" />
             <Text tone="muted" size="xs" className="block">
               {filter !== "all"
-                ? t("only → {target}; order and numbering are shared", { target: filter })
+                ? t("only → {target}; order and numbering are shared", {
+                    target: groupName(filter),
+                  })
                 : t("checked before rule sets, top to bottom; the first match wins")}
             </Text>
           </div>

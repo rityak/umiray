@@ -5,14 +5,9 @@ import {
   Eraser,
   type LucideIcon,
   Plug,
-  Power,
   RotateCcw,
-  ShieldAlert,
-  SlidersHorizontal,
-  VenetianMask,
   Wand2,
   Waves,
-  Wrench,
   Zap,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -23,6 +18,7 @@ import { useCached } from "../hooks/useCached";
 import { type LanguagePreference, languagePreference, t, tk } from "../i18n";
 import { failure, type Message } from "../shell/Banner";
 import SectionBar from "../shell/SectionBar";
+import RefreshSchedule from "../sources/RefreshSchedule";
 import ClientUpdate from "./ClientUpdate";
 import MaskForm from "./MaskForm";
 import Page, { type Group } from "./Page";
@@ -108,6 +104,14 @@ const PINGS: { id: api.PingMethod; label: string; hint: string; icon: LucideIcon
 
 /// Как часто перепрашивать страну узла (D-084). Ноль — не спрашивать вовсе: тогда наружу
 /// не уходит ни один адрес.
+/// Как часто группы клиента перепроверяют узлы (`health-interval`, секунд).
+const RECHECK = [
+  { seconds: 60, label: tk("Every minute") },
+  { seconds: 300, label: tk("Every 5 minutes") },
+  { seconds: 900, label: tk("Every 15 minutes") },
+  { seconds: 3600, label: tk("Every hour") },
+];
+
 const GEO = [
   { hours: 0, label: tk("Never check") },
   { hours: 24, label: tk("Every day") },
@@ -213,12 +217,14 @@ export default function ClientForm({
   const [health, setHealth] = useCached<string | null>("client.health", null);
   const [udp, setUdp] = useCached<api.Udp | null>("client.udp", null);
   const [geo, setGeo] = useCached<number | null>("client.geo", null);
+  const [recheck, setRecheckSeconds] = useCached<number | null>("client.recheck", null);
   const [device, setDevice] = useCached<string | null>("client.device", null);
   const [flushing, setFlushing] = useState(false);
 
   useEffect(() => {
     api.clientPingGet().then(setMethod, (e) => onMessage(failure(e)));
     api.clientGeoGet().then(setGeo, () => setGeo(null));
+    api.clientHealthIntervalGet().then(setRecheckSeconds, () => setRecheckSeconds(null));
     api.clientHealthGet().then(setHealth, () => setHealth(null));
     api.udpGet().then(setUdp, () => setUdp(null));
     // Идентификатор устройства не меняется никогда — спрашиваем один раз при открытии,
@@ -264,6 +270,16 @@ export default function ClientForm({
     }
   };
 
+  const setRecheck = async (seconds: number) => {
+    setRecheckSeconds(seconds);
+    try {
+      onStatus(await api.clientHealthIntervalSet(seconds));
+    } catch (e) {
+      onMessage(failure(e));
+      api.clientHealthIntervalGet().then(setRecheckSeconds, () => {});
+    }
+  };
+
   const setGeoHours = async (hours: number) => {
     setGeo(hours);
     try {
@@ -291,7 +307,6 @@ export default function ClientForm({
     {
       id: "launch",
       label: t("Startup"),
-      icon: Power,
       parts: [
         {
           id: "launch-windows",
@@ -368,7 +383,6 @@ export default function ClientForm({
     {
       id: "guard",
       label: t("Protection"),
-      icon: ShieldAlert,
       parts: [
         {
           id: "guard-firewall",
@@ -396,7 +410,6 @@ export default function ClientForm({
     {
       id: "antidpi",
       label: "Anti-DPI",
-      icon: VenetianMask,
       parts: [
         {
           id: "antidpi-wireguard",
@@ -422,7 +435,6 @@ export default function ClientForm({
     {
       id: "nodes",
       label: t("Nodes"),
-      icon: SlidersHorizontal,
       parts: [
         {
           id: "nodes-ping",
@@ -501,12 +513,50 @@ export default function ClientForm({
           ],
         },
         {
-          id: "nodes-geo",
-          label: t("Country flag"),
+          // Всё, что клиент обновляет сам, — рядом: подписки, флаги, проверка групп.
+          id: "nodes-updates",
+          label: t("Updates"),
           settings: [
             {
+              id: "refresh",
+              label: t("Subscriptions"),
+              hint: t("New nodes from a subscription go into AUTO and auto groups by themselves"),
+              control: (
+                <span className="flex flex-wrap items-center justify-end gap-1.5">
+                  <RefreshSchedule
+                    schedule={settings.refresh}
+                    onSchedule={(refresh) => onChange({ refresh })}
+                  />
+                </span>
+              ),
+            },
+            {
+              id: "recheck",
+              label: t("Group re-check"),
+              hint: t(
+                "How often AUTO and auto groups check their nodes and set dead ones aside. Your own groups have their own interval",
+              ),
+              control: (
+                <Select
+                  aria-label={t("Group re-check interval")}
+                  value={String(recheck ?? 300)}
+                  disabled={recheck === null}
+                  onChange={(value) => setRecheck(Number(value))}
+                  options={[
+                    ...RECHECK.map((item) => ({
+                      value: String(item.seconds),
+                      label: t(item.label),
+                    })),
+                    ...(recheck !== null && !RECHECK.some((item) => item.seconds === recheck)
+                      ? [{ value: String(recheck), label: t("{n} s", { n: recheck }) }]
+                      : []),
+                  ]}
+                />
+              ),
+            },
+            {
               id: "geo",
-              label: t("Look up server country"),
+              label: t("Country flags"),
               hint:
                 geo === 0
                   ? t("Off: no addresses are sent anywhere, so no flags")
@@ -530,7 +580,6 @@ export default function ClientForm({
     {
       id: "service",
       label: t("Maintenance"),
-      icon: Wrench,
       parts: [
         {
           id: "service-client",

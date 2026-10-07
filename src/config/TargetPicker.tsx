@@ -1,4 +1,5 @@
 import { Select } from "rootik";
+import { groupName } from "../connection/groups";
 import { lostLook, targetLook } from "./kinds";
 
 type Props = {
@@ -25,7 +26,7 @@ export default function TargetPicker({ value, groups, nodes, label, lost, onChan
     const look = lost(target) ? lostLook() : targetLook(target, nodes);
     return {
       value: target,
-      label: target,
+      label: groupName(target),
       hint: look.word,
       // The icon goes straight into the kit's slot: rootik sets size (1em) and stroke, no
       // wrapper of our own. Only outcomes are coloured, and the colour comes from the icon.

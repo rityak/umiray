@@ -19,6 +19,29 @@ use crate::error::{AppError, Result};
 use crate::yaml::Yaml;
 
 const KEY: &str = "health-url";
+const EVERY: &str = "health-interval";
+
+/// Как часто группы перепроверяют узлы, секунд, — умолчание и границы. Чаще минуты — трафик
+/// и нагрузка на узлы ради ничего; реже суток — мёртвый узел держится в группе весь день.
+pub const INTERVAL: u32 = 300;
+const SHORTEST: u32 = 60;
+const LONGEST: u32 = 86_400;
+
+/// Проверка живости так, как её получает сборка: куда бить и как часто.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Check {
+    pub url: String,
+    pub interval: u32,
+}
+
+impl Default for Check {
+    fn default() -> Self {
+        Check {
+            url: DEFAULT.to_string(),
+            interval: INTERVAL,
+        }
+    }
+}
 
 /// Умолчание. Cloudflare, а не gstatic: последний в России шейпится, а этот адрес
 /// к тому же уже замерен как цель замера через туннель (S-016).
@@ -61,6 +84,41 @@ impl HealthCheck {
         Documents::write(CLIENT, &text)
     }
 
+    pub fn check() -> Result<Check> {
+        Ok(Check {
+            url: HealthCheck::url()?,
+            interval: HealthCheck::interval(),
+        })
+    }
+
+    /// Частота перепроверки групп. Число вне границ или мусор — умолчание: из-за поля,
+    /// поправленного руками, VPN не должен перестать подниматься.
+    pub fn interval() -> u32 {
+        Documents::read(CLIENT)
+            .ok()
+            .and_then(|text| Yaml::top_mapping(&text).ok())
+            .and_then(|map| {
+                map.get(serde_yaml::Value::from(EVERY))
+                    .and_then(serde_yaml::Value::as_u64)
+            })
+            .and_then(|seconds| u32::try_from(seconds).ok())
+            .filter(|seconds| (SHORTEST..=LONGEST).contains(seconds))
+            .unwrap_or(INTERVAL)
+    }
+
+    pub fn set_interval(seconds: u32) -> Result<()> {
+        if !(SHORTEST..=LONGEST).contains(&seconds) {
+            return Err(AppError::invalid(format!(
+                "Перепроверка групп — от {SHORTEST} до {LONGEST} секунд"
+            )));
+        }
+        let mut map = Yaml::top_mapping(&Documents::read(CLIENT)?)?;
+        Yaml::set(&mut map, EVERY, serde_yaml::Value::from(seconds));
+        let text = serde_yaml::to_string(&serde_yaml::Value::Mapping(map))
+            .map_err(|e| AppError::invalid(e.to_string()))?;
+        Documents::write(CLIENT, &text)
+    }
+
     /// Хост и путь — то, из чего клиент собирает свой запрос в туннеле.
     ///
     /// Только `http://`, и это не упущение: замер идёт через `CONNECT` на 80-й порт, а ядро
@@ -97,6 +155,14 @@ mod tests {
         let map = Yaml::top_mapping(Documents::template(CLIENT).unwrap()).unwrap();
         let said = map.get(serde_yaml::Value::from(KEY)).unwrap();
         assert_eq!(said.as_str(), Some(DEFAULT));
+    }
+
+    /// Шаблон называет ту же частоту, что берёт клиент без поля.
+    #[test]
+    fn the_template_says_the_interval_the_client_uses() {
+        let map = Yaml::top_mapping(Documents::template(CLIENT).unwrap()).unwrap();
+        let said = map.get(serde_yaml::Value::from(EVERY)).unwrap();
+        assert_eq!(said.as_u64(), Some(u64::from(INTERVAL)));
     }
 
     /// Всё, что не доедет до ядра или до замера, отвергаем здесь, а не молча.

@@ -1,4 +1,4 @@
-import { Download, Gauge } from "lucide-react";
+import { Download } from "lucide-react";
 import { useCallback, useState } from "react";
 import { Button, NumberInput } from "rootik";
 import Page, { type Group } from "../config/Page";
@@ -39,7 +39,6 @@ export default function QdSettings({ live, start, onInstall, onMessage }: Props)
     {
       id: "qd-transport",
       label: t("qd transport"),
-      icon: Gauge,
       parts: [
         {
           id: "qd-rate",
@@ -71,7 +70,6 @@ export default function QdSettings({ live, start, onInstall, onMessage }: Props)
     {
       id: "qd-binary",
       label: t("qd binary"),
-      icon: Download,
       parts: [
         {
           id: "qd-update",

@@ -1,16 +1,6 @@
 import { ExternalLink, ListChecks, Plus, RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import {
-  Badge,
-  Button,
-  Card,
-  EmptyState,
-  IconButton,
-  Item,
-  ItemGroup,
-  Text,
-  Tooltip,
-} from "rootik";
+import { Badge, Button, Card, EmptyState, IconButton, Item, ItemGroup, Tooltip } from "rootik";
 import * as api from "../api";
 import { useCached } from "../hooks/useCached";
 import { getLang, locale, t, tn } from "../i18n";
@@ -178,15 +168,8 @@ export default function RuleSets({ entries, onChange, targets, nodes, lost, onMe
             return (
               <Item
                 key={entry.id}
-                size="sm"
-                title={
-                  <span className="inline-flex items-center gap-2">
-                    {title(entry.id)}
-                    <Text tone="muted" size="xs" className="rk-mono">
-                      {entry.id}
-                    </Text>
-                  </span>
-                }
+                // Обычный размер: в строке два выпадающих списка, и ниже их она тесна.
+                title={title(entry.id)}
                 description={
                   list ? (list.error ?? summary(list)) : t("not downloaded yet — press refresh")
                 }

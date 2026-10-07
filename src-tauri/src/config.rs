@@ -4,6 +4,7 @@
 //! каталог источников, ни формат результата.
 
 pub mod advanced;
+pub mod auto;
 pub mod awg;
 pub mod direction;
 pub mod files;
@@ -11,6 +12,7 @@ pub mod groups;
 pub mod mode;
 pub mod presets;
 pub mod recommended;
+pub mod rename;
 pub mod route;
 pub mod route_doc;
 pub mod rules;

@@ -49,6 +49,9 @@ pub struct Source {
     /// Помнит источник, а не память клиента: жалоба переживает перезапуск (D-038).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failed: Option<String>,
+    /// Имя дал человек (D-172): название из ответа панели его больше не перетирает.
+    #[serde(default)]
+    pub renamed: bool,
 }
 
 /// Проставить признак, который не хранится, а выводится из содержимого.
@@ -189,9 +192,21 @@ impl SourceStore {
     pub fn mark_failed(id: &str, why: &str) -> Result<()> {
         let mut source = SourceStore::get(id)?;
         source.failed = Some(why.to_string());
-        let meta = serde_json::to_string_pretty(&source)
-            .map_err(|e| AppError::io(format!("Не удалось записать источник: {e}")))?;
-        Db::put(Table::Sources, id, META, &meta)
+        put_meta(&source)
+    }
+
+    /// Переименовать источник (D-172). Только название: узлы, адрес и id не трогаются, и имя
+    /// переживает обновление — панель его больше не перетирает.
+    pub fn rename(id: &str, name: &str) -> Result<Source> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(AppError::invalid("У источника должно быть название"));
+        }
+        let mut source = SourceStore::get(id)?;
+        source.name = name.to_string();
+        source.renamed = true;
+        put_meta(&source)?;
+        Ok(source)
     }
 
     /// Пересобрать все источники из сырья и выложить ядру заново: разбор мог научиться
@@ -227,6 +242,13 @@ impl SourceStore {
         }
         Ok(())
     }
+}
+
+/// Записать одно описание источника — без узлов и сырья.
+fn put_meta(source: &Source) -> Result<()> {
+    let meta = serde_json::to_string_pretty(source)
+        .map_err(|e| AppError::io(format!("Не удалось записать источник: {e}")))?;
+    Db::put(Table::Sources, &source.id, META, &meta)
 }
 
 /// Записи, которые уже лежат в источнике.
@@ -396,6 +418,7 @@ mod tests {
             records: false,
             skipped: Vec::new(),
             failed: None,
+            renamed: false,
         };
         let meta = serde_json::to_string(&source).unwrap();
         Db::batch(|batch| {
@@ -577,6 +600,7 @@ Endpoint = a.example:51820
             records: false,
             skipped: Vec::new(),
             failed: None,
+            renamed: false,
         };
         write(
             &mut source,
@@ -653,6 +677,7 @@ remote-dns-resolve: true",
             records: false,
             skipped: Vec::new(),
             failed: None,
+            renamed: false,
         };
         write(
             &mut source,
@@ -695,6 +720,7 @@ remote-dns-resolve: true",
             records: false,
             skipped: Vec::new(),
             failed: None,
+            renamed: false,
         };
         write(
             &mut source,
@@ -774,6 +800,7 @@ remote-dns-resolve: true",
             records: false,
             skipped: Vec::new(),
             failed: None,
+            renamed: false,
         };
         let lines = lines.iter().map(|line| line.to_string()).collect();
         write(&mut source, lines, id, &crate::config::awg::Mask::default()).unwrap();

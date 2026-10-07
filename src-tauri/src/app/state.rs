@@ -8,6 +8,7 @@
 use crate::app::catalog::Catalog;
 use crate::app::connect::Connection;
 use crate::app::diagnostics::Diagnostics;
+use crate::app::groups::Groups;
 use crate::app::killswitch::KillSwitch;
 use crate::app::lists::Lists;
 use crate::app::maintenance::Maintenance;
@@ -28,6 +29,8 @@ pub struct AppState {
     pub connection: Connection,
     /// Куда идёт трафик: направление, выбранный узел, псевдоним, применённый набор.
     pub routing: Routing,
+    /// Группы: имена своих и группы, которые собирает клиент (D-172).
+    pub groups: Groups,
     /// Наборы маршрутизации: завести, применить, удалить.
     pub presets: Presets,
     /// Узлы для окна: состав, замеры задержки, страны.
@@ -60,6 +63,7 @@ impl AppState {
             settings: SettingsStore::open(),
             connection: Connection::default(),
             routing: Routing,
+            groups: Groups,
             presets: Presets,
             catalog: Catalog::default(),
             sources: Sources,

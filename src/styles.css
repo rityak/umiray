@@ -7,6 +7,8 @@
 @layer theme, base, rootik, components, utilities;
 @import "tailwindcss" source("./");
 @import "rootik/styles.css";
+/* Utilities count in kit steps (`gap-3` = three `--rk-space`), radii and text follow its tokens. */
+@import "rootik/tailwind.css";
 
 @layer base {
   html,
@@ -89,10 +91,11 @@
     animation: none;
   }
 
+  /* Opacity only: content rising into place got clipped by the scroll edge and read as a
+     jolt. */
   @keyframes um-enter {
     from {
       opacity: 0;
-      transform: translateY(4px);
     }
   }
 
@@ -152,12 +155,30 @@
     color: var(--rk-tone-text);
   }
 
-  /* The "am I on VPN?" answer under the power button: the kit's large number, thin weight. */
+  /* The "am I on VPN?" answer beside the power button. */
   .um-headline {
-    font-size: var(--rk-text-2xl);
-    font-weight: 300;
-    letter-spacing: -0.02em;
-    line-height: 1.1;
+    font-size: var(--rk-text-xl);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+  }
+
+  /* Content that replaces other content in place (a new state, another tab, an opened
+     group) fades in. Durations are the kit's, so "reduce motion"
+     turns it off with the rest. Exits are instant: the old content is already gone. */
+  .um-swap {
+    animation: um-enter var(--rk-dur-slow) var(--rk-ease-out);
+  }
+
+  /* Hover on a card you can pick (tiles, DIRECT/AUTO, groups — all `outline`): its line
+     brightens. The kit's `interactive` lifts the card 2px instead, and in a scrolling list
+     the lifted edge is cut off (ROOTIK §1). */
+  .rk-card[data-action] {
+    transition: box-shadow var(--rk-dur) var(--rk-ease);
+  }
+
+  .rk-card[data-action]:not([data-selected]):hover {
+    box-shadow: inset 0 0 0 1px var(--rk-line-strong);
   }
 
   /* Rule number — order is the meaning here; the number's colour is the rule's outcome. */

@@ -12,6 +12,7 @@ pub mod connect;
 pub mod data;
 pub mod diagnostics;
 pub mod engine;
+pub mod groups;
 pub mod guard;
 pub mod import;
 pub mod killswitch;
