@@ -106,7 +106,11 @@ jobs:
           sudo apt-get install -y "./$deb"
           set +e; umiray --helper check; code=$?; set -e
           test "$code" = 1
-          pkaction --action-id com.umiray.client.helper
+          # pkaction из polkit 0.105 (Ubuntu 22.04) отвечает кодом 1 и на найденное действие —
+          # судим по выводу: действие известно polkit и даётся активному сеансу без пароля.
+          action=$(pkaction --verbose --action-id com.umiray.client.helper || true)
+          echo "$action"
+          grep -Eq 'implicit active: +yes' <<<"$action"
       - name: Upload packages to the draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -3,7 +3,7 @@
 The version comes from `package.json`, is mirrored in `Cargo.toml`, and appears in
 the subscription User-Agent as `umiray/<version>`.
 
-## 1.5.0
+## 1.5.1
 
 ### New
 
@@ -25,12 +25,16 @@ the subscription User-Agent as `umiray/<version>`.
 - Connectivity checks of Fedora, Ubuntu, Debian, Arch, GNOME and KDE skip the fake-IP range.
 
 Install from this release's assets:
-- Windows x64: `umiray_1.5.0_x64-setup.exe`
-- Debian, Ubuntu: `umiray_1.5.0_amd64.deb` (`sudo apt install ./umiray_1.5.0_amd64.deb`)
-- Fedora: `umiray-1.5.0-1.x86_64.rpm` (`sudo dnf install ./umiray-1.5.0-1.x86_64.rpm`)
+- Windows x64: `umiray_1.5.1_x64-setup.exe`
+- Debian, Ubuntu: `umiray_1.5.1_amd64.deb` (`sudo apt install ./umiray_1.5.1_amd64.deb`)
+- Fedora: `umiray-1.5.1-1.x86_64.rpm` (`sudo dnf install ./umiray-1.5.1-1.x86_64.rpm`)
 - Arch: `umiray-bin` from the AUR, or `PKGBUILD` with `umiray.install` from this release (`makepkg -si`)
 
 Existing installations update from within the client; on Arch, with the package manager.
+
+## 1.5.0
+
+Not published: a check of the Linux build stopped the release. Its changes are in 1.5.1.
 
 ## 1.4.0
 
