@@ -236,11 +236,11 @@ fn node_sources() -> Vec<NodeSource> {
                 .map(|node| NodeFact {
                     name: node.name.clone(),
                     kind: node.kind.clone(),
-                    country: node
-                        .address
-                        .as_ref()
-                        .and_then(|address| geo.get(address))
-                        .and_then(|known| known.country.clone()),
+                    country: crate::nodes::geo::GeoCache::country(
+                        &geo,
+                        node.address.as_deref(),
+                        &node.name,
+                    ),
                 })
                 .collect(),
             id: source.id,

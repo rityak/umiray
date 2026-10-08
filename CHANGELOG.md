@@ -3,6 +3,35 @@
 The version comes from `package.json`, is mirrored in `Cargo.toml`, and appears in
 the subscription User-Agent as `umiray/<version>`.
 
+## 1.5.0
+
+### New
+
+- Linux: deb (Debian, Ubuntu 22.04 and newer), rpm (Fedora) and `umiray-bin` for Arch.
+  Works on GNOME, KDE Plasma and Xfce, on Wayland and X11.
+- TUN on Linux without running the client as root: the core gets network rights through
+  polkit for each start, and DNS goes through the tunnel with systemd-resolved too.
+- Kill switch on Linux (nftables); the system proxy on GNOME and KDE.
+- Options a system can't do well are hidden instead of half-working: qd, "Always as
+  administrator", ICMP ping and MTU probe are Windows-only for now.
+- Linux: logging out or shutting down with the VPN on gives the network back; if the session
+  ended too abruptly, the next sign-in does it.
+
+### Changes
+
+- Every node gets a country flag, also nodes with a hostname; flags and emoji in node names
+  are cut out, so the flag isn't shown twice. Countries are refreshed when a subscription is
+  added or updated and on "Refresh" in Connection.
+- Connectivity checks of Fedora, Ubuntu, Debian, Arch, GNOME and KDE skip the fake-IP range.
+
+Install from this release's assets:
+- Windows x64: `umiray_1.5.0_x64-setup.exe`
+- Debian, Ubuntu: `umiray_1.5.0_amd64.deb` (`sudo apt install ./umiray_1.5.0_amd64.deb`)
+- Fedora: `umiray-1.5.0-1.x86_64.rpm` (`sudo dnf install ./umiray-1.5.0-1.x86_64.rpm`)
+- Arch: `umiray-bin` from the AUR, or `PKGBUILD` with `umiray.install` from this release (`makepkg -si`)
+
+Existing installations update from within the client; on Arch, with the package manager.
+
 ## 1.4.0
 
 ### Changes

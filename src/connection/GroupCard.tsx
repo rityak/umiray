@@ -7,7 +7,7 @@ import { t, tn } from "../i18n";
 import Flag from "../shell/Flag";
 import GroupIcon from "./GroupIcon";
 import type { GroupEntry } from "./groups";
-import { load } from "./groups";
+import { load, plainName } from "./groups";
 import IconPicker from "./IconPicker";
 import NodeTiles from "./NodeTiles";
 
@@ -128,7 +128,7 @@ export default function GroupCard({
               <Text tone="muted" size="xs" className="flex items-center gap-1.5">
                 {t("Traffic through")}
                 <Flag country={carrier?.country ?? null} />
-                <Text size="xs">{lead}</Text>
+                <Text size="xs">{plainName(lead)}</Text>
               </Text>
               <Text size="xs">
                 <RollingNumber value={connections} />{" "}

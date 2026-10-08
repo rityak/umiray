@@ -15,14 +15,42 @@
 //! Цена, которую мы платим осознанно: в отладочной сборке у клиента **есть** своя
 //! консоль, и после первой мягкой остановки она потеряна — `eprintln!` уходит в никуда
 //! (GOTCHAS). В релизе терять нечего.
+//!
+//! На Linux всё это — один `SIGTERM`: сигнал адресуется процессу, а не консоли.
 
-/// Флаг запуска: своя группа процессов. Без него Ctrl+Break получила бы и наша.
+use std::process::Command;
+
+/// Без этого флага при каждом запуске мигает окно консоли.
 #[cfg(windows)]
-pub const NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+/// Своя группа процессов. Без неё Ctrl+Break получила бы и наша.
+#[cfg(windows)]
+const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 
 pub struct Console;
 
 impl Console {
+    /// Дочерний процесс без окна консоли. `own_group` — в своей группе процессов: ради
+    /// мягкой остановки на Windows (S-021) и чтобы Ctrl+C в терминале отладки не гасил
+    /// ядро раньше клиента на Linux.
+    pub fn hide(command: &mut Command, own_group: bool) {
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            let group = if own_group {
+                CREATE_NEW_PROCESS_GROUP
+            } else {
+                0
+            };
+            command.creation_flags(CREATE_NO_WINDOW | group);
+        }
+        #[cfg(unix)]
+        if own_group {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
+    }
+
     /// Попросить процесс выйти самому. `false` — не вышло попросить; звать `kill` всё равно
     /// придётся, эта функция только даёт шанс выйти по-человечески.
     #[cfg(windows)]
@@ -49,5 +77,11 @@ impl Console {
             AttachConsole(ATTACH_PARENT_PROCESS);
             sent
         }
+    }
+
+    #[cfg(unix)]
+    pub fn interrupt(pid: u32) -> bool {
+        // SAFETY: только посылка сигнала; чужой pid просто вернёт ошибку.
+        unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) == 0 }
     }
 }

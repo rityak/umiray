@@ -35,6 +35,16 @@ pub struct Effective {
 pub struct MihomoRenderer;
 
 impl MihomoRenderer {
+    /// Тот же конфиг для ядра без прав на TUN — пробного прогона (D-106). Метку исходящих
+    /// ставит сокету только процесс с `CAP_NET_ADMIN`: без прав каждое соединение ядра,
+    /// даже скачивание GeoSite, падает с «operation not permitted», и исправный конфиг
+    /// выглядел бы сломанным.
+    pub fn unprivileged(yaml: &str) -> Result<String> {
+        let mut map = Yaml::top_mapping(yaml)?;
+        map.remove(Value::from("routing-mark"));
+        serde_yaml::to_string(&Value::Mapping(map)).map_err(|e| AppError::invalid(e.to_string()))
+    }
+
     /// Файлы пользователя плюс источники — в тот самый файл, который запускает ядро.
     ///
     /// Порядок: сначала документы пользователя, потом наше. Что клиент ставит жёстко —
@@ -237,6 +247,12 @@ fn baseline(map: &mut Mapping, mode: Mode) {
             "mixed-port",
             Value::from(crate::config::files::LOCAL_PROXY_PORT),
         );
+    }
+    // Метка своих исходящих — по ней запрет выхода выпускает ядро там, где брандмауэр
+    // не умеет пускать по пути к бинарю (Linux, S-035). Жёстко: без неё kill switch
+    // запер бы и само ядро. Ставить её ядру позволяет только право на TUN.
+    if let (Mode::Tun, Some(mark)) = (mode, crate::system::killswitch::CORE_MARK) {
+        Yaml::set(map, "routing-mark", Value::from(mark));
     }
     Yaml::fill(map, "log-level", Value::from("info"));
     Yaml::fill(map, "allow-lan", Value::from(false));
@@ -1098,6 +1114,28 @@ mod tests {
         assert_eq!(out["dns"]["enable"], Value::from(false));
         // Выбор узла помним мы (D-039) — у ядра эта память должна быть выключена.
         assert_eq!(out["profile"]["store-selected"], Value::from(false));
+    }
+
+    /// Метка исходящих ядра (kill switch на Linux, S-035) — только в TUN и только там,
+    /// где её просит ОС; пробному прогону без прав её не достаётся.
+    #[test]
+    fn the_core_mark_goes_to_tun_but_not_to_the_dry_run() {
+        let tun = assembled(&["tun:\n  enable: true\n"], &[]).yaml;
+        let mark = crate::system::killswitch::CORE_MARK.map(Value::from);
+        assert_eq!(parsed_text(&tun).get("routing-mark").cloned(), mark);
+        let local = assembled(&["tun:\n  enable: false\n"], &[]).yaml;
+        assert!(parsed_text(&local).get("routing-mark").is_none());
+        let dry = MihomoRenderer::unprivileged(&tun).unwrap();
+        assert!(parsed_text(&dry).get("routing-mark").is_none());
+        assert_eq!(
+            parsed_text(&dry)["tun"],
+            parsed_text(&tun)["tun"],
+            "остальное — как было"
+        );
+    }
+
+    fn parsed_text(yaml: &str) -> Mapping {
+        Yaml::top_mapping(yaml).unwrap()
     }
 
     /// Режим приходит из самого конфига, а не из настроек рядом с ним (D-052).

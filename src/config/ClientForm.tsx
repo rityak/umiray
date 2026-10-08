@@ -14,6 +14,7 @@ import { useEffect, useState } from "react";
 import { Button, ChoiceCards, Code, ConfirmButton, Select, Switch, Tooltip } from "rootik";
 import * as api from "../api";
 import { ENGINES } from "../engines";
+import { has, unsupportedRows } from "../features";
 import { useCached } from "../hooks/useCached";
 import { type LanguagePreference, languagePreference, t, tk } from "../i18n";
 import { failure, type Message } from "../shell/Banner";
@@ -138,7 +139,7 @@ const LAUNCHES: { id: api.Launch; label: string; hint: string }[] = [
   {
     id: "smart",
     label: tk("Smart"),
-    hint: tk("With Windows: start in tray. From a shortcut: open the window"),
+    hint: tk("At sign-in: start in tray. From a shortcut: open the window"),
   },
   { id: "window", label: tk("Open window"), hint: tk("Start with the window open") },
   {
@@ -310,16 +311,16 @@ export default function ClientForm({
       parts: [
         {
           id: "launch-windows",
-          label: "Windows",
+          label: t("Sign-in"),
           settings: [
             {
               id: "autostart",
-              label: t("Launch with Windows"),
+              label: t("Launch at sign-in"),
               inline: true,
               hint: status.alwaysAdmin
                 ? t("via Windows Task Scheduler")
-                : t("via a startup entry visible in Task Manager"),
-              control: check(t("Launch with Windows"), status.autostart, onAutostart),
+                : t("via the system startup list"),
+              control: check(t("Launch at sign-in"), status.autostart, onAutostart),
             },
             {
               id: "always-admin",
@@ -449,7 +450,7 @@ export default function ClientForm({
                 <ChoiceCards
                   aria-label={t("Latency check method")}
                   value={method ?? undefined}
-                  options={cards(PINGS)}
+                  options={cards(PINGS.filter((ping) => ping.id !== "icmp" || has("icmpPing")))}
                   disabled={method === null}
                   onChange={choose}
                 />
@@ -727,7 +728,10 @@ export default function ClientForm({
 
   return (
     <Page
-      groups={without(groups, ENGINES[settings.engine].hiddenClientSettings)}
+      groups={without(
+        groups,
+        new Set([...ENGINES[settings.engine].hiddenClientSettings, ...unsupportedRows()]),
+      )}
       // Кнопок записи нет: каждая настройка клиента пишется сразу (D-117).
       bar={<SectionBar start={start} hint={hint} />}
     />

@@ -11,6 +11,7 @@ import {
   Textarea,
 } from "rootik";
 import * as api from "../api";
+import { has } from "../features";
 import { useCached } from "../hooks/useCached";
 import { t, tk } from "../i18n";
 import { failure, type Message, notice } from "../shell/Banner";
@@ -38,7 +39,7 @@ const STACKS: { id: api.Stack; label: string; hint: string }[] = [
   {
     id: "system",
     label: "system",
-    hint: tk("Windows stack: fastest, but not supported on every machine"),
+    hint: tk("the system network stack: fastest, but not supported on every machine"),
   },
   {
     id: "gvisor",
@@ -211,9 +212,10 @@ export default function CoreForm({ onMessage, onSaved, start, hint, onUnsavedCha
             {
               id: "mtu",
               label: "MTU",
-              hint: t(
-                "0 lets the core decide; otherwise 576–9000. Use the path MTU tool to measure",
-              ),
+              // Подбора MTU на этой ОС нет (D-174) — и отсылать к нему нечего.
+              hint: has("mtuProbe")
+                ? t("0 lets the core decide; otherwise 576–9000. Use the path MTU tool to measure")
+                : t("0 lets the core decide; otherwise 576–9000"),
               control: (
                 // Empty means zero: let the core decide.
                 <NumberInput

@@ -30,9 +30,18 @@ const NAME: &str = crate::paths::APP_NAME;
 /// показывать не надо (D-129).
 pub const AT_LOGON: &str = "--autostart";
 
+/// Флаг записи «вернуть сеть при входе» (D-175).
+pub const RESTORE: &str = "--restore";
+
 pub struct Autostart;
 
 impl Autostart {
+    /// ponytail: на Windows записи нет — залипший прокси снимает следующий запуск клиента.
+    /// Окажется, что выход из сеанса его оставляет, — та же запись через `RunOnce`.
+    pub fn set_restore(_on: bool) -> Result<()> {
+        Ok(())
+    }
+
     /// Подняла ли клиента система, а не человек (D-129).
     pub fn by_system() -> bool {
         let args: Vec<String> = std::env::args().collect();

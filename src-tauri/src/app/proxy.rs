@@ -8,7 +8,7 @@ use crate::app::engine::{Capture, Engine};
 use crate::app::state::AppState;
 use crate::error::Result;
 use crate::system::sysproxy::Backup;
-use crate::system::sysproxy::WinProxy;
+use crate::system::sysproxy::ProxySetting;
 
 pub struct SystemProxy;
 
@@ -32,28 +32,28 @@ impl SystemProxy {
         };
         if let Some(mut backup) = state.settings.get().proxy_backup {
             // Кто-то сменил прокси после нас — не отбираем его обратно при reconnect.
-            if !backup.ours.is_empty() && !WinProxy::is_ours(&backup.ours) {
+            if !backup.ours.is_empty() && !ProxySetting::is_ours(&backup.ours) {
                 return Ok(());
             }
-            if backup.ours == address && WinProxy::is_ours(&address) {
+            if backup.ours == address && ProxySetting::is_ours(&address) {
                 return Ok(());
             }
             let old = backup.ours.clone();
-            WinProxy::apply(&address)?;
+            ProxySetting::apply(&address)?;
             backup.ours = address;
             if let Err(why) = remember(state, Some(backup)) {
                 if !old.is_empty() {
-                    let _ = WinProxy::apply(&old);
+                    let _ = ProxySetting::apply(&old);
                 }
                 return Err(why);
             }
             return Ok(());
         }
-        let mut previous = WinProxy::read()?;
+        let mut previous = ProxySetting::read()?;
         previous.ours = address.clone();
         // Снимок должен пережить падение между записью реестра и следующей строкой.
         remember(state, Some(previous))?;
-        if let Err(why) = WinProxy::apply(&address) {
+        if let Err(why) = ProxySetting::apply(&address) {
             let _ = remember(state, None);
             return Err(why);
         }
@@ -69,7 +69,7 @@ impl SystemProxy {
         let Some(backup) = state.settings.get().proxy_backup else {
             return Ok(());
         };
-        WinProxy::restore(&backup)?;
+        ProxySetting::restore(&backup)?;
         remember(state, None)
     }
 }
@@ -80,7 +80,9 @@ impl SystemProxy {
 fn remember(state: &AppState, backup: Option<Backup>) -> Result<()> {
     state
         .settings
-        .update(|settings| settings.proxy_backup = backup)
+        .update(|settings| settings.proxy_backup = backup)?;
+    crate::app::leftovers::Leftovers::mark(state);
+    Ok(())
 }
 
 #[cfg(test)]

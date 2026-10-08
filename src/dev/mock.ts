@@ -15,6 +15,8 @@ const now = () => Math.floor(Date.now() / 1000);
 
 /// `?fresh` — первый запуск: ни источников, ни qd, мастер не пройден (D-162).
 const fresh = new URLSearchParams(location.search).has("fresh");
+/// `?linux` — возможности Linux (D-174): без qd, «всегда от администратора», ICMP и MTU.
+const linux = new URLSearchParams(location.search).has("linux");
 
 let status: api.Status = {
   active: null,
@@ -25,7 +27,7 @@ let status: api.Status = {
   trouble: null,
   port: 2080,
   corePresent: true,
-  qdPresent: !fresh,
+  qdPresent: !fresh && !linux,
   elevated: true,
   alwaysAdmin: false,
   systemProxy: false,
@@ -94,7 +96,8 @@ const DEMO_NODES: api.Node[] = [
   node("Estonia 0", "Trojan", "demo", "EE", 90, { fallback: true, method: "icmp" }),
   node("Finland 0", "Vless", "demo", "FI", 102),
   node("Sweden 1", "Hysteria2", "demo", "SE", 92),
-  node("Germany LTE", "Hysteria2", "demo", "DE", 193),
+  // Флаг в имени, как ставят панели: окно его вырезает (D-084).
+  node("\u{1F1E9}\u{1F1EA} Germany LTE", "Hysteria2", "demo", "DE", 193),
   node("UAE", "Vless", "demo", "AE", 95),
   node("Old SSR", "SSR", "demo", null, null, { supported: false }),
   node("vless-reality", "Vless", "links", "RU", 74, { edited: true }),
@@ -863,6 +866,19 @@ const HANDLERS: Record<string, (args: Args) => unknown> = {
   },
   system_device: () => "5f3c9a2e-1b7d-4c8e-9a0f-6d2b1e4c7a90",
   system_language: () => (navigator.language.startsWith("ru") ? "ru" : "en"),
+  system_features: () =>
+    linux
+      ? ["systemProxy", "killSwitch", "autostart"]
+      : [
+          "qd",
+          "alwaysAdmin",
+          "systemProxy",
+          "killSwitch",
+          "icmpPing",
+          "mtuProbe",
+          "autostart",
+          "selfUpdate",
+        ],
   system_reset: status_,
   system_autostart_set: ({ on }) => {
     status = { ...status, autostart: Boolean(on) };

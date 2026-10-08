@@ -9,9 +9,6 @@ use crate::core::mihomo::Mihomo;
 use crate::error::{AppError, Result};
 use crate::nodes::warp::WgKeys;
 
-#[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
 pub struct KeyGen;
 
 impl KeyGen {
@@ -25,11 +22,7 @@ impl KeyGen {
         }
         let mut command = Command::new(binary);
         command.args(["generate", "wg-keypair"]);
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(CREATE_NO_WINDOW);
-        }
+        crate::system::console::Console::hide(&mut command, false);
         let output = command
             .output()
             .map_err(|e| AppError::io(format!("Не удалось запустить ядро: {e}")))?;

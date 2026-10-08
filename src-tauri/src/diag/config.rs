@@ -16,9 +16,6 @@ use crate::error::{AppError, Result};
 /// и туда же смотрит `SAFE_PATHS`.
 const PROBE: &str = "config.test.yaml";
 
-#[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
 /// Что сказало ядро о готовом конфиге. Пусто — принял.
 ///
 /// Конфиг приходит уже собранным: собрать его здесь второй раз значило бы проверить
@@ -67,7 +64,10 @@ impl DryRun {
         let core = Mihomo::binary();
         std::fs::create_dir_all(Mihomo::workdir())?;
         let path = Mihomo::workdir().join(PROBE);
-        crate::atomic::AtomicFile::write(&path, yaml)?;
+        crate::atomic::AtomicFile::write(
+            &path,
+            crate::render::mihomo::MihomoRenderer::unprivileged(yaml)?,
+        )?;
 
         let mut command = Command::new(&core);
         command
@@ -76,11 +76,7 @@ impl DryRun {
             .arg(Mihomo::workdir())
             .arg("-f")
             .arg(&path);
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(CREATE_NO_WINDOW);
-        }
+        crate::system::console::Console::hide(&mut command, false);
 
         let output = command
             .output()

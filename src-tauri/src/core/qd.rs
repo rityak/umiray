@@ -236,7 +236,7 @@ impl Qd {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let mut child = CoreProcess::spawn(command, 0, "qd")?;
+        let mut child = CoreProcess::spawn(command, false, "qd")?;
 
         let hello = match child.stdout.take() {
             Some(out) => self.log.pump_until(out, HELLO),
@@ -286,6 +286,11 @@ impl Qd {
     }
 
     pub async fn install(&self) -> Result<String> {
+        use crate::system::features::{Feature, Features};
+        // Сборка ядра qd есть только под Windows (D-174): качать на Linux нечего.
+        if !Features::has(Feature::Qd) {
+            return Err(AppError::invalid("qd на этой системе не работает"));
+        }
         let client = Http::client()?;
         let feed = Http::fetch(&client, FEED, 1024 * 1024)
             .await

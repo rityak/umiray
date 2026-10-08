@@ -1,0 +1,24 @@
+# umiray для Arch и производных (D-173): deb релиза, перепакованный как есть — так устроены
+# пакеты -bin в AUR. deb собран на Ubuntu 22.04 (glibc 2.34) и на Arch встаёт без пересборки.
+# ponytail: sha256 у каждого выпуска свой — правится вместе с pkgver; сборка из исходников
+# (`umiray`) — когда кто-то попросит.
+pkgname=umiray-bin
+pkgver=1.4.0
+pkgrel=1
+pkgdesc="VPN client on the mihomo core"
+arch=('x86_64')
+url="https://github.com/rityak/umiray"
+license=('LicenseRef-umiray')
+depends=('webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator' 'polkit' 'util-linux' 'nftables'
+         'zenity')
+optdepends=('kdialog: окно выбора файла в стиле KDE')
+provides=('umiray')
+conflicts=('umiray')
+source=("umiray_${pkgver}_amd64.deb::${url}/releases/download/v${pkgver}/umiray_${pkgver}_amd64.deb")
+sha256sums=('SKIP')
+options=('!debug' '!strip')
+install=umiray.install
+
+package() {
+  bsdtar -xf data.tar.* -C "$pkgdir"
+}

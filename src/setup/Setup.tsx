@@ -3,13 +3,14 @@ import { useEffect, useState } from "react";
 import { Button, Callout, ChoiceCards, Dialog, Stepper, Toaster, toast } from "rootik";
 import * as api from "../api";
 import { MODES } from "../connection/ConnectionPath";
+import { available, has } from "../features";
 import { t, tk } from "../i18n";
 import * as qd from "../qd/api";
 import { failure, type Message } from "../shell/Banner";
 import Disputed, { ADVISED, type Choices } from "./Disputed";
 import RouteStep from "./RouteStep";
 import SourceStep from "./SourceStep";
-import Tuning, { TUNING } from "./Tuning";
+import Tuning, { TUNING, tunings } from "./Tuning";
 
 type Way = "recommended" | "manual";
 type StepId = "way" | "options" | "source" | "capture" | "route";
@@ -132,7 +133,7 @@ export default function Setup({
     if (way !== "recommended") return;
     const told: api.Report[] = [];
     const done = { ...tuned };
-    for (const item of TUNING) {
+    for (const item of tunings()) {
       const key = item.filtered ? dnsFilter : "";
       if (done[item.id] === key) continue;
       setDoing(t(item.doing));
@@ -226,9 +227,10 @@ export default function Setup({
               value: "recommended",
               label: t("Recommended"),
               icon: <Gauge />,
-              description: t(
-                "Sets up the core for every mode and picks DNS and MTU for this computer.",
-              ),
+              // Подбора MTU на этой ОС нет (D-174) — и обещать его нечего.
+              description: has("mtuProbe")
+                ? t("Sets up the core for every mode and picks DNS and MTU for this computer.")
+                : t("Sets up the core for every mode and picks DNS for this computer."),
             },
             {
               value: "manual",
@@ -264,7 +266,7 @@ export default function Setup({
         aria-label={t("Capture")}
         value={mode}
         onChange={setMode}
-        options={MODES.map((item) => ({
+        options={MODES.filter(available).map((item) => ({
           value: item.value,
           label: item.label,
           icon: item.icon,

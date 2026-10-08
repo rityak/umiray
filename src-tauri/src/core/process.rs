@@ -4,7 +4,6 @@
 
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Read};
-use std::os::windows::io::AsRawHandle;
 use std::process::{Child, Command};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -13,8 +12,6 @@ use crate::error::{AppError, Result};
 
 /// Сколько строк вывода держим. Единственный источник правды о том, почему ядро не встало.
 const LOG_LINES: usize = 500;
-/// Без этого флага при каждом запуске мигает окно консоли.
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// Кольцо на `LOG_LINES` строк: пишут в него и ядро, и клиент (`note`). У каждого ядра
 /// своё — строка клиента о qd в логе mihomo не видна тому, кто смотрит на qd.
@@ -107,26 +104,18 @@ pub struct CoreProcess;
 impl CoreProcess {
     /// Запустить без окна консоли и сразу в клетку (D-058): с этой секунды ядро не переживёт
     /// падение клиента. Не принятый клеткой процесс гасится тут же — ядро, способное пережить
-    /// клиента, хуже отказа (D-134).
-    ///
-    /// Между спавном и клеткой окно всё-таки есть — микросекунды.
-    /// ponytail: окно в микросекунды, лечится CREATE_SUSPENDED + ResumeThread.
-    pub fn spawn(mut command: Command, flags: u32, name: &str) -> Result<Child> {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(CREATE_NO_WINDOW | flags);
-        let mut child = command.spawn().map_err(|e| AppError::CoreFailed {
-            message: format!("Не удалось запустить {name}: {e}"),
+    /// клиента, хуже отказа (D-134). `own_group` — своя группа процессов (`Console::hide`).
+    pub fn spawn(mut command: Command, own_group: bool, name: &str) -> Result<Child> {
+        crate::system::console::Console::hide(&mut command, own_group);
+        crate::system::job::Job::spawn(command).map_err(|e| AppError::CoreFailed {
+            // Файл есть, а запускать нельзя: чаще всего каталог данных на разделе с `noexec`.
+            message: if e.kind() == std::io::ErrorKind::PermissionDenied {
+                format!("Не удалось запустить {name}: нет права на запуск файла — раздел с каталогом данных смонтирован с noexec?")
+            } else {
+                format!("Не удалось запустить {name}: {e}")
+            },
             log: Vec::new(),
-        })?;
-        if !crate::system::job::Job::attach(child.as_raw_handle()) {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(AppError::CoreFailed {
-                message: format!("Не удалось привязать {name} к процессу клиента"),
-                log: vec!["Windows job object не принял процесс ядра".into()],
-            });
-        }
-        Ok(child)
+        })
     }
 
     /// Дождаться выхода не дольше `grace`, потом убить: остановка обязана состояться.

@@ -47,13 +47,18 @@ pub struct Backup {
     pub bypass: Option<String>,
 }
 
-pub struct WinProxy;
+pub struct ProxySetting;
 
-impl WinProxy {
+impl ProxySetting {
+    /// Реестр прокси есть на любой Windows (D-174).
+    pub fn supported() -> bool {
+        true
+    }
+
     /// Наш ли адрес сейчас в реестре. По этому признаку и убираем за собой после падения:
     /// чужой прокси трогать нельзя, свой — обязаны.
     pub fn is_ours(address: &str) -> bool {
-        matches!(WinProxy::read(), Ok(current) if current.enabled && current.server == address)
+        matches!(ProxySetting::read(), Ok(current) if current.enabled && current.server == address)
     }
 
     /// Прочитать текущее состояние — чтобы потом было к чему вернуться.
@@ -70,9 +75,9 @@ impl WinProxy {
     /// Включить наш прокси. Возвращает снимок: что стояло раньше и что поставили мы.
     #[cfg(test)]
     pub fn enable(address: &str) -> Result<Backup> {
-        let mut previous = WinProxy::read()?;
+        let mut previous = ProxySetting::read()?;
         previous.ours = address.to_string();
-        if let Err(why) = WinProxy::apply(address) {
+        if let Err(why) = ProxySetting::apply(address) {
             let _ = put(&previous);
             return Err(why);
         }
@@ -82,7 +87,7 @@ impl WinProxy {
     /// Записать адрес без нового снимка. Нужен при повторном подъёме: исходное состояние
     /// уже сохранено, и подменять его снимком нашей же настройки нельзя.
     pub fn apply(address: &str) -> Result<()> {
-        let current = WinProxy::read()?;
+        let current = ProxySetting::read()?;
         if let Err(why) = write(address) {
             let _ = put(&current);
             return Err(why);
@@ -99,7 +104,7 @@ impl WinProxy {
     /// Снимок обязателен: без него неизвестно, наша ли запись в реестре, а «выключить любой
     /// прокси» — не наше дело. Кто прибирается, тот и предъявляет снимок.
     pub fn restore(previous: &Backup) -> Result<()> {
-        if !previous.ours.is_empty() && !WinProxy::is_ours(&previous.ours) {
+        if !previous.ours.is_empty() && !ProxySetting::is_ours(&previous.ours) {
             return Ok(());
         }
         put(previous)
@@ -127,7 +132,6 @@ fn put(previous: &Backup) -> Result<()> {
 
 /// Сказать системе, что настройки изменились. Без этого уже запущенный браузер продолжит
 /// ходить напрямую до своего перезапуска — и включение будет выглядеть не сработавшим.
-#[cfg(windows)]
 fn notify() {
     use windows_sys::Win32::Networking::WinInet::{
         InternetSetOptionW, INTERNET_OPTION_REFRESH, INTERNET_OPTION_SETTINGS_CHANGED,
@@ -147,9 +151,6 @@ fn notify() {
         );
     }
 }
-
-#[cfg(not(windows))]
-fn notify() {}
 
 #[cfg(test)]
 mod tests {

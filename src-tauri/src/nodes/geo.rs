@@ -54,6 +54,16 @@ pub type Cache = BTreeMap<String, Known>;
 pub struct GeoCache;
 
 impl GeoCache {
+    /// Страна узла: ответ сервиса по адресу, а если его нет — флаг, который панель
+    /// поставила в имя. Флаг — явная метка страны, а не текст вроде «Poland», который
+    /// разбирать мы не берёмся (D-084); окно его из имени вырезает и рисует рядом.
+    pub fn country(cache: &Cache, address: Option<&str>, name: &str) -> Option<String> {
+        address
+            .and_then(|address| cache.get(address))
+            .and_then(|known| known.country.clone())
+            .or_else(|| flag_in(name))
+    }
+
     pub fn load() -> Cache {
         Db::get(Table::State, ROW, "")
             .ok()
@@ -110,46 +120,78 @@ impl GeoCache {
         want
     }
 
-    /// Спросить про всё, чему подошёл срок, и запомнить.
-    ///
-    /// Последовательно и без спешки: узлов десятки, а не тысячи, и торопиться некуда —
-    /// зато чужой сервис не получает залп.
+    /// Спросить про всё, чему подошёл срок, и запомнить. Это фоновый такт: срок бережёт
+    /// чужой сервис от повторов.
     pub async fn refresh() -> Result<()> {
         let hours = GeoCache::hours();
-        if hours == 0 {
-            return Ok(());
-        }
-        let addresses: Vec<String> = crate::nodes::source_catalog::SourceCatalog::nodes()
-            .into_iter()
-            .filter_map(|node| node.address)
-            .collect();
-        let mut cache = GeoCache::load();
+        let cache = GeoCache::load();
         let want = GeoCache::due(
-            &addresses,
+            &addresses(),
             &cache,
             hours,
             crate::stamp::Stamp::now().unwrap_or_default(),
         );
-        if want.is_empty() {
+        ask_about(cache, want).await
+    }
+
+    /// Спросить заново про все узлы, невзирая на срок: подписку добавили или обновили
+    /// по кнопке. Адрес за тем же именем мог сменить страну, а прежний ответ мог быть
+    /// неверным — человек нажал «обновить» и ждёт свежих флагов, а не недельных.
+    /// `geo-hours: 0` по-прежнему значит «не спрашивать вовсе».
+    pub async fn renew() -> Result<()> {
+        if GeoCache::hours() == 0 {
             return Ok(());
         }
-        for address in want {
-            // Сервис не ответил — не запоминаем ничего: спросим на следующем такте, а не
-            // через неделю.
-            let Some(country) = ask(&address).await else {
-                continue;
-            };
-            cache.insert(
-                address,
-                // Часы недоступны — ноль: такая запись просто устареет и спросится заново.
-                Known {
-                    country,
-                    at: crate::stamp::Stamp::now().unwrap_or_default(),
-                },
-            );
-        }
-        save(&cache)
+        let mut want = addresses();
+        want.sort();
+        want.dedup();
+        ask_about(GeoCache::load(), want).await
     }
+}
+
+/// Флаг-эмодзи — пара «региональных букв» U+1F1E6…U+1F1FF; берём первую пару в имени.
+fn flag_in(name: &str) -> Option<String> {
+    let letter = |c: char| {
+        let code = c as u32;
+        (0x1F1E6..=0x1F1FF)
+            .contains(&code)
+            .then(|| char::from(b'A' + (code - 0x1F1E6) as u8))
+    };
+    let chars: Vec<char> = name.chars().collect();
+    chars
+        .windows(2)
+        .find_map(|pair| Some(format!("{}{}", letter(pair[0])?, letter(pair[1])?)))
+}
+
+fn addresses() -> Vec<String> {
+    crate::nodes::source_catalog::SourceCatalog::nodes()
+        .into_iter()
+        .filter_map(|node| node.address)
+        .collect()
+}
+
+/// Последовательно и без спешки: узлов десятки, а не тысячи, и торопиться некуда —
+/// зато чужой сервис не получает залп.
+async fn ask_about(mut cache: Cache, want: Vec<String>) -> Result<()> {
+    if want.is_empty() {
+        return Ok(());
+    }
+    for address in want {
+        // Сервис не ответил — не запоминаем ничего: спросим на следующем такте, а не
+        // через неделю.
+        let Some(country) = ask(&address).await else {
+            continue;
+        };
+        cache.insert(
+            address,
+            // Часы недоступны — ноль: такая запись просто устареет и спросится заново.
+            Known {
+                country,
+                at: crate::stamp::Stamp::now().unwrap_or_default(),
+            },
+        );
+    }
+    save(&cache)
 }
 
 fn save(cache: &Cache) -> Result<()> {
@@ -162,9 +204,8 @@ fn save(cache: &Cache) -> Result<()> {
 /// не знание, и в кэш оно не ложится. `Some(None)` — сервис ответил, но страны не знает.
 /// Список узлов показывается и без флагов, так что отказом это не бывает.
 async fn ask(address: &str) -> Option<Option<String>> {
-    let Some(ip) = resolve(address).await else {
-        return Some(None);
-    };
+    // Адрес не разрешился — это сбой сети, а не знание: в кэш он не ложится.
+    let ip = resolve(address).await?;
     // Мимо системного прокси: страна нужна серверу, а не нашему туннелю (GOTCHAS).
     let response = crate::http::Http::direct()
         .ok()?
@@ -185,19 +226,63 @@ fn country(text: &str) -> Option<String> {
     (code.len() == 2 && code.chars().all(|c| c.is_ascii_alphabetic())).then_some(code)
 }
 
+/// Кого спрашиваем, когда система вместо адреса отдала подменный. Адреса, а не имена:
+/// имя резолвера разрешилось бы в тот же подменный адрес. JSON-ответ у обоих одинаков.
+const RESOLVERS: &[&str] = &[
+    "https://1.1.1.1/dns-query?type=A&name=",
+    "https://8.8.8.8/resolve?type=A&name=",
+];
+
 /// `host:port` в адрес. Сервис имена хостов не принимает (S-017), поэтому резолвим сами.
+///
+/// Системе верим, пока она не врёт: под TUN с `fake-ip` она отвечает адресом из
+/// `198.18.0.0/15`, где сервера быть не может, — ipinfo страны такого не знает, и флаги
+/// пропадали ровно у узлов, записанных именем. Тогда спрашиваем DoH: его запрос
+/// идёт через туннель, но ответ — настоящий.
 async fn resolve(address: &str) -> Option<String> {
+    let (host, _) = address.rsplit_once(':')?;
+    let host = host.trim_start_matches('[').trim_end_matches(']');
     // Уже адрес — не тревожим DNS.
-    if let Some((host, _)) = address.rsplit_once(':') {
-        if host.parse::<std::net::IpAddr>().is_ok() {
-            return Some(host.to_string());
+    if host.parse::<std::net::IpAddr>().is_ok() {
+        return Some(host.to_string());
+    }
+    if let Ok(found) = tokio::net::lookup_host(address).await {
+        if let Some(ip) = found.map(|socket| socket.ip()).find(|ip| !fake(ip)) {
+            return Some(ip.to_string());
         }
     }
-    tokio::net::lookup_host(address)
-        .await
-        .ok()?
-        .next()
-        .map(|socket| socket.ip().to_string())
+    let client = crate::http::Http::direct().ok()?;
+    for resolver in RESOLVERS {
+        let Ok(response) = client
+            .get(format!("{resolver}{host}"))
+            .header("accept", "application/dns-json")
+            .send()
+            .await
+        else {
+            continue;
+        };
+        if let Some(ip) = response.text().await.ok().and_then(|text| answer(&text)) {
+            return Some(ip);
+        }
+    }
+    None
+}
+
+/// Подменный адрес ядра: `198.18.0.0/15` зарезервирован под испытания и в интернете
+/// не встречается.
+fn fake(ip: &std::net::IpAddr) -> bool {
+    matches!(ip, std::net::IpAddr::V4(v4) if v4.octets()[0] == 198 && v4.octets()[1] & 0xFE == 18)
+}
+
+/// Первый адрес из ответа DoH в JSON. Ответ чужой — проверяем, что это правда адрес.
+fn answer(text: &str) -> Option<String> {
+    let reply: serde_json::Value = serde_json::from_str(text).ok()?;
+    reply["Answer"]
+        .as_array()?
+        .iter()
+        .filter_map(|record| record["data"].as_str())
+        .find_map(|data| data.parse::<std::net::Ipv4Addr>().ok())
+        .map(|ip| ip.to_string())
 }
 
 #[cfg(test)]
@@ -217,6 +302,48 @@ mod tests {
         let address = vec!["pl1:443".to_string()];
         assert!(GeoCache::due(&address, &cache, 168, 3599).is_empty());
         assert_eq!(GeoCache::due(&address, &cache, 168, 3600), address);
+    }
+
+    #[test]
+    fn a_flag_in_the_name_stands_in_for_an_unknown_country() {
+        let mut cache = Cache::new();
+        cache.insert("de:443".into(), known(1));
+        assert_eq!(
+            GeoCache::country(&cache, Some("de:443"), "\u{1F1F7}\u{1F1FA} LTE").as_deref(),
+            Some("NL"),
+            "ответ сервиса главнее флага в имени"
+        );
+        assert_eq!(
+            GeoCache::country(&cache, Some("ru:443"), "\u{1F1F7}\u{1F1FA} CapyHub LTE 1")
+                .as_deref(),
+            Some("RU")
+        );
+        assert_eq!(
+            GeoCache::country(&cache, None, "Poland 1"),
+            None,
+            "текст не разбираем"
+        );
+        assert_eq!(
+            GeoCache::country(&cache, None, "\u{1F680} fast"),
+            None,
+            "не флаг"
+        );
+    }
+
+    #[test]
+    fn a_fake_ip_is_not_an_address() {
+        assert!(fake(&"198.18.0.4".parse().unwrap()));
+        assert!(fake(&"198.19.255.1".parse().unwrap()));
+        assert!(!fake(&"198.20.0.1".parse().unwrap()));
+        assert!(!fake(&"140.82.121.4".parse().unwrap()));
+    }
+
+    #[test]
+    fn a_doh_answer_gives_its_first_address() {
+        let reply = r#"{"Status":0,"Answer":[{"type":5,"data":"cdn.example."},{"type":1,"data":"140.82.121.4"}]}"#;
+        assert_eq!(answer(reply).as_deref(), Some("140.82.121.4"));
+        assert_eq!(answer(r#"{"Status":3}"#), None);
+        assert_eq!(answer("<html>"), None);
     }
 
     #[test]

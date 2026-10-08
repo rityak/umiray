@@ -5,11 +5,11 @@
 <h1 align="center">Umiray</h1>
 
 <p align="center">
-  VPN-клиент для Windows на ядре <a href="https://github.com/MetaCubeX/mihomo">Mihomo</a>.<br>
+  VPN-клиент для Windows и Linux на ядре <a href="https://github.com/MetaCubeX/mihomo">Mihomo</a>.<br>
   Tauri 2 · Rust · React · <a href="https://github.com/rityak/rootik">Rootik</a>
 </p>
 
-<p align="center">1.4.0 · <a href="README.md">English</a></p>
+<p align="center">1.5.0 · <a href="README.md">English</a></p>
 
 ![Соединение](screenshots/connection.png)
 
@@ -38,13 +38,23 @@
 
 ## Запуск
 
-Скачайте установщик Windows x64 `*-setup.exe` из [Releases](https://github.com/rityak/umiray/releases/latest).
+Скачайте из [Releases](https://github.com/rityak/umiray/releases/latest):
+
+- **Windows x64** — `umiray_<версия>_x64-setup.exe`.
+- **Debian, Ubuntu, Mint** (Debian 12+, Ubuntu 22.04+) — `umiray_<версия>_amd64.deb`:
+  `sudo apt install ./umiray_<версия>_amd64.deb`.
+- **Fedora** и другие системы с rpm — `umiray-<версия>-1.x86_64.rpm`:
+  `sudo dnf install ./umiray-<версия>-1.x86_64.rpm`.
+- **Arch** и производные — `umiray-bin` из AUR (`yay -S umiray-bin`) или `PKGBUILD`
+  и `umiray.install` из релиза: `makepkg -si`.
+
 Ядро mihomo клиент скачает с официальной страницы релизов при первом запуске.
 
-Для TUN нужны права администратора. Клиент может создать задачу в планировщике,
-чтобы запускаться с правами без подтверждения UAC каждый раз.
+Для TUN нужны дополнительные права. На Windows клиент может создать задачу в планировщике,
+чтобы запускаться с правами без подтверждения UAC каждый раз. На Linux клиент работает
+от вас, а права на сеть через polkit получает только ядро; в своём сеансе пароль не спрашивается.
 
-Данные хранятся в `%LOCALAPPDATA%\umiray`.
+Данные хранятся в `%LOCALAPPDATA%\umiray` на Windows и в `~/.local/share/umiray` на Linux.
 
 Если установлена русская раскладка клавиатуры, интерфейс выбирает русский язык.
 В остальных случаях — английский.
@@ -59,16 +69,18 @@ npm run tauri dev
 npm run tauri build -- --no-bundle
 ```
 
-Бинарник: `src-tauri/target/release/umiray.exe`.
+Бинарник: `src-tauri/target/release/umiray.exe` (`umiray` на Linux). Пакеты Linux:
+`npx tauri build --bundles deb,rpm`; собирайте на Ubuntu 22.04 — тогда они встанут и на старые системы.
 
 Проверки: `npm run lint`, `npm test`, `npx tsc --noEmit` и `cargo test` в `src-tauri`.
 `npm run dev` открывает интерфейс в браузере с демонстрационными данными.
 
 ## Статус
 
-Версия 1.0 для Windows x64. Ошибки — в [Issues](https://github.com/rityak/umiray/issues).
+Windows x64 и Linux x86_64. Ошибки — в [Issues](https://github.com/rityak/umiray/issues).
 
 Обновления проверяются при запуске и в «Настройки» → Umiray Settings → «Обслуживание».
 Установка проверяет подпись, отключает VPN и сохраняет пользовательские данные.
+На Arch обновления ставит менеджер пакетов; клиент только сообщает, что вышла новая версия.
 
 Выпуск новой версии: [RELEASING.md](RELEASING.md).

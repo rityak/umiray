@@ -56,6 +56,22 @@ impl Elevation {
         }
         Ok(())
     }
+
+    /// Почему TUN не поднять, если прав нет.
+    pub fn missing() -> String {
+        "Для режима TUN нужны права администратора — перезапустите приложение".into()
+    }
+
+    /// Права у всего клиента: отказать в них при запуске ядра некому.
+    pub fn refused(_status: std::process::ExitStatus) -> Option<String> {
+        None
+    }
+
+    /// Команда запуска ядра в TUN. На Windows права у всего процесса клиента, и ядро
+    /// наследует их само; адаптер ему называет конфиг.
+    pub fn privileged(binary: &std::path::Path, _device: &str) -> std::process::Command {
+        std::process::Command::new(binary)
+    }
 }
 
 fn query_elevation() -> bool {

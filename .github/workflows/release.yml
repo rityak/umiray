@@ -62,8 +62,92 @@ jobs:
           uploadUpdaterJson: true
           updaterJsonPreferNsis: true
           args: --bundles nsis -- --locked
-      - name: Publish complete release
+
+  # deb и rpm (D-173). Ubuntu 22.04 — самый старый glibc из поддерживаемых (2.34): собранное
+  # на нём ставится и на Debian 12+, и на свежей Fedora, а Arch перепаковывает этот же deb.
+  # Пакеты и подписи ложатся в тот же черновик; latest.json дописывает задание publish.
+  linux:
+    runs-on: ubuntu-22.04
+    needs: release
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
+      - run: npm ci
+      - run: cargo test --locked
+        working-directory: src-tauri
+      - run: cargo clippy --locked --all-targets -- -D warnings
+        working-directory: src-tauri
+      - name: Build signed deb and rpm
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx tauri build --bundles deb,rpm -- --locked
+      # Пакет обязан встать на чистую Ubuntu 22.04 со своими зависимостями, а бинарь —
+      # загрузить библиотеки. Помощник отвечает без окна: так проверяется запуск без дисплея.
+      - name: Install the deb and start the binary
+        run: |
+          deb=$(ls src-tauri/target/release/bundle/deb/*.deb)
+          dpkg-deb -c "$deb" | grep -q polkit-1/actions/com.umiray.client.policy
+          sudo apt-get install -y "./$deb"
+          set +e; umiray --helper check; code=$?; set -e
+          test "$code" = 1
+          pkaction --action-id com.umiray.client.helper
+      - name: Upload packages to the draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: gh release edit "$env:RELEASE_TAG" --draft=false --latest --repo "$env:GITHUB_REPOSITORY"
+        run: >-
+          gh release upload "$TAG" --clobber --repo "$GITHUB_REPOSITORY"
+          src-tauri/target/release/bundle/deb/*.deb src-tauri/target/release/bundle/deb/*.deb.sig
+          src-tauri/target/release/bundle/rpm/*.rpm src-tauri/target/release/bundle/rpm/*.rpm.sig
+
+  # latest.json получает deb и rpm (ключи linux-x86_64-deb/-rpm), Arch — PKGBUILD с sha256
+  # этого выпуска. В AUR пакет уходит, только если задан секрет AUR_SSH_PRIVATE_KEY.
+  publish:
+    runs-on: ubuntu-latest
+    needs: [release, linux]
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ github.ref_name }}
+      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Add Linux packages to latest.json and build the Arch package
+        run: |
+          mkdir out
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir out --pattern latest.json --pattern '*.deb' --pattern '*.deb.sig' --pattern '*.rpm' --pattern '*.rpm.sig'
+          node tools/linux-release.mjs "${TAG#v}" out
+          gh release upload "$TAG" --clobber --repo "$GITHUB_REPOSITORY" out/latest.json out/PKGBUILD out/umiray.install
+      - name: Publish to the AUR
+        if: env.AUR_SSH_PRIVATE_KEY != ''
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          ssh-keyscan -t ed25519 aur.archlinux.org >> ~/.ssh/known_hosts
+          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/aur"
+          git clone ssh://aur@aur.archlinux.org/umiray-bin.git aur
+          cp out/PKGBUILD out/.SRCINFO out/umiray.install aur/
+          cd aur
+          git add PKGBUILD .SRCINFO umiray.install
+          git -c user.name="umiray release" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "umiray-bin ${TAG#v}"
+          git push origin HEAD:master
+      - name: Publish complete release
+        run: gh release edit "$TAG" --draft=false --latest --repo "$GITHUB_REPOSITORY"

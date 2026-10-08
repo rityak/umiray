@@ -1,9 +1,6 @@
 //! Страница в браузере по умолчанию: окно клиента ссылок не открывает — WebView2 поднял бы
 //! на них своё окно без адресной строки.
 
-use windows_sys::Win32::UI::Shell::ShellExecuteW;
-use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-
 use crate::error::{AppError, Result};
 
 /// Куда окну можно отправить человека. Адрес приходит из вебвью: открыть «что угодно» значило
@@ -18,24 +15,41 @@ impl Browser {
         if !allowed(url) {
             return Err(AppError::invalid(format!("Не открываю: {url}")));
         }
-        let verb = wide("open");
-        let file = wide(url);
-        let result = unsafe {
-            ShellExecuteW(
-                std::ptr::null_mut(),
-                verb.as_ptr(),
-                file.as_ptr(),
-                std::ptr::null(),
-                std::ptr::null(),
-                SW_SHOWNORMAL,
-            )
-        };
-        // ShellExecuteW отдаёт код <= 32, если открыть не удалось.
-        if (result as isize) <= 32 {
-            return Err(AppError::io(format!("Браузер не открылся: {url}")));
-        }
-        Ok(())
+        open(url)
     }
+}
+
+/// Linux: `xdg-open` передаёт адрес браузеру, выбранному в окружении.
+#[cfg(not(windows))]
+fn open(url: &str) -> Result<()> {
+    std::process::Command::new("xdg-open")
+        .arg(url)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| AppError::io(format!("Браузер не открылся: {e}")))
+}
+
+#[cfg(windows)]
+fn open(url: &str) -> Result<()> {
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    let verb = wide("open");
+    let file = wide(url);
+    let result = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            verb.as_ptr(),
+            file.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+    // ShellExecuteW отдаёт код <= 32, если открыть не удалось.
+    if (result as isize) <= 32 {
+        return Err(AppError::io(format!("Браузер не открылся: {url}")));
+    }
+    Ok(())
 }
 
 fn allowed(url: &str) -> bool {
@@ -46,6 +60,7 @@ fn allowed(url: &str) -> bool {
             .any(|c| c.is_whitespace() || c.is_control() || c == '"')
 }
 
+#[cfg(windows)]
 fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
 }

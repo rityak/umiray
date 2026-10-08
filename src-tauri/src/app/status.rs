@@ -16,7 +16,7 @@ use crate::config::mode::Mode;
 use crate::core::EngineId;
 use crate::system::autostart::Autostart;
 use crate::system::elevation::Elevation;
-use crate::system::sysproxy::WinProxy;
+use crate::system::sysproxy::ProxySetting;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -81,7 +81,7 @@ impl Status {
         let running = state.running();
         // Один поход в реестр на весь статус: он опрашивается раз в 1.5 с, и читать
         // одно и то же дважды незачем.
-        let registry = WinProxy::read().unwrap_or_default();
+        let registry = ProxySetting::read().unwrap_or_default();
         let ours = SystemProxy::address(
             running
                 .as_ref()
@@ -126,13 +126,13 @@ impl Status {
 
     /// Причина, по которой окну стоит предложить перезапуск. Только для живых проверок:
     /// рабочему коду  уезжает целиком в вебвью и внутрь никто не смотрит.
-    #[cfg(test)]
+    #[cfg(all(test, windows))]
     pub fn restart_reason(&self) -> Option<&str> {
         self.restart_reason.as_deref()
     }
 
     /// Важнейшая жалоба. Тоже только для живых проверок.
-    #[cfg(test)]
+    #[cfg(all(test, windows))]
     pub fn trouble(&self) -> Option<&str> {
         self.trouble.as_ref().map(|trouble| trouble.text.as_str())
     }

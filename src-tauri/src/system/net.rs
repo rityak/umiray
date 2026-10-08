@@ -1,4 +1,6 @@
-//! Что Windows думает про сеть: маршруты по умолчанию, свои резолверы, хозяин порта.
+//! Что система думает про сеть: маршруты по умолчанию, свои резолверы, хозяин порта.
+//!
+//! Linux отвечает файлами `/proc/net` и утилитой `ss` — их вывод от языка не зависит.
 //!
 //! Читаем командлетами `NetTCPIP`/`DnsClient`, а не `route print` и `ipconfig`: их вывод
 //! переведён на язык системы и разбит по ширине консоли, а мы уже обжигались на
@@ -11,7 +13,9 @@
 #[cfg(test)]
 use std::collections::HashSet;
 
-use crate::error::{AppError, Result};
+#[cfg(windows)]
+use crate::error::AppError;
+use crate::error::Result;
 
 /// Маршрут по умолчанию: чей адаптер и с какой метрикой. Побеждает наименьшая сумма
 /// метрик — по ней и видно, идёт ли трафик в туннель или мимо него.
@@ -52,16 +56,12 @@ fn powershell(script: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(&out.stdout).replace('\r', ""))
 }
 
-#[cfg(not(windows))]
-fn powershell(_script: &str) -> Result<String> {
-    Err(AppError::io("Только Windows".to_string()))
-}
-
 pub struct NetInfo;
 
 impl NetInfo {
     /// Маршруты по умолчанию — все, а не один: их бывает несколько, и вопрос как раз в том,
     /// чей выиграл.
+    #[cfg(windows)]
     pub fn default_routes() -> Result<Vec<Route>> {
         let raw = powershell(
         "Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | \
@@ -75,7 +75,7 @@ impl NetInfo {
 
     /// DNS поднятых физических адаптеров до появления TUN. Берём оба семейства: IPv6 DNS
     /// может быть единственным путём утечки, даже когда основной маршрут IPv4.
-    #[cfg(test)]
+    #[cfg(all(test, windows))]
     pub fn physical_resolvers() -> Result<Vec<String>> {
         let raw = powershell(
         "$physical = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue | \
@@ -90,6 +90,7 @@ impl NetInfo {
     /// Кто слушает TCP-порт: имя процесса с номером, а если имени не прочитать — один номер
     /// (D-133). Спрашивается только на отказе: PowerShell стоит полсекунды, а удачному
     /// запуску ответ не нужен вовсе.
+    #[cfg(windows)]
     pub fn port_owner(port: u16) -> Option<String> {
         let raw = powershell(&format!(
         "Get-NetTCPConnection -LocalPort {port} -State Listen -ErrorAction SilentlyContinue | \
@@ -99,8 +100,60 @@ impl NetInfo {
     .ok()?;
         parse_owner(&raw)
     }
+
+    /// Linux: один маршрут — тот, что ОС выберет для адреса в интернете (`ip route get`).
+    /// Таблица `main` здесь не отвечает: ядро в TUN уводит трафик правилами `ip rule`
+    /// в свою таблицу, а маршрут по умолчанию в `main` остаётся физическим — по нему
+    /// исправный туннель выглядел бы обворованным.
+    #[cfg(not(windows))]
+    pub fn default_routes() -> Result<Vec<Route>> {
+        let out = std::process::Command::new("ip")
+            .args(["-o", "route", "get", "1.1.1.1"])
+            .output()?;
+        Ok(chosen_route(&String::from_utf8_lossy(&out.stdout))
+            .into_iter()
+            .collect())
+    }
+
+    #[cfg(not(windows))]
+    pub fn port_owner(port: u16) -> Option<String> {
+        let out = std::process::Command::new("ss")
+            .args(["-Htlnp", &format!("sport = :{port}")])
+            .output()
+            .ok()?;
+        ss_owner(&String::from_utf8_lossy(&out.stdout))
+    }
 }
 
+/// `1.1.1.1 via 198.18.0.2 dev Meta table 2022 src 198.18.0.1 uid 1000` → адаптер и шлюз.
+#[cfg(not(windows))]
+fn chosen_route(line: &str) -> Option<Route> {
+    let words: Vec<&str> = line.split_whitespace().collect();
+    let after = |key: &str| {
+        words
+            .iter()
+            .position(|word| *word == key)
+            .and_then(|at| words.get(at + 1))
+            .map(|word| (*word).to_string())
+    };
+    Some(Route {
+        adapter: after("dev")?,
+        gateway: after("via").unwrap_or_default(),
+        metric: 0,
+    })
+}
+
+/// `users:(("mihomo",pid=4242,fd=7))` → `mihomo (PID 4242)`. Чужой процесс `ss` без прав
+/// не называет — тогда ответа нет: номера без имени тоже нет.
+#[cfg(not(windows))]
+fn ss_owner(raw: &str) -> Option<String> {
+    let users = raw.lines().next()?.split("users:((\"").nth(1)?;
+    let (name, rest) = users.split_once('"')?;
+    let pid = rest.split("pid=").nth(1)?.split(',').next()?;
+    Some(format!("{name} (PID {pid})"))
+}
+
+#[cfg(any(windows, test))]
 fn parse_owner(raw: &str) -> Option<String> {
     let parts = fields(raw, 2).next()?;
     Some(if parts[1].is_empty() {
@@ -110,6 +163,7 @@ fn parse_owner(raw: &str) -> Option<String> {
     })
 }
 
+#[cfg(any(windows, test))]
 fn parse_routes(raw: &str) -> Vec<Route> {
     fields(raw, 3)
         .filter_map(|parts| {
@@ -151,6 +205,7 @@ fn resolver_servers(raw: &str) -> Vec<String> {
 /// Разбор строк вида `a|b|c`. Разделитель — вертикальная черта: в именах адаптеров
 /// («Ethernet 2», «Подключение по локальной сети») бывают и пробелы, и запятые,
 /// а черты не бывает.
+#[cfg(any(windows, test))]
 fn fields(raw: &str, count: usize) -> impl Iterator<Item = Vec<&str>> {
     raw.lines().filter_map(move |line| {
         let parts: Vec<&str> = line.trim().split('|').map(str::trim).collect();
@@ -188,6 +243,29 @@ mod tests {
         );
         assert_eq!(parse_owner("4|\n").as_deref(), Some("процесс 4"));
         assert_eq!(parse_owner(""), None, "никто не слушает — и сказать нечего");
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn the_route_the_kernel_would_take_is_named() {
+        let tunnel =
+            "1.1.1.1 via 198.18.0.2 dev Meta table 2022 src 198.18.0.1 uid 1000 \\    cache \n";
+        let route = chosen_route(tunnel).unwrap();
+        assert_eq!(
+            (route.adapter.as_str(), route.gateway.as_str()),
+            ("Meta", "198.18.0.2")
+        );
+        let direct = "1.1.1.1 via 192.168.232.2 dev ens33 src 192.168.232.129 uid 0 \n";
+        assert_eq!(chosen_route(direct).unwrap().adapter, "ens33");
+        assert!(chosen_route("").is_none(), "нет ответа — нет и маршрута");
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn ss_names_the_listener() {
+        let line = "LISTEN 0 4096 127.0.0.1:7890 0.0.0.0:* users:((\"mihomo\",pid=4242,fd=7))\n";
+        assert_eq!(ss_owner(line).as_deref(), Some("mihomo (PID 4242)"));
+        assert_eq!(ss_owner(""), None);
     }
 
     #[test]

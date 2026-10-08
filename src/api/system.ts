@@ -1,8 +1,12 @@
-/// Windows вокруг клиента: права, автозапуск, kill switch, сброс.
+/// Система вокруг клиента: права, автозапуск, kill switch, сброс.
 
 import { z } from "zod";
+import { Features } from "../features";
 import { call, done } from "./call";
 import { Status } from "./core";
+
+/// Что эта ОС умеет хорошо (D-174).
+export const systemFeatures = () => call(Features, "system_features");
 
 export const systemRelaunchElevated = () => call(done, "system_relaunch_elevated");
 /// Сброс всего, кроме скачанного ядра и идентификатора устройства. Ядро останавливает сам.

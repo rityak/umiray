@@ -24,5 +24,5 @@ pub(crate) mod wire;
 pub use report::Report;
 
 /// Стенд наружу — замерам жизненного цикла (S-020): им нужно живое ядро на своих портах.
-#[cfg(test)]
+#[cfg(all(test, windows))]
 pub use bench::Bench;

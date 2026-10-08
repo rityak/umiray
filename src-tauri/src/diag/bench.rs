@@ -19,9 +19,6 @@ use crate::core::mihomo::controller::Controller;
 use crate::core::mihomo::Mihomo;
 use crate::error::{AppError, Result};
 
-#[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
 /// Сколько ждём, пока ядро ответит на `/version`. Ядро без правил и без geosite встаёт
 /// за десятки миллисекунд; секунда — потолок на медленную машину.
 const READY: Duration = Duration::from_millis(1000);
@@ -69,11 +66,7 @@ impl Bench {
             .arg("-f")
             .arg(&path)
             .args(controller.args());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(CREATE_NO_WINDOW);
-        }
+        crate::system::console::Console::hide(&mut command, false);
         let child = command
             .spawn()
             .map_err(|e| AppError::io(format!("Стенд не запустился: {e}")))?;
@@ -102,17 +95,17 @@ impl Bench {
 
     /// Внутренности стенда — только замерам (S-020). Рабочему коду они не нужны: он
     /// спрашивает стенд про имена, а не про то, как тот устроен.
-    #[cfg(test)]
+    #[cfg(all(test, windows))]
     pub fn controller(&self) -> &Controller {
         &self.controller
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, windows))]
     pub fn config_path(&self) -> std::path::PathBuf {
         self.dir.join("config.yaml")
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, windows))]
     pub fn pid(&self) -> u32 {
         self.child.id()
     }

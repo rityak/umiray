@@ -7,7 +7,7 @@ import { t } from "../i18n";
 import Flag from "../shell/Flag";
 import { hide } from "../shell/secret";
 import { isExit } from "./exits";
-import { share } from "./groups";
+import { plainName, share } from "./groups";
 import NodeDelay from "./NodeDelay";
 
 /// Who is in AUTO while its make-up is edited (D-172): a switch on every tile.
@@ -111,7 +111,7 @@ const Tile = memo(function Tile({
       title={
         <span className="flex min-w-0 items-center gap-2">
           {look ? <look.Icon className="size-4 shrink-0" /> : <Flag country={node.country} />}
-          <span className="truncate">{node.name}</span>
+          <span className="truncate">{plainName(node.name)}</span>
         </span>
       }
       actions={

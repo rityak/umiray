@@ -49,6 +49,12 @@ dns:
     - '*.example'
     - +.msftconnecttest.com
     - +.msftncsi.com
+    - nmcheck.gnome.org
+    - fedoraproject.org
+    - connectivity-check.ubuntu.com
+    - network-test.debian.org
+    - ping.archlinux.org
+    - networkcheck.kde.org
     - time.windows.com
     - time.*.com
     - time.*.gov

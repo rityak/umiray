@@ -2,6 +2,7 @@ import { FileCog, Ruler, Server } from "lucide-react";
 import type { ReactNode } from "react";
 import { Item, ItemGroup, Switch, Text } from "rootik";
 import type * as api from "../api";
+import { available, type Feature } from "../features";
 import { t, tk } from "../i18n";
 
 type Tune = {
@@ -12,6 +13,8 @@ type Tune = {
   /// Подпись кнопки, пока идёт замер.
   doing: string;
   icon: ReactNode;
+  /// Подбор, которого эта ОС не умеет, мастер не показывает и не запускает (D-174).
+  feature?: Feature;
   /// Итог зависит от блокировки рекламы: её смена перемеряет только такие подборы.
   filtered?: true;
 };
@@ -41,8 +44,12 @@ export const TUNING: Tune[] = [
     what: tk("Fits the packet size to your network so traffic in TUN isn't split."),
     doing: tk("Measuring MTU…"),
     icon: <Ruler />,
+    feature: "mtuProbe",
   },
 ];
+
+/// Подборы, которые есть на этой ОС.
+export const tunings = () => TUNING.filter(available);
 
 type Props = {
   /// Блокировать рекламу: DNS только из блокирующих и готовый набор правил (D-169).
@@ -58,7 +65,7 @@ export default function Tuning({ ads, onAds }: Props) {
         {t("What Recommended does")}
       </Text>
       <ItemGroup>
-        {TUNING.map((tune) => (
+        {tunings().map((tune) => (
           <Item key={tune.id} icon={tune.icon} title={tune.title} description={t(tune.what)} />
         ))}
       </ItemGroup>

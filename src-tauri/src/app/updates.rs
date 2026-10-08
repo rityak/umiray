@@ -65,6 +65,14 @@ impl Updates {
     }
 
     pub async fn install(app: &AppHandle, progress: Channel<Progress>) -> Result<()> {
+        use crate::system::features::{Feature, Features};
+        // Клиента поставил чужой менеджер пакетов (Arch из deb, D-173): ставить поверх него
+        // нечем, и обновляет его тот же менеджер.
+        if !Features::has(Feature::SelfUpdate) {
+            return Err(AppError::invalid(
+                "Этот клиент обновляет менеджер пакетов системы — обновите его там.",
+            ));
+        }
         let updates = app.state::<Updates>();
         // One check or installation at a time. A check cannot replace the verified update.
         let pending = updates.0.lock().await;
@@ -88,7 +96,7 @@ impl Updates {
             .map_err(|error| AppError::network(error.to_string()))?;
         // download() verifies the signature. Failed downloads leave the VPN untouched.
         let state = app.state::<AppState>();
-        let _transition = state.connection.stop_for_update(app, &state).await?;
+        let transition = state.connection.stop_for_update(app, &state).await?;
         let _ = progress.send(Progress {
             phase: "install",
             downloaded,
@@ -96,6 +104,11 @@ impl Updates {
         });
         update
             .install(bytes)
-            .map_err(|error| AppError::io(error.to_string()))
+            .map_err(|error| AppError::io(error.to_string()))?;
+        // Установщик Windows закрывает клиента сам и сюда не возвращается; пакет deb или rpm
+        // меняет файл под работающим процессом — новую версию поднимает перезапуск. Замок
+        // перехода — до него: выход гасит ядра под тем же замком и ждал бы его вечно.
+        drop(transition);
+        app.restart()
     }
 }

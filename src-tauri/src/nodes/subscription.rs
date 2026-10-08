@@ -27,7 +27,7 @@ impl Subscription {
         let response = crate::http::Http::client()?
             .get(url)
             .header("X-Hwid", Device::hwid()?)
-            .header("X-Device-Os", "Windows")
+            .header("X-Device-Os", Device::os())
             .header("X-Ver-Os", Device::os_version())
             .header("X-Device-Model", "PC")
             .send()

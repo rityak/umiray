@@ -70,15 +70,8 @@ impl Look {
 /// значок на каждый такт незачем — меняем, только когда действительно изменилось.
 static SHOWN: Mutex<Option<(Look, bool)>> = Mutex::new(None);
 
-// The taskbar follows the Windows system theme, not the application's theme.
 fn light_taskbar() -> bool {
-    crate::system::registry::Registry::read_dword(
-        r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
-        "SystemUsesLightTheme",
-    )
-    .ok()
-    .flatten()
-        == Some(1)
+    crate::system::taskbar::Taskbar::is_light()
 }
 
 /// Меню трея. Пересобирается целиком при смене состояния, а не правится по частям:

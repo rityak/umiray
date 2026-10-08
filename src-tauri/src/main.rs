@@ -14,8 +14,9 @@ mod http;
 #[cfg(test)]
 mod layers;
 // Живые проверки: настоящий каталог, настоящее ядро, настоящая сеть. В сборку не входят.
+// Пока только Windows: реестр, брандмауэр и планировщик в них — её.
 mod lists;
-#[cfg(test)]
+#[cfg(all(test, windows))]
 mod live;
 mod nodes;
 mod paths;
@@ -31,6 +32,7 @@ use app::state::AppState;
 use app::tray;
 
 fn main() {
+    system::webview::Webview::prepare();
     let context = app::boot::Boot::context();
     // Удаление зовёт клиента прибраться (B-044) — и только: ни переноса, ни задачи, ни окна.
     if std::env::args().any(|arg| arg == app::maintenance::UNINSTALL) {
@@ -47,7 +49,13 @@ fn main() {
     // планировщика и уходим (D-087). Самым первым делом: вторая копия появится через
     // мгновение, и успей эта объявиться плагином одиночного запуска, новая просто
     // показала бы ей окно и умерла — то есть повышения так и не случилось бы.
-    if system::task::SchedulerTask::handoff() {
+    // На Linux здесь же отвечает помощник с правами (D-173): тот же бинарь через pkexec.
+    if system::launch::Launch::handoff() {
+        return;
+    }
+    // Вход в систему после смерти клиента вместе с сеансом: вернуть сеть и уйти (D-175).
+    if app::leftovers::Leftovers::asked() {
+        app::leftovers::Leftovers::restore();
         return;
     }
     tauri::Builder::default()
@@ -74,7 +82,12 @@ fn main() {
             match event {
                 tauri::WindowEvent::CloseRequested { api, .. } => {
                     api.prevent_close();
-                    let _ = window.hide();
+                    // Трея нет (GNOME без AppIndicator) — спрятанное окно было бы не вернуть.
+                    if system::taskbar::Taskbar::has_tray() {
+                        let _ = window.hide();
+                    } else {
+                        let _ = window.minimize();
+                    }
                 }
                 // Свернули или развернули обратно — ниже решится, видно ли страницу.
                 // Разворот из панели задач приходит не всегда размером, но всегда фокусом.
@@ -176,6 +189,7 @@ fn main() {
             commands::system::system_export,
             commands::system::system_device,
             commands::system::system_language,
+            commands::system::system_features,
             commands::system::system_open_github,
             commands::updates::updates_check,
             commands::updates::updates_install,

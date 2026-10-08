@@ -10,6 +10,7 @@
 //! и обычный замер задержки.
 
 use std::net::{IpAddr, Ipv4Addr};
+#[cfg(windows)]
 use std::time::Duration;
 
 use crate::error::{AppError, Result};
@@ -22,6 +23,7 @@ const HEADERS: u32 = 28;
 const LOW: u32 = 576;
 const HIGH: u32 = 1500;
 
+#[cfg(windows)]
 const TIMEOUT: Duration = Duration::from_millis(1200);
 
 pub struct PmtuProbe;

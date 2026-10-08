@@ -15,7 +15,8 @@ pub struct Device;
 impl Device {
     /// Идентификатор устройства для подписок с привязкой (D-016, D-034).
     ///
-    /// MachineGuid из реестра — настоящий идентификатор машины. Он переживает переустановку
+    /// Идентификатор машины от системы (`Machine::id`: MachineGuid, на Linux — производное
+    /// от `/etc/machine-id`). Он переживает переустановку
     /// клиента, поэтому повторное добавление подписки не съедает у провайдера ещё один слот;
     /// прежний случайный идентификатор умирал вместе с каталогом данных и съедал.
     ///
@@ -45,17 +46,12 @@ impl Device {
     /// Описание устройства. Панели это не обязательно, но по нему она различает устройства
     /// в списке — человеку иначе не понять, какой слот чей.
     pub fn os_version() -> String {
-        #[cfg(windows)]
-        {
-            // Версию берём у самой системы: «11» константой врёт на любой другой сборке.
-            if let Some(version) = registry(
-                "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
-                "CurrentBuild",
-            ) {
-                return format!("10.0.{version}");
-            }
-        }
-        "unknown".into()
+        crate::system::machine::Machine::os_version()
+    }
+
+    /// Имя ОС для панели.
+    pub fn os() -> &'static str {
+        crate::system::machine::Machine::os()
     }
 }
 
@@ -67,64 +63,8 @@ fn is_valid(id: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '=' || c == '-')
 }
 
-#[cfg(windows)]
 fn machine_guid() -> Option<String> {
-    registry("SOFTWARE\\Microsoft\\Cryptography", "MachineGuid").filter(|id| is_valid(id))
-}
-
-#[cfg(not(windows))]
-fn machine_guid() -> Option<String> {
-    None
-}
-
-/// Чтение одной строки из HKEY_LOCAL_MACHINE.
-///
-/// `KEY_WOW64_64KEY` обязателен: 32-битный процесс иначе попадёт в WOW6432Node, где
-/// MachineGuid другой — и панель увидит два устройства вместо одного.
-#[cfg(windows)]
-fn registry(subkey: &str, name: &str) -> Option<String> {
-    use windows_sys::Win32::System::Registry::{
-        RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_64KEY,
-    };
-
-    let subkey = wide(subkey);
-    let name = wide(name);
-    let mut key = std::ptr::null_mut();
-    let mut buffer = [0u16; 256];
-    let mut size = (buffer.len() * 2) as u32;
-
-    unsafe {
-        if RegOpenKeyExW(
-            HKEY_LOCAL_MACHINE,
-            subkey.as_ptr(),
-            0,
-            KEY_READ | KEY_WOW64_64KEY,
-            &mut key,
-        ) != 0
-        {
-            return None;
-        }
-        let status = RegQueryValueExW(
-            key,
-            name.as_ptr(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            buffer.as_mut_ptr().cast(),
-            &mut size,
-        );
-        RegCloseKey(key);
-        if status != 0 {
-            return None;
-        }
-    }
-
-    let chars = (size as usize / 2).saturating_sub(1);
-    Some(String::from_utf16_lossy(&buffer[..chars.min(buffer.len())]))
-}
-
-#[cfg(windows)]
-fn wide(text: &str) -> Vec<u16> {
-    text.encode_utf16().chain(std::iter::once(0)).collect()
+    crate::system::machine::Machine::id().filter(|id| is_valid(id))
 }
 
 /// Запасной вариант, если реестр недоступен: случайный идентификатор установки.
@@ -154,21 +94,10 @@ mod tests {
 
     /// Если реестр читается — значение обязано подойти панели без правок.
     #[test]
-    #[cfg(windows)]
     fn the_machine_guid_is_shaped_the_way_the_panel_wants() {
         match machine_guid() {
             Some(id) => assert!(is_valid(&id), "MachineGuid не прошёл проверку"),
             None => println!("реестр недоступен — проверять нечего"),
         }
-    }
-
-    #[test]
-    #[cfg(windows)]
-    fn the_os_version_is_read_from_the_system() {
-        let version = Device::os_version();
-        assert!(
-            version.starts_with("10.0.") || version == "unknown",
-            "неожиданная версия: {version}"
-        );
     }
 }

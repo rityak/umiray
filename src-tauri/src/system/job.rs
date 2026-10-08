@@ -23,6 +23,24 @@ static JOB: OnceLock<usize> = OnceLock::new();
 pub struct Job;
 
 impl Job {
+    /// Запустить сразу в клетку. Не принятый клеткой процесс гасится тут же: процесс,
+    /// способный пережить клиента, хуже отказа (D-134).
+    ///
+    /// Между спавном и клеткой окно всё-таки есть — микросекунды.
+    /// ponytail: окно в микросекунды, лечится CREATE_SUSPENDED + ResumeThread.
+    pub fn spawn(mut command: std::process::Command) -> std::io::Result<std::process::Child> {
+        use std::os::windows::io::AsRawHandle;
+        let mut child = command.spawn()?;
+        if !Job::attach(child.as_raw_handle()) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(std::io::Error::other(
+                "Windows job object не принял процесс",
+            ));
+        }
+        Ok(child)
+    }
+
     /// Посадить процесс в клетку. `false` — клетки нет, и ядро переживёт падение клиента:
     /// вызывающий обязан сказать об этом вслух, а не молча продолжить.
     pub fn attach(process: HANDLE) -> bool {

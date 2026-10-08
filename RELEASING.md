@@ -1,8 +1,22 @@
 # Выпуск umiray
 
-Репозиторий: https://github.com/rityak/umiray. Сборка — Windows x64, NSIS.
+Репозиторий: https://github.com/rityak/umiray. Сборки — Windows x64 (NSIS) и Linux x86_64
+(deb и rpm, собираются на Ubuntu 22.04; для Arch — `PKGBUILD` с sha256 этого deb).
 Тег `vX.Y.Z` запускает проверки и сборку; завершённый релиз публикуется автоматически.
-Клиенты читают `releases/latest/download/latest.json` из этого репозитория.
+Клиенты читают `releases/latest/download/latest.json` из этого репозитория: в нём
+`windows-x86_64`, `linux-x86_64-deb` и `linux-x86_64-rpm` (последние два дописывает задание
+`publish` через `tools/linux-release.mjs`).
+
+### AUR (по желанию)
+
+Чтобы `umiray-bin` в AUR обновлялся сам с каждым выпуском:
+
+1. Заведите учётную запись на https://aur.archlinux.org и добавьте в неё публичный SSH-ключ
+   (отдельный, только для AUR).
+2. Добавьте закрытый ключ как Actions secret `AUR_SSH_PRIVATE_KEY`.
+
+Первый выпуск с секретом создаст пакет `umiray-bin`; без секрета шаг пропускается, а `PKGBUILD`
+и `umiray.install` всё равно лежат в ассетах релиза для `makepkg -si`.
 
 ## Один раз перед первым тегом
 

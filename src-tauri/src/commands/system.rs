@@ -76,3 +76,9 @@ pub fn system_open_github(url: String) -> Result<()> {
 pub fn system_language() -> crate::system::lang::Lang {
     crate::system::lang::Lang::detect()
 }
+
+/// Что эта ОС умеет хорошо (D-174): окно прячет всё, чего нет в списке.
+#[tauri::command]
+pub fn system_features() -> Vec<crate::system::features::Feature> {
+    crate::system::features::Features::supported()
+}

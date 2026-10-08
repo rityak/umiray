@@ -227,9 +227,10 @@ async fn reload(app: &AppHandle, state: &AppState, id: &str) -> Vec<String> {
 }
 
 /// Страны узлов — в фоне: запрос к внешнему сервису не должен задерживать ответ окну.
+/// Заново про все, а не только про устаревшие: подписку тронул человек (D-084).
 fn spawn_geo() {
     tauri::async_runtime::spawn(async {
-        let _ = crate::nodes::geo::GeoCache::refresh().await;
+        let _ = crate::nodes::geo::GeoCache::renew().await;
     });
 }
 

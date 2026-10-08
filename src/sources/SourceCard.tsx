@@ -2,6 +2,7 @@ import { FileCode, RefreshCw, Trash2, X } from "lucide-react";
 import { Badge, Button, Card, ConfirmButton, IconButton, Item, ItemGroup, Text } from "rootik";
 import type * as api from "../api";
 import { updatedLabel } from "../api";
+import { plainName } from "../connection/groups";
 import { t, tn } from "../i18n";
 import Flag from "../shell/Flag";
 import { hide } from "../shell/secret";
@@ -143,7 +144,7 @@ export default function SourceCard({
                 key={node.name}
                 size="sm"
                 media={<Flag country={node.country} />}
-                title={hide(node.name, hidden)}
+                title={hide(plainName(node.name), hidden)}
                 description={`${node.kind}${node.address !== null ? ` · ${hide(node.address, hidden)}` : ""}`}
                 meta={
                   !node.supported && (

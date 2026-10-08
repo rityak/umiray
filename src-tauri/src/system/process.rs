@@ -1,4 +1,4 @@
-//! Processes running on Windows: names for PROCESS-NAME rules (D-153) and killing an
+//! Running processes: names for PROCESS-NAME rules (D-153) and killing an
 //! orphaned core by its full path (D-059, D-154).
 
 use std::path::Path;
@@ -22,9 +22,25 @@ impl ProcessTable {
         Ok(names.into_iter().map(|name| Process { name }).collect())
     }
 
+    /// Linux: имя исполняемого файла, как его сверяет PROCESS-NAME ядра; процессы, чей
+    /// бинарь не прочитать, — по `comm`.
     #[cfg(not(windows))]
     pub fn running() -> Result<Vec<Process>> {
-        Ok(Vec::new())
+        let names: std::collections::BTreeSet<String> = pids()?
+            .filter_map(|pid| {
+                let proc = Path::new("/proc").join(pid.to_string());
+                std::fs::read_link(proc.join("exe"))
+                    .ok()
+                    .and_then(|exe| Some(exe.file_name()?.to_string_lossy().into_owned()))
+                    .or_else(|| {
+                        std::fs::read_to_string(proc.join("comm"))
+                            .ok()
+                            .map(|comm| comm.trim().to_string())
+                    })
+            })
+            .filter(|name| !name.is_empty())
+            .collect();
+        Ok(names.into_iter().map(|name| Process { name }).collect())
     }
 
     /// Kill every process started from this very file. By path, not by name: a process with
@@ -67,8 +83,37 @@ impl ProcessTable {
         }
     }
 
+    /// Linux: по `/proc/<pid>/exe`, а у ядра, запущенного с правами, его не прочитать
+    /// (S-035) — тогда по первому аргументу командной строки: клиент зовёт ядро полным путём.
     #[cfg(not(windows))]
-    pub fn kill_by_path(_path: &Path) {}
+    pub fn kill_by_path(path: &Path) {
+        let Ok(wanted) = std::fs::canonicalize(path) else {
+            return;
+        };
+        let Ok(pids) = pids() else {
+            return;
+        };
+        for pid in pids.filter(|&pid| pid != std::process::id()) {
+            let proc = Path::new("/proc").join(pid.to_string());
+            let exe = std::fs::read_link(proc.join("exe")).ok().or_else(|| {
+                let line = std::fs::read(proc.join("cmdline")).ok()?;
+                let first = line.split(|&byte| byte == 0).next()?;
+                Some(String::from_utf8_lossy(first).into_owned().into())
+            });
+            if exe.as_deref() == Some(wanted.as_path()) {
+                // SAFETY: только сигнал; процесс другого пользователя просто откажет.
+                unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
+            }
+        }
+    }
+}
+
+/// Номера всех процессов из `/proc`.
+#[cfg(not(windows))]
+fn pids() -> Result<impl Iterator<Item = u32>> {
+    Ok(std::fs::read_dir("/proc")?
+        .flatten()
+        .filter_map(|entry| entry.file_name().to_str()?.parse().ok()))
 }
 
 /// Full path of the process's executable.
@@ -117,6 +162,50 @@ fn snapshot() -> Result<Vec<(u32, String)>> {
     }
     unsafe { CloseHandle(snapshot) };
     Ok(found)
+}
+
+#[cfg(all(test, not(windows)))]
+mod unix_tests {
+    #[test]
+    fn running_processes_include_this_test() {
+        let exe = std::env::current_exe().unwrap();
+        let name = exe.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(super::ProcessTable::running()
+            .unwrap()
+            .iter()
+            .any(|process| process.name == name));
+    }
+
+    /// Уборка по пути: процесс из нашего файла умирает, одноимённый из другого — живёт.
+    #[test]
+    fn only_a_process_from_this_very_file_is_killed() {
+        let dir = std::env::temp_dir().join(format!("umiray-sweep-{}", std::process::id()));
+        let (ours, theirs) = (dir.join("ours"), dir.join("theirs"));
+        std::fs::create_dir_all(&ours).unwrap();
+        std::fs::create_dir_all(&theirs).unwrap();
+        let sleep = std::path::Path::new("/usr/bin/sleep");
+        let (a, b) = (ours.join("sleep"), theirs.join("sleep"));
+        std::fs::copy(sleep, &a).unwrap();
+        std::fs::copy(sleep, &b).unwrap();
+        let spawn =
+            |exe: &std::path::Path| std::process::Command::new(exe).arg("30").spawn().unwrap();
+        let (mut mine, mut other) = (spawn(&a), spawn(&b));
+
+        super::ProcessTable::kill_by_path(&a);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while mine.try_wait().unwrap().is_none() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let mine_gone = mine.try_wait().unwrap().is_some();
+        let other_alive = other.try_wait().unwrap().is_none();
+        let _ = mine.kill();
+        let _ = other.kill();
+        let _ = mine.wait();
+        let _ = other.wait();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(mine_gone, "процесс из нашего файла пережил уборку");
+        assert!(other_alive, "уборка задела одноимённый чужой процесс");
+    }
 }
 
 #[cfg(all(test, windows))]

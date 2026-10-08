@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type * as api from "../api";
-import { activeFirst, entries, groupLabel, groupName, iconOf, inAuto, load, share } from "./groups";
+import {
+  activeFirst,
+  entries,
+  groupLabel,
+  groupName,
+  iconOf,
+  inAuto,
+  load,
+  plainName,
+  share,
+} from "./groups";
 
 const node = (name: string, source: string, kind = "Vless"): api.Node => ({
   name,
@@ -51,6 +61,15 @@ describe("groups tab", () => {
       "Mine",
     ]);
     expect(activeFirst(list, "gone")).toBe(list);
+  });
+
+  it("shows a node name without the flags and emoji the panel put in it", () => {
+    expect(plainName("\u{1F1E9}\u{1F1EA} CapyHub | Hysteria")).toBe("CapyHub | Hysteria");
+    expect(plainName("Sweden \u{1F680}\u{FE0F} fast")).toBe("Sweden fast");
+    expect(plainName("\u{1F468}\u{200D}\u{1F4BB} dev")).toBe("dev");
+    expect(plainName("Poland 1")).toBe("Poland 1");
+    expect(plainName("\u{1F1F7}\u{1F1FA}")).toBe("\u{1F1F7}\u{1F1FA}");
+    expect(groupName("\u{1F1F3}\u{1F1F1} NL")).toBe("NL");
   });
 
   it("names client groups for the eye and gives them a meaning icon", () => {

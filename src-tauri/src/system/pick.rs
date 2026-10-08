@@ -55,9 +55,28 @@ impl FileDialog {
         )))
     }
 
+    /// Linux: окно рабочего стола — `kdialog` в KDE, `zenity` в остальных (пакет тянет
+    /// его зависимостью, D-173).
     #[cfg(not(windows))]
-    pub fn file(_title: &str, _filter: &[(&str, &str)]) -> Option<std::path::PathBuf> {
-        None
+    pub fn file(title: &str, filter: &[(&str, &str)]) -> Option<std::path::PathBuf> {
+        if kde() {
+            return ask(
+                "kdialog",
+                &[
+                    "--title",
+                    title,
+                    "--getopenfilename",
+                    ".",
+                    &kde_filter(filter),
+                ],
+            );
+        }
+        let mut args = vec!["--file-selection".to_string(), format!("--title={title}")];
+        args.extend(zenity_filter(filter));
+        ask(
+            "zenity",
+            &args.iter().map(String::as_str).collect::<Vec<_>>(),
+        )
     }
 
     #[cfg(windows)]
@@ -102,11 +121,101 @@ impl FileDialog {
 
     #[cfg(not(windows))]
     pub fn save(
-        _title: &str,
-        _filter: &[(&str, &str)],
-        _name: &str,
-        _extension: &str,
+        title: &str,
+        filter: &[(&str, &str)],
+        name: &str,
+        extension: &str,
     ) -> Option<std::path::PathBuf> {
-        None
+        let picked = if kde() {
+            ask(
+                "kdialog",
+                &[
+                    "--title",
+                    title,
+                    "--getsavefilename",
+                    name,
+                    &kde_filter(filter),
+                ],
+            )
+        } else {
+            let mut args = vec![
+                "--file-selection".to_string(),
+                "--save".to_string(),
+                "--confirm-overwrite".to_string(),
+                format!("--title={title}"),
+                format!("--filename={name}"),
+            ];
+            args.extend(zenity_filter(filter));
+            ask(
+                "zenity",
+                &args.iter().map(String::as_str).collect::<Vec<_>>(),
+            )
+        }?;
+        // Расширение дописываем сами, как `lpstrDefExt` на Windows.
+        Some(if picked.extension().is_none() {
+            picked.with_extension(extension)
+        } else {
+            picked
+        })
+    }
+}
+
+#[cfg(not(windows))]
+/// KDE и в нём есть `kdialog`. Без него и в KDE — `zenity`: пакеты тянут его зависимостью.
+fn kde() -> bool {
+    std::env::var("XDG_CURRENT_DESKTOP")
+        .unwrap_or_default()
+        .split(':')
+        .any(|name| name.eq_ignore_ascii_case("KDE"))
+        && std::process::Command::new("kdialog")
+            .arg("--version")
+            .output()
+            .is_ok()
+}
+
+/// Ответ окна — путь строкой; закрыли окно — пусто и ненулевой код.
+#[cfg(not(windows))]
+fn ask(program: &str, args: &[&str]) -> Option<std::path::PathBuf> {
+    let out = std::process::Command::new(program)
+        .args(args)
+        .output()
+        .ok()?;
+    let path = String::from_utf8_lossy(&out.stdout)
+        .trim_end_matches('\n')
+        .to_string();
+    (out.status.success() && !path.is_empty()).then(|| path.into())
+}
+
+/// Маски Windows `*.yaml;*.yml` у zenity — `подпись | *.yaml *.yml`.
+#[cfg(not(windows))]
+fn zenity_filter(filter: &[(&str, &str)]) -> Vec<String> {
+    filter
+        .iter()
+        .map(|(label, mask)| format!("--file-filter={label} | {}", mask.replace(';', " ")))
+        .collect()
+}
+
+/// У kdialog — `*.yaml *.yml|подпись`, фильтры через перевод строки.
+#[cfg(not(windows))]
+fn kde_filter(filter: &[(&str, &str)]) -> String {
+    filter
+        .iter()
+        .map(|(label, mask)| format!("{}|{label}", mask.replace(';', " ")))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[cfg(all(test, not(windows)))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn windows_masks_become_desktop_filters() {
+        let filter = [("Подписка (*.yaml)", "*.yaml;*.yml")];
+        assert_eq!(
+            zenity_filter(&filter),
+            ["--file-filter=Подписка (*.yaml) | *.yaml *.yml"]
+        );
+        assert_eq!(kde_filter(&filter), "*.yaml *.yml|Подписка (*.yaml)");
     }
 }

@@ -60,4 +60,41 @@ impl Stamp {
             t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond, t.wMilliseconds
         )
     }
+
+    #[cfg(unix)]
+    pub fn utc() -> String {
+        format!("{}Z", unix(libc::gmtime_r))
+    }
+
+    #[cfg(unix)]
+    pub fn local() -> String {
+        unix(libc::localtime_r)
+    }
+}
+
+/// Время по разбивке libc (`gmtime_r` или `localtime_r`) в том же виде, что у Windows.
+#[cfg(unix)]
+fn unix(
+    split: unsafe extern "C" fn(*const libc::time_t, *mut libc::tm) -> *mut libc::tm,
+) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let seconds = now.as_secs() as libc::time_t;
+    // SAFETY: обе функции только заполняют переданную структуру.
+    let t = unsafe {
+        let mut t: libc::tm = std::mem::zeroed();
+        split(&seconds, &mut t);
+        t
+    };
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}",
+        t.tm_year + 1900,
+        t.tm_mon + 1,
+        t.tm_mday,
+        t.tm_hour,
+        t.tm_min,
+        t.tm_sec,
+        now.subsec_millis()
+    )
 }

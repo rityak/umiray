@@ -32,7 +32,7 @@ use crate::paths::Paths;
 use crate::system::autostart::Autostart;
 use crate::system::killswitch::Firewall;
 use crate::system::registry::Registry;
-use crate::system::sysproxy::WinProxy;
+use crate::system::sysproxy::ProxySetting;
 use crate::system::task::SchedulerTask;
 use crate::yaml::Yaml;
 
@@ -1356,7 +1356,7 @@ fn live_system_proxy_reaches_the_registry_and_gives_it_back() {
     crate::system::registry::Registry::write_dword(proxy_key(), "ProxyEnable", 1).unwrap();
 
     let ours = "127.0.0.1:3090";
-    let backup = WinProxy::enable(ours).unwrap();
+    let backup = ProxySetting::enable(ours).unwrap();
 
     assert_eq!(proxy_enabled(), 1, "ProxyEnable не встал");
     assert_eq!(
@@ -1370,9 +1370,9 @@ fn live_system_proxy_reaches_the_registry_and_gives_it_back() {
             .contains("127.*"),
         "петля не в исключениях: окно не достучится до external-controller"
     );
-    assert!(WinProxy::is_ours(ours), "свою запись обязаны узнавать");
+    assert!(ProxySetting::is_ours(ours), "свою запись обязаны узнавать");
 
-    WinProxy::restore(&backup).unwrap();
+    ProxySetting::restore(&backup).unwrap();
 
     assert_eq!(
         proxy_enabled(),
@@ -1391,11 +1391,11 @@ fn live_system_proxy_reaches_the_registry_and_gives_it_back() {
     );
 
     // Второе правило D-047: пока мы работали, прокси сменил кто-то третий.
-    let backup = WinProxy::enable(ours).unwrap();
+    let backup = ProxySetting::enable(ours).unwrap();
     let third_party = "127.0.0.1:9999";
     crate::system::registry::Registry::write_string(proxy_key(), "ProxyServer", third_party)
         .unwrap();
-    WinProxy::restore(&backup).unwrap();
+    ProxySetting::restore(&backup).unwrap();
     assert_eq!(
         proxy_value("ProxyServer").as_deref(),
         Some(third_party),
@@ -1549,7 +1549,7 @@ async fn live_system_proxy_actually_redirects_a_foreign_client() {
         .with_number("ProxyEnable");
 
     let address = format!("127.0.0.1:{port}");
-    let backup = WinProxy::enable(&address).unwrap();
+    let backup = ProxySetting::enable(&address).unwrap();
     println!("системный прокси включён на {address}");
 
     let through = ip_via_system_proxy()
@@ -1559,7 +1559,7 @@ async fn live_system_proxy_actually_redirects_a_foreign_client() {
 
     // Возврат делаем до утверждений: провалившаяся проверка не должна оставлять
     // машину с чужим прокси даже на время печати сообщения.
-    WinProxy::restore(&backup).unwrap();
+    ProxySetting::restore(&backup).unwrap();
 
     assert_ne!(
         through, home,
@@ -2864,18 +2864,15 @@ async fn fake_address(dns: u16, name: &str) -> String {
 /// Поднять ядро **ровно так, как это делает супервизор**: своя невидимая консоль плюс
 /// своя группа процессов. Иначе проверялась бы не та мягкая остановка, что в клиенте.
 async fn fakeip_core(dir: &Path, config: &str) -> std::process::Child {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
     std::fs::write(dir.join("config.yaml"), config).unwrap();
-    let child = std::process::Command::new(Paths::core())
+    let mut command = std::process::Command::new(Paths::core());
+    command
         .arg("-d")
         .arg(dir)
         .arg("-f")
-        .arg(dir.join("config.yaml"))
-        .creation_flags(CREATE_NO_WINDOW | crate::system::console::NEW_PROCESS_GROUP)
-        .spawn()
-        .expect("ядро не запустилось");
+        .arg(dir.join("config.yaml"));
+    crate::system::console::Console::hide(&mut command, true);
+    let child = command.spawn().expect("ядро не запустилось");
     tokio::time::sleep(Duration::from_millis(900)).await;
     child
 }

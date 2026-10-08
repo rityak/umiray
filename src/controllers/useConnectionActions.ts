@@ -81,7 +81,7 @@ export function useConnectionActions({
         // «Подключён» ещё не значит, что трафик идёт; заменили чужой — это чужой VPN,
         // и его поломка выглядела бы нашей виной.
         if (choice === "system" && next.running && !next.systemProxy) {
-          report(notice(t("Couldn't set the Windows proxy — enter the address in your browser.")));
+          report(notice(t("Couldn't set the system proxy — enter the address in your browser.")));
         } else if (choice === "system" && status.foreignProxy !== null) {
           report(
             notice(

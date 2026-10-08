@@ -15,6 +15,7 @@ import {
   type Values,
   wrong,
 } from "../sources/proxy";
+import { plainName } from "./groups";
 
 type Props = {
   node: api.Node;
@@ -163,7 +164,7 @@ export default function NodeEditor({ node, onClose, onChanged }: Props) {
     <Dialog
       open
       size={form ? "lg" : "md"}
-      title={node.name}
+      title={plainName(node.name)}
       description={`${node.kind} · ${node.address ?? t("address unknown")}${node.edited ? ` · ${t("edited")}` : ""}`}
       onClose={onClose}
       footer={

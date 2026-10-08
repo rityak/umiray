@@ -11,9 +11,6 @@ use crate::error::{AppError, Result};
 use crate::lists::store::{ListStore, Part};
 use crate::render::mihomo_lists::MihomoLists;
 
-#[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
 /// Чем кончилась сборка.
 #[derive(Debug, Default)]
 pub struct Built {
@@ -89,11 +86,7 @@ fn compile(part: Part, text: &str, target: &std::path::Path) -> Result<()> {
         .arg("text")
         .arg(&source)
         .arg(&staging);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
+    crate::system::console::Console::hide(&mut command, false);
     let output = command.output();
     let _ = std::fs::remove_file(&source);
     let output = output.map_err(|e| AppError::io(format!("Не удалось запустить ядро: {e}")))?;

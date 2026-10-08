@@ -69,6 +69,14 @@ impl Boot {
             paths::APP_NAME,
             env!("CARGO_PKG_VERSION")
         );
+        // Вторая — что эта ОС умеет (D-174): «почему у меня нет кнопки» на Linux решается
+        // этой строкой в «Логах», а не перепиской о дистрибутиве.
+        let features = format!(
+            "возможности системы: {:?}",
+            crate::system::features::Features::supported()
+        );
+        eprintln!("{}: {features}", paths::APP_NAME);
+        app.state::<AppState>().note("info", &features);
         for step in STEPS {
             let began = Instant::now();
             let outcome = (step.run)(app);
@@ -131,6 +139,11 @@ const STEPS: &[Step] = &[
         id: "wake",
         label: "наблюдатель за сетью",
         run: netwatch,
+    },
+    Step {
+        id: "session",
+        label: "выход по просьбе системы",
+        run: session,
     },
     Step {
         id: "tray",
@@ -222,6 +235,17 @@ fn netwatch(app: &AppHandle) -> Done {
     Ok(())
 }
 
+/// Выключение машины и `kill` — тот же выход, что из трея: ядро гасится, прокси
+/// и запрет снимаются (`RunEvent::Exit` в `main`).
+fn session(app: &AppHandle) -> Done {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        crate::system::session::Session::ended().await;
+        app.exit(0);
+    });
+    Ok(())
+}
+
 /// Что делает пункт питания, трей не знает: действие приходит отсюда, из места сборки
 /// приложения.
 fn icon(app: &AppHandle) -> Done {
@@ -254,10 +278,10 @@ fn proxy(app: &AppHandle) -> Done {
 /// ещё раз (D-073).
 fn unlock(app: &AppHandle) -> Done {
     let state = app.state::<AppState>();
-    state
-        .kill_switch
-        .release(&state)
-        .map_err(|why| why.to_string())
+    let released = state.kill_switch.release(&state);
+    // Запись возврата при входе могла пережить свои снимки (D-175).
+    crate::app::leftovers::Leftovers::mark(&state);
+    released.map_err(|why| why.to_string())
 }
 
 fn sources(_app: &AppHandle) -> Done {
@@ -302,12 +326,13 @@ mod tests {
             assert_eq!(config.identifier, "com.umiray.client.dev");
             assert_eq!(config.app.windows[0].title, "umiray-dev");
             assert_eq!(config.plugins.0["updater"]["pubkey"], "");
-            assert_eq!(paths::CORE_NAME, "mihomo-dev.exe");
+            assert_eq!(paths::CORE_NAME.trim_end_matches(".exe"), "mihomo-dev");
         } else {
             assert_eq!(config.identifier, "com.umiray.client");
             assert_ne!(config.plugins.0["updater"]["pubkey"], "");
-            assert_eq!(paths::CORE_NAME, "mihomo.exe");
+            assert_eq!(paths::CORE_NAME.trim_end_matches(".exe"), "mihomo");
         }
+        #[cfg(windows)]
         assert_eq!(crate::system::task::NAME, paths::APP_NAME);
     }
 }

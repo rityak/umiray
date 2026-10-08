@@ -33,10 +33,28 @@
 //! то же, что у системного прокси (D-047), — **снимаем при старте**, поэтому «починить»
 //! значит просто открыть umiray ещё раз.
 
+//!
+//! На Linux то же самое — своя таблица nftables (D-173, S-035): исходящее по умолчанию
+//! `drop`, разрешены адаптер ядра, метка исходящих самого ядра (`CORE_MARK`) и локальные
+//! сети. Ставит и снимает её помощник с правами; снимок брандмауэра там не нужен —
+//! таблица наша целиком, и снятие удаляет её всю.
+
 use serde::{Deserialize, Serialize};
 
-use crate::error::{AppError, Result};
+#[cfg(windows)]
+use crate::error::AppError;
+use crate::error::Result;
 
+/// Метка, которой ядро помечает свои исходящие (`routing-mark`), — по ней запрет его
+/// и выпускает. Нужна только на Linux: nftables не умеют разрешать по пути к бинарю,
+/// как брандмауэр Windows. Ставит её сборка конфига в TUN.
+pub const CORE_MARK: Option<u32> = if cfg!(target_os = "linux") {
+    Some(6666)
+} else {
+    None
+};
+
+#[cfg(any(windows, test))]
 /// Общее начало имён наших правил. По нему же они и удаляются — в том числе оставшиеся
 /// от прошлой жизни клиента, снимок которой потерян.
 const PREFIX: &str = if cfg!(debug_assertions) {
@@ -45,10 +63,12 @@ const PREFIX: &str = if cfg!(debug_assertions) {
     "umiray killswitch"
 };
 
+#[cfg(any(windows, test))]
 /// Адреса самого туннеля. Ядро раздаёт их своему адаптеру, и трафик к ним обязан ходить
 /// даже когда всё остальное закрыто.
 const TUN_NET: &str = "198.18.0.0/15";
 
+#[cfg(any(windows, test))]
 /// Чем брандмауэр отвечает на «что у тебя стоит», пока никто ничего не настраивал.
 /// **Не `Allow`**: у исходящего по умолчанию значение `NotConfigured`, и вернуть вместо него
 /// `Allow` значило бы сделать явно настроенным то, что настроено не было.
@@ -122,20 +142,17 @@ fn powershell(script: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-#[cfg(not(windows))]
-fn powershell(_script: &str) -> Result<String> {
-    Err(AppError::io(
-        "Брандмауэр есть только на Windows".to_string(),
-    ))
-}
-
 pub struct Firewall;
 
 impl Firewall {
     /// Состояние профилей брандмауэра. Наружу — ради диагностики (D-097): «включён ли
     /// он вообще» спрашивают до того, как поверят галке защиты.
     pub fn profiles() -> Result<Vec<Profile>> {
-        read_profiles()
+        #[cfg(windows)]
+        return read_profiles();
+        // Профилей у nftables нет, а своя таблица исполняется всегда.
+        #[cfg(not(windows))]
+        Ok(Vec::new())
     }
 
     /// Поставить защиту. `core` — путь к бинарю ядра, `device` — имя его адаптера.
@@ -148,7 +165,7 @@ impl Firewall {
     /// Порядок обязателен и обратен интуиции: **сначала разрешения, потом запрет**. Поставь
     /// запрет первым — и между ним и первым разрешением есть окно, в котором машина уже без
     /// сети, а ядро ещё не выведено из-под него.
-    #[cfg(test)]
+    #[cfg(all(test, windows))]
     pub fn engage(core: &std::path::Path, device: &str) -> Result<Backup> {
         let previous = read_profiles()?;
         let allowed = Allowed {
@@ -173,7 +190,10 @@ impl Firewall {
     /// Поставить правила без нового снимка. Снимок хранит приложение до изменения ОС,
     /// поэтому reconnect не должен заменять его состоянием уже включённого запрета.
     pub fn apply(allowed: &Allowed) -> Result<()> {
+        #[cfg(windows)]
         powershell(&script(&allowed.core, &allowed.device))?;
+        #[cfg(target_os = "linux")]
+        linux_apply(allowed)?;
         Ok(())
     }
 
@@ -181,20 +201,37 @@ impl Firewall {
     /// всё это время заперта (B-042). Новые встают раньше, чем уходят прежние, — окна, где
     /// новое ядро не выпущено, нет.
     pub fn renew(allowed: &Allowed) -> Result<()> {
+        #[cfg(windows)]
         powershell(&renew_script(allowed))?;
+        // Таблица nftables заменяется одним файлом — это уже замена без окна.
+        #[cfg(target_os = "linux")]
+        linux_apply(allowed)?;
         Ok(())
     }
 
     pub fn release(previous: &Backup) -> Result<()> {
-        let restore = restore_script(previous);
-        powershell(&format!(
-            "$ErrorActionPreference='Stop'
+        #[cfg(windows)]
+        {
+            let restore = restore_script(previous);
+            powershell(&format!(
+                "$ErrorActionPreference='Stop'
          {restore}
-         Get-NetFirewallRule -DisplayName '{PREFIX}*' -ErrorAction SilentlyContinue | \
-           Remove-NetFirewallRule"
-        ))?;
+         Get-NetFirewallRule -DisplayName '{PREFIX}*' -ErrorAction SilentlyContinue |            Remove-NetFirewallRule"
+            ))?;
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let _ = previous;
+            crate::system::helper::Helper::run(&["killswitch", "release"])?;
+        }
         Ok(())
     }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_apply(allowed: &Allowed) -> Result<()> {
+    let mark = CORE_MARK.unwrap_or_default().to_string();
+    crate::system::helper::Helper::run(&["killswitch", "apply", &allowed.device, &mark])
 }
 
 /// Прочитать состояние профилей — чтобы потом было к чему вернуться.
@@ -202,6 +239,7 @@ impl Firewall {
 /// Читаем и `Enabled`, и `DefaultOutboundAction`: выключенный брандмауэр не запрещает
 /// ничего, и защите приходится его включать. Замерено — на этой машине он был выключен,
 /// и первая версия защиты из-за этого не запирала ровным счётом ничего (B-012).
+#[cfg(windows)]
 fn read_profiles() -> Result<Vec<Profile>> {
     let raw = powershell(
         "Get-NetFirewallProfile -All | ForEach-Object { \
@@ -230,6 +268,7 @@ fn read_profiles() -> Result<Vec<Profile>> {
 /// **и есть** защита, и выпади из него правило по адаптеру — трафик приложений встал бы
 /// намертво, а выпади правило ядра — туннель не поднялся бы вовсе. На живом брандмауэре
 /// это стоило бы прогона с запертой машиной, здесь стоит одного сравнения строк.
+#[cfg(any(windows, test))]
 fn script(core: &str, device: &str) -> String {
     // Апостроф закрываем удвоением — так PowerShell экранирует кавычку внутри строки.
     // Имя адаптера пользователь пишет своей рукой в «Настройках» (`tun.device`),
@@ -252,6 +291,7 @@ fn script(core: &str, device: &str) -> String {
 
 /// Текст замены разрешений: прежние запоминаются, новые встают, прежние уходят. Запрет
 /// стоит всё время — машина не открывается ни на миг (B-042).
+#[cfg(any(windows, test))]
 fn renew_script(allowed: &Allowed) -> String {
     format!(
         "$old = @(Get-NetFirewallRule -DisplayName '{PREFIX}*' -ErrorAction SilentlyContinue)
@@ -271,6 +311,7 @@ fn renew_script(allowed: &Allowed) -> String {
 /// безобидно; обратный порядок оставил бы машину запертой.
 /// Текст возврата. Отдельно от `release` по той же причине, что и `script`: это вторая
 /// половина той же гарантии, и её тоже надо уметь проверить, не запирая машину.
+#[cfg(any(windows, test))]
 pub(crate) fn restore_script(previous: &Backup) -> String {
     let profiles = previous
         .profiles

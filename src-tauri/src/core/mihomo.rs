@@ -298,7 +298,7 @@ impl Mihomo {
 
         self.log.clear();
         let controller = Controller::new()?;
-        let mut child = self.spawn(&core, &controller)?;
+        let mut child = self.spawn(&core, &controller, effective.device.as_deref())?;
 
         if let Err(why) = wait_ready(&mut child, &controller).await {
             // Не оставляем висеть ядро, которое запустилось, но так и не заработало.
@@ -345,8 +345,18 @@ impl Mihomo {
         running.launched = None;
     }
 
-    fn spawn(&self, core: &std::path::Path, controller: &Controller) -> Result<Child> {
-        let mut command = Command::new(core);
+    /// `device` — адаптер TUN: такому ядру нужны права, и запускает его система
+    /// (`Elevation::privileged`: на Windows права уже у клиента, на Linux — помощник, D-173).
+    fn spawn(
+        &self,
+        core: &std::path::Path,
+        controller: &Controller,
+        device: Option<&str>,
+    ) -> Result<Child> {
+        let mut command = match device {
+            Some(device) => Elevation::privileged(core, device),
+            None => Command::new(core),
+        };
         command
             .arg("-d")
             .arg(Paths::run_dir())
@@ -366,8 +376,7 @@ impl Mihomo {
             .stderr(Stdio::piped());
         // Своя группа процессов — ради мягкой остановки: без неё Ctrl+Break
         // прилетел бы и клиенту (S-021).
-        let mut child =
-            CoreProcess::spawn(command, crate::system::console::NEW_PROCESS_GROUP, "mihomo")?;
+        let mut child = CoreProcess::spawn(command, true, "mihomo")?;
         if let Some(out) = child.stdout.take() {
             self.log.pump(out);
         }
@@ -417,8 +426,7 @@ impl Mihomo {
     pub fn check_privileges(mode: Mode, elevated: bool) -> Result<()> {
         if mode == Mode::Tun && !elevated {
             return Err(AppError::NeedsElevation {
-                message: "Для режима TUN нужны права администратора — перезапустите приложение"
-                    .into(),
+                message: Elevation::missing(),
             });
         }
         Ok(())
@@ -438,7 +446,7 @@ async fn wait_ready(child: &mut Child, controller: &Controller) -> std::result::
     let deadline = Instant::now() + READY_TIMEOUT;
     loop {
         if let Ok(Some(code)) = child.try_wait() {
-            return Err(format!("Ядро завершилось ({code})."));
+            return Err(Elevation::refused(code).unwrap_or(format!("Ядро завершилось ({code}).")));
         }
         if controller.ready().await {
             return Ok(());
@@ -471,10 +479,6 @@ mod tests {
             "needsElevation",
             "интерфейс покажет кнопку по этому виду"
         );
-        let refusal = refusal.to_string();
-        assert!(
-            refusal.contains("администратора"),
-            "причина названа: {refusal}"
-        );
+        assert_eq!(refusal.to_string(), Elevation::missing(), "причина названа");
     }
 }

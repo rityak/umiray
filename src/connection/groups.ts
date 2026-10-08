@@ -72,7 +72,18 @@ export function groupName(name: string, nodes: api.Node[] = []): string {
     );
   }
   if (name === UDP) return t("UDP over UDP");
-  return name;
+  return plainName(name);
+}
+
+/// Эмодзи, флаги и их склейки: флаг рисуется рядом картинкой (D-084), а прочее в имени
+/// панели — украшение, которое Windows вдобавок рисует буквами.
+const EMOJI = /\p{Extended_Pictographic}|\p{Regional_Indicator}|‍|️|⃣/gu;
+
+/// Имя узла для глаз: без эмодзи и лишних пробелов. Имя целиком из эмодзи остаётся как есть —
+/// пустая плитка хуже украшенной. Выбирают и пишут в конфиг по-прежнему исходное имя.
+export function plainName(name: string): string {
+  const plain = name.replace(EMOJI, " ").replace(/\s+/g, " ").trim();
+  return plain === "" ? name : plain;
 }
 
 export function groupLabel(entry: GroupEntry, nodes: api.Node[]): string {

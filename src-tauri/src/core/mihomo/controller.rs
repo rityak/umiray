@@ -436,7 +436,7 @@ impl Controller {
 
     /// Конфиг глазами самого ядра. Только для замеров: рабочему коду знать, что ядро
     /// думает о своём конфиге, незачем — он знает, чем его запускал.
-    #[cfg(test)]
+    #[cfg(all(test, windows))]
     pub async fn config(&self) -> Result<serde_json::Value> {
         serde_json::from_str(&self.get("/configs").await?)
             .map_err(|e| AppError::network(format!("Ядро ответило неожиданным: {e}")))

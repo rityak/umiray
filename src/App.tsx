@@ -28,6 +28,7 @@ import { useStatus } from "./controllers/useStatus";
 import { useSystemActions } from "./controllers/useSystemActions";
 import { useUpdates } from "./controllers/useUpdates";
 import { ENGINES, headline } from "./engines";
+import { has } from "./features";
 import { saveLanguagePreference, t, tk } from "./i18n";
 import * as lifecycle from "./lifecycle";
 import Logs from "./logs/Logs";
@@ -392,12 +393,16 @@ export default function App() {
               (D-087). Отказ помнится — предложение, возвращающееся каждый запуск,
               это уже не предложение. И не поверх мастера: два вопроса разом —
               ни на один не ответят. */}
-        {status.elevated && !status.alwaysAdmin && settings.adminOffer && !setupOpen && (
-          <AdminOffer
-            onAccept={() => system.alwaysAdmin(true)}
-            onDismiss={() => update({ adminOffer: false })}
-          />
-        )}
+        {has("alwaysAdmin") &&
+          status.elevated &&
+          !status.alwaysAdmin &&
+          settings.adminOffer &&
+          !setupOpen && (
+            <AdminOffer
+              onAccept={() => system.alwaysAdmin(true)}
+              onDismiss={() => update({ adminOffer: false })}
+            />
+          )}
 
         <Banner
           message={banner}

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "targets": ["deb", "rpm"],
+    "category": "Utility",
+    "shortDescription": "VPN client on the mihomo core",
+    "longDescription": "umiray: subscriptions, nodes, routing and TUN on the mihomo core.",
+    "linux": {
+      "deb": {
+        "depends": ["pkexec | policykit-1", "util-linux", "nftables", "zenity"],
+        "preRemoveScript": "linux/prerm.sh",
+        "files": {
+          "/usr/share/polkit-1/actions/com.umiray.client.policy": "linux/com.umiray.client.policy"
+        }
+      },
+      "rpm": {
+        "depends": ["polkit", "util-linux", "nftables", "zenity"],
+        "preRemoveScript": "linux/prerm.sh",
+        "files": {
+          "/usr/share/polkit-1/actions/com.umiray.client.policy": "linux/com.umiray.client.policy"
+        }
+      }
+    }
+  }
+}

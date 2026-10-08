@@ -31,8 +31,8 @@ pub struct Node {
     /// Число получено запасным способом: выбранная проверка промолчала, а хост жив.
     pub fallback: bool,
     pub address: Option<String>,
-    /// Код страны из двух букв — по адресу, а не по имени (D-084). Пусто: не спрашивали,
-    /// не узнали или геозапросы выключены.
+    /// Код страны из двух букв — по адресу (D-084), без ответа — по флагу в имени.
+    /// Пусто: не узнали ни так, ни так.
     pub country: Option<String>,
     /// Правлен ли узел пользователем — поверх пришедшего лежит наша разница.
     pub edited: bool,
@@ -46,12 +46,10 @@ impl Node {
     /// таблицей снаружи.
     pub fn enrich(nodes: &mut [Node], pings: &ping::Table, countries: &geo::Cache) {
         for node in nodes {
+            node.country = geo::GeoCache::country(countries, node.address.as_deref(), &node.name);
             let Some(address) = node.address.clone() else {
                 continue;
             };
-            node.country = countries
-                .get(&address)
-                .and_then(|known| known.country.clone());
             let Some(reply) = pings.get(&address) else {
                 continue;
             };

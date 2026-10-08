@@ -2,6 +2,7 @@ import { AppWindow, MonitorCog, Network, Server } from "lucide-react";
 import { memo, useRef } from "react";
 import { Badge, Card, CopyButton, Field, Item, SegmentedControl } from "rootik";
 import * as api from "../api";
+import { available, type Feature } from "../features";
 import { t, tk } from "../i18n";
 import Flag from "../shell/Flag";
 import { hide } from "../shell/secret";
@@ -48,11 +49,12 @@ export const MODES = [
   {
     value: "system" as const,
     label: "System",
-    hint: tk("Windows proxy"),
+    hint: tk("system proxy"),
     about: tk(
-      "umiray becomes the Windows proxy. Browsers and most apps pick it up, but games and some programs don't.",
+      "umiray becomes the system proxy. Browsers and most apps pick it up, but games and some programs don't.",
     ),
     icon: <MonitorCog />,
+    feature: "systemProxy" as Feature,
   },
   {
     value: "tun" as const,
@@ -88,7 +90,7 @@ function what(status: api.Status): string {
   if (mode === null)
     return t("{mode} turns on with VPN", { mode: api.MODE_LABEL[status.desiredMode] });
   if (mode === "tun") return t("all device traffic goes through the adapter");
-  if (mode === "system") return t("proxy set in Windows settings");
+  if (mode === "system") return t("proxy set in system settings");
   return t("enter the address below in your browser or app");
 }
 
@@ -237,7 +239,7 @@ export default memo(function ConnectionPath({
             <SegmentedControl
               aria-label={t("Capture")}
               fill
-              options={MODES.map((item) => ({
+              options={MODES.filter(available).map((item) => ({
                 value: item.value,
                 label: item.label,
                 hint: t(item.hint),

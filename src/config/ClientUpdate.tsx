@@ -2,7 +2,9 @@ import { Download, RefreshCw } from "lucide-react";
 import { Button, Code, ConfirmButton, Progress, Text } from "rootik";
 import type { UpdateInfo, UpdateProgress } from "../api";
 import { formatBytes, VERSION } from "../api";
+import { has } from "../features";
 import { t } from "../i18n";
+import ReleaseNotes from "./ReleaseNotes";
 
 type Props = {
   info: UpdateInfo | null;
@@ -32,7 +34,8 @@ export default function ClientUpdate({
             <Button icon={<RefreshCw />} loading={checking} disabled={busy} onClick={onCheck}>
               {t("Check for updates")}
             </Button>
-            {info?.version && (
+            {/* Поставленный чужим менеджером пакетов (Arch) обновляет он же (D-174). */}
+            {info?.version && has("selfUpdate") && (
               <ConfirmButton
                 icon={<Download />}
                 variant="primary"
@@ -52,7 +55,11 @@ export default function ClientUpdate({
           : progress
             ? t("Downloading update…")
             : info?.version
-              ? t("umiray {version} is available", { version: info.version })
+              ? has("selfUpdate")
+                ? t("umiray {version} is available", { version: info.version })
+                : t("umiray {version} is available — update it with your package manager", {
+                    version: info.version,
+                  })
               : info?.enabled === false
                 ? t("Updates are unavailable in this build.")
                 : info
@@ -67,11 +74,7 @@ export default function ClientUpdate({
           showValue={formatBytes(progress.downloaded)}
         />
       )}
-      {info?.notes && (
-        <Text className="selectable whitespace-pre-wrap" size="sm">
-          {info.notes}
-        </Text>
-      )}
+      {info?.notes && <ReleaseNotes notes={info.notes} />}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 //! Где лежат файлы приложения. Единственная ответственность модуля — пути.
 //!
-//! Всё живёт под `%LOCALAPPDATA%\umiray` (D-150). Не `app_local_data_dir` из Tauri —
+//! Всё живёт под `%LOCALAPPDATA%\umiray` на Windows и `$XDG_DATA_HOME/umiray`
+//! (`~/.local/share/umiray`) на Linux (D-150). Не `app_local_data_dir` из Tauri —
 //! тот подставил бы identifier из tauri.conf.json.
 //!
 //! **У отладочной сборки каталог свой** — `umiray-dev` (D-150). Разработка идёт
@@ -23,24 +24,53 @@ pub const APP_NAME: &str = if cfg!(debug_assertions) {
 
 /// Имя клиента в каталоге данных (D-171). Совпадает с именем бинаря сборки: так копия
 /// из `target/debug` и установленная — один и тот же процесс для `taskkill` и проверок.
+/// Только Windows: на Linux клиент лежит там, куда его положил пакет.
+#[cfg(windows)]
 pub const CLIENT_NAME: &str = if cfg!(debug_assertions) {
     "umiray-dev.exe"
 } else {
     "umiray.exe"
 };
 
-pub const CORE_NAME: &str = if cfg!(debug_assertions) {
-    "mihomo-dev.exe"
-} else {
-    "mihomo.exe"
-};
+/// Имя бинаря: своё у отладочной сборки (D-150), `.exe` только на Windows.
+macro_rules! binary {
+    ($debug:literal, $release:literal) => {
+        match (cfg!(debug_assertions), cfg!(windows)) {
+            (true, true) => concat!($debug, ".exe"),
+            (false, true) => concat!($release, ".exe"),
+            (true, false) => $debug,
+            (false, false) => $release,
+        }
+    };
+}
+
+pub const CORE_NAME: &str = binary!("mihomo-dev", "mihomo");
+
+/// Переменная с корнем данных пользователя. Её же подменяют проверки (`Sandbox`).
+#[cfg(windows)]
+pub const BASE: &str = "LOCALAPPDATA";
+#[cfg(not(windows))]
+pub const BASE: &str = "XDG_DATA_HOME";
 
 pub struct Paths;
 
 impl Paths {
     pub fn root() -> PathBuf {
-        let base = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| ".".into());
-        PathBuf::from(base).join(APP_NAME)
+        Paths::base().join(APP_NAME)
+    }
+
+    /// Корень данных пользователя. На Linux без `XDG_DATA_HOME` — его умолчание
+    /// по спецификации XDG, `~/.local/share`.
+    fn base() -> PathBuf {
+        if let Some(base) = std::env::var_os(BASE).filter(|base| !base.is_empty()) {
+            return PathBuf::from(base);
+        }
+        if cfg!(windows) {
+            return PathBuf::from(".");
+        }
+        std::env::var_os("HOME")
+            .map(|home| PathBuf::from(home).join(".local/share"))
+            .unwrap_or_else(|| PathBuf::from("."))
     }
 
     /// Предыдущий каталог этого же окружения, только для разового переезда (D-150).
@@ -58,6 +88,7 @@ impl Paths {
     }
 
     /// Единственное место, откуда клиент работает (D-171).
+    #[cfg(windows)]
     pub fn client_exe() -> PathBuf {
         Paths::root().join(CLIENT_NAME)
     }
@@ -112,13 +143,9 @@ impl Paths {
 
 /// Бинарь второго ядра (D-154). У debug своё имя, как у mihomo (D-150): уборка сирот
 /// по пути одной сборки не тронет процесс другой.
-pub const QD_NAME: &str = if cfg!(debug_assertions) {
-    "qd-dev.exe"
-} else {
-    "qd.exe"
-};
+pub const QD_NAME: &str = binary!("qd-dev", "qd");
 
-/// Свой `LOCALAPPDATA` для проверки с диском — под замком на весь процесс: переменная одна
+/// Свой корень данных (`BASE`) для проверки с диском — под замком на весь процесс: переменная одна
 /// на процесс, и две проверки иначе подменяли бы каталог друг у друга на ходу.
 #[cfg(test)]
 pub struct Sandbox {
@@ -134,7 +161,7 @@ impl Sandbox {
         let dir = std::env::temp_dir().join(format!("umiray-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        std::env::set_var("LOCALAPPDATA", &dir);
+        std::env::set_var(BASE, &dir);
         Sandbox { _lock: lock, dir }
     }
 }

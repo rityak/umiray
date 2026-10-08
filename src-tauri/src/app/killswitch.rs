@@ -130,7 +130,9 @@ fn step(tun: Option<&Allowed>, wanted: bool, held: Option<&Backup>) -> Step {
 fn remember(state: &AppState, backup: Option<Backup>) -> Result<()> {
     state
         .settings
-        .update(|settings| settings.kill_switch_backup = backup)
+        .update(|settings| settings.kill_switch_backup = backup)?;
+    crate::app::leftovers::Leftovers::mark(state);
+    Ok(())
 }
 
 #[cfg(test)]

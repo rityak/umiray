@@ -8,10 +8,10 @@ const ru: Record<string, Entry> = {
   "Interface language": "Язык интерфейса",
   Startup: "Запуск",
   Window: "Окно",
-  "Launch with Windows": "Запускать вместе с Windows",
+  "Sign-in": "Вход в систему",
+  "Launch at sign-in": "Запускать при входе в систему",
   "via Windows Task Scheduler": "через задачу в «Планировщике заданий»",
-  "via a startup entry visible in Task Manager":
-    "через автозагрузку, её видно в «Диспетчере задач»",
+  "via the system startup list": "через автозагрузку системы",
   "Always run as administrator": "Всегда от имени администратора",
   "Task installed: no UAC prompt, TUN starts right away.":
     "задача создана: UAC не спрашивает, TUN запускается сразу",
@@ -170,16 +170,16 @@ const ru: Record<string, Entry> = {
     "Клиент будет запускаться от администратора без запроса UAC. Задача umiray создана в «Планировщике заданий».",
   "Settings reset. The core and device ID were kept.":
     "Настройки сброшены. Ядро и идентификатор устройства остались.",
-  "Couldn't set the Windows proxy — enter the address in your browser.":
-    "Не удалось задать прокси в Windows — укажите адрес в браузере вручную.",
+  "Couldn't set the system proxy — enter the address in your browser.":
+    "Не удалось задать системный прокси — укажите адрес в браузере вручную.",
   "System proxy was {proxy} — it's replaced while connected and restored after.":
     "Системный прокси был {proxy}: при подключении он будет заменён, при отключении — восстановлен.",
   "unsaved changes": "есть несохранённые изменения",
   Sections: "Разделы",
   "both stacks — works on most machines; choose this if unsure":
     "оба стека — работает почти везде; выберите, если не уверены",
-  "Windows stack: fastest, but not supported on every machine":
-    "стек Windows: самый быстрый, но работает не везде",
+  "the system network stack: fastest, but not supported on every machine":
+    "сетевой стек системы: самый быстрый, но работает не везде",
   "core stack: works almost everywhere, a bit slower":
     "стек ядра: работает везде, но чуть медленнее",
   "route by domain name — faster and more precise": "маршрут по имени домена — быстрее и точнее",
@@ -200,6 +200,7 @@ const ru: Record<string, Entry> = {
     "видно в «Сетевых подключениях». Пусто — ядро назовёт его Meta",
   "0 lets the core decide; otherwise 576–9000. Use the path MTU tool to measure":
     "0 — ядро решит само, иначе 576…9000. Подобрать поможет «MTU пути»",
+  "0 lets the core decide; otherwise 576–9000": "0 — ядро решит само, иначе 576…9000",
   "the core blocks routes that skip the adapter — like kill-switch, but a different mechanism":
     "ядро блокирует маршруты в обход адаптера; похоже на kill-switch, но работает иначе",
   "catch other DNS queries so apps with their own resolver don't skip the tunnel. Empty — no interception":
@@ -306,12 +307,12 @@ const ru: Record<string, Entry> = {
   "The selected check gave no result, but the host is reachable — {method}":
     "выбранная проверка не дала результата, но хост доступен — {method}",
   "set the address in your app": "адрес указывается в приложении",
-  "Windows proxy": "прокси Windows",
+  "system proxy": "системный прокси",
   "all device traffic": "весь трафик устройства",
   "Only apps where you enter the umiray address go through VPN. Everything else goes direct.":
     "Через VPN идут только программы, в которых вы указали адрес umiray. Остальное работает напрямую.",
-  "umiray becomes the Windows proxy. Browsers and most apps pick it up, but games and some programs don't.":
-    "umiray становится прокси Windows. Браузеры и большинство программ подхватят его сами, а игры и часть приложений — нет.",
+  "umiray becomes the system proxy. Browsers and most apps pick it up, but games and some programs don't.":
+    "umiray становится системным прокси. Браузеры и большинство программ подхватят его сами, а игры и часть приложений — нет.",
   "All traffic on this computer goes through VPN, games and UDP included. No setup in apps.":
     "Через VPN идёт весь трафик компьютера, включая игры и UDP. В программах ничего настраивать не нужно.",
   "spread across working nodes": "по всем рабочим узлам",
@@ -323,7 +324,7 @@ const ru: Record<string, Entry> = {
   "core missing — download it in Settings": "ядра нет — скачайте его в «Настройках»",
   "{mode} turns on with VPN": "{mode} включится вместе с VPN",
   "all device traffic goes through the adapter": "весь трафик устройства идёт через адаптер",
-  "proxy set in Windows settings": "прокси прописан в настройках Windows",
+  "proxy set in system settings": "прокси прописан в настройках системы",
   "enter the address below in your browser or app": "укажите адрес ниже в браузере или приложении",
   "Connecting…": "Подключение…",
   "Core missing": "Нет ядра",
@@ -710,8 +711,8 @@ const ru: Record<string, Entry> = {
   "Never check": "Не определять",
   "Every week": "Раз в неделю",
   "Every month": "Раз в месяц",
-  "With Windows: start in tray. From a shortcut: open the window":
-    "с Windows — в трей, с ярлыка — окно",
+  "At sign-in: start in tray. From a shortcut: open the window":
+    "при входе в систему — в трей, с ярлыка — окно",
   "Open window": "Окно",
   "Start with the window open": "запуск с открытым окном",
   "Start in tray": "В трей",
@@ -797,6 +798,8 @@ const ru: Record<string, Entry> = {
   "umiray {version} is available": "Доступна umiray {version}",
   "Installing… The client will restart.": "Установка… Клиент перезапустится.",
   "Downloading update…": "Скачивание обновления…",
+  "umiray {version} is available — update it with your package manager":
+    "Вышла umiray {version} — обновите её менеджером пакетов",
   "Updates are unavailable in this build.": "В этой сборке обновления недоступны.",
   "You have the latest version.": "У вас последняя версия.",
   "Checks on launch; installs only when you say so.":
@@ -900,6 +903,8 @@ const ru: Record<string, Entry> = {
   "Not everything was picked": "Подобрано не всё",
   "Sets up the core for every mode and picks DNS and MTU for this computer.":
     "Настроит ядро сразу для всех режимов и подберёт DNS и MTU под этот компьютер.",
+  "Sets up the core for every mode and picks DNS for this computer.":
+    "Настроит ядро сразу для всех режимов и подберёт DNS под этот компьютер.",
   "Changes nothing. You can set everything up later in Settings.":
     "Ничего не меняет. Всё можно настроить позже в «Настройках».",
   "Compares public DNS servers and keeps the four fastest.":

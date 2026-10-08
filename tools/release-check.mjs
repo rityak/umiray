@@ -34,6 +34,20 @@ assert.equal(config.version, "../package.json");
 assert.equal(config.mainBinaryName, "umiray");
 assert.equal(config.bundle.createUpdaterArtifacts, true);
 assert.deepEqual(config.bundle.targets, ["nsis"]);
+// Linux (D-173): deb и rpm, помощник с правами назван polkit тем же путём, куда его кладёт пакет.
+const linux = JSON.parse(read("src-tauri/tauri.linux.conf.json"));
+assert.deepEqual(linux.bundle.targets, ["deb", "rpm"]);
+const policy = "/usr/share/polkit-1/actions/com.umiray.client.policy";
+for (const format of ["deb", "rpm"]) {
+  const source = linux.bundle.linux[format].files[policy];
+  assert.ok(source, `${format} must ship the polkit action`);
+  assert.match(
+    read(`src-tauri/${source}`),
+    new RegExp(`exec\\.path">/usr/bin/${config.mainBinaryName}<`),
+    "polkit must name the installed binary",
+  );
+}
+assert.match(read("src-tauri/linux/arch/PKGBUILD"), /^pkgname=umiray-bin$/m);
 assert.deepEqual(config.plugins.updater.endpoints, [
   "https://github.com/rityak/umiray/releases/latest/download/latest.json",
 ]);
