@@ -11,6 +11,9 @@
 
 <p align="center"><b>1.6.0</b> · <a href="README.ru.md">Русская версия</a></p>
 
+> **Umiray is a proxy client for Windows and Linux powered by Mihomo.** It runs solely on the user’s computer, at their request, and provides local proxy, system proxy or TUN modes. It includes no servers, does not encrypt or tunnel traffic by itself, and grants no access to any service. The code and builds are provided as is. You are responsible for using them in accordance with the laws of your country and the terms of your network provider. The authors do not encourage any violation of these rules and accept no liability for any use.
+
+
 ![Connection](screenshots/connection.png)
 
 ## Features
@@ -58,11 +61,6 @@ it selects English. Override this in Settings → Umiray Settings → Interface 
 [umiray-core](https://github.com/rityak/umiray-core) contains the optional Windows traffic
 transformer VOLT. It changes TCP segmentation and packet order and can add decoy packets
 while preserving the real data stream.
-
-Open Settings → Umiray Settings → Anti-DPI → VOLT to configure direct connections and
-VPN traffic independently. Enabling VOLT downloads its binaries from core releases;
-packet capture requires administrator rights. DIRECT-VOLT always uses the Relay,
-while DIRECT-AUTO tries an ordinary TLS connection first. VOLT is not a VPN service.
 
 ## Dependencies and build
 
