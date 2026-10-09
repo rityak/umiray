@@ -17,3 +17,5 @@ scan.txt
 *.key
 .env
 .env.*
+QD.md
+RELEASING.md
