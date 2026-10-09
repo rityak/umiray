@@ -980,14 +980,24 @@ mod tests {
             std::env::temp_dir().join(format!("volt-probe-test-{}.yaml", Stamp::id().unwrap()));
         std::fs::write(&file, b"probe").unwrap();
         let marker = file.with_extension("stopped");
+        let ready = file.with_extension("ready");
         let mut command = Command::new("powershell");
-        command.args(["-NoProfile", "-NonInteractive", "-Command", "if ([Console]::ReadLine() -eq 'stop') { [IO.File]::WriteAllText($env:UMIRAY_PROBE_MARKER, 'stopped'); exit 0 }; exit 1"]);
+        command.args(["-NoProfile", "-NonInteractive", "-Command", "[IO.File]::WriteAllText($env:UMIRAY_PROBE_READY, 'ready'); if ([Console]::ReadLine() -eq 'stop') { [IO.File]::WriteAllText($env:UMIRAY_PROBE_MARKER, 'stopped'); exit 0 }; exit 1"]);
         command
             .env("UMIRAY_PROBE_MARKER", &marker)
+            .env("UMIRAY_PROBE_READY", &ready)
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         let child = CoreProcess::spawn(command, false, "VOLT test probe").unwrap();
+        // A cold PowerShell on a CI runner takes longer than the 2 s stop grace to start;
+        // a real helper is already serving when its probe is dropped. Wait for the same.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while !ready.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(ready.exists(), "the test child never started");
+        std::fs::remove_file(&ready).unwrap();
         let guard = ProbeRelay {
             child: Some(child),
             file: file.clone(),
