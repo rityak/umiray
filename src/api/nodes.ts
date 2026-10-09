@@ -111,6 +111,8 @@ export type BuiltGroup = z.infer<typeof BuiltGroup>;
 /// Всё, что опрашивает «Соединение», одним ответом (D-145): узлы, направление — с поправкой
 /// на исчезнувший выбранный узел, — способ замера и выход от выбранного до узла.
 export const ConnectionSnapshot = z.object({
+  directTarget: z.string(),
+  directTargets: z.array(z.string()),
   nodes: z.array(Node),
   direction: Direction,
   /// Узел или группа, выбранные в `manual`; вне него пусто (D-166, D-172).

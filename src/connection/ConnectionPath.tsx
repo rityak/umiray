@@ -7,11 +7,15 @@ import { t, tk } from "../i18n";
 import Flag from "../shell/Flag";
 import { hide } from "../shell/secret";
 import Uptime from "../shell/Uptime";
+import { bypassNote } from "./exits";
 import { groupName } from "./groups";
 import { delayTone } from "./NodeDelay";
 import PowerRow from "./PowerRow";
 
 type Props = {
+  /// A row under the capture switch: VOLT (D-182).
+  extra?: React.ReactNode;
+  directTarget: string;
   status: api.Status;
   mode: api.Choice;
   running: api.Choice | null;
@@ -42,7 +46,7 @@ export const MODES = [
     label: "Proxy",
     hint: tk("set the address in your app"),
     about: tk(
-      "Only apps where you enter the umiray address go through VPN. Everything else goes direct.",
+      "Only apps where you enter the umiray address go through the proxy. Everything else goes direct.",
     ),
     icon: <AppWindow />,
   },
@@ -61,7 +65,7 @@ export const MODES = [
     label: "TUN",
     hint: tk("all device traffic"),
     about: tk(
-      "All traffic on this computer goes through VPN, games and UDP included. No setup in apps.",
+      "All traffic on this computer goes through the proxy, games and UDP included. No setup in apps.",
     ),
     icon: <Network />,
   },
@@ -69,7 +73,7 @@ export const MODES = [
 
 /// Explain routing while no exit is known.
 const WAITING: Record<api.Direction, string> = {
-  direct: tk("bypass VPN — no server"),
+  direct: tk("bypass proxy — no server"),
   // AUTO — `load-balance` по живым узлам (D-053): «лучший» был бы неправдой —
   // медленный узел получает сайты наравне с быстрым.
   auto: tk("spread across working nodes"),
@@ -78,7 +82,7 @@ const WAITING: Record<api.Direction, string> = {
 
 /// Explain how the current exit was selected.
 const CHOSEN: Record<api.Direction, string> = {
-  direct: tk("bypass VPN"),
+  direct: tk("bypass proxy"),
   auto: tk("selected automatically"),
   manual: tk("selected manually"),
 };
@@ -88,7 +92,7 @@ function what(status: api.Status): string {
   const mode = api.runningMode(status);
   if (!status.corePresent) return t("core missing — download it in Settings");
   if (mode === null)
-    return t("{mode} turns on with VPN", { mode: api.MODE_LABEL[status.desiredMode] });
+    return t("{mode} turns on when you connect", { mode: api.MODE_LABEL[status.desiredMode] });
   if (mode === "tun") return t("all device traffic goes through the adapter");
   if (mode === "system") return t("proxy set in system settings");
   return t("enter the address below in your browser or app");
@@ -107,6 +111,8 @@ function headline(status: api.Status, powering: boolean, stopping: boolean): str
  */
 /// Traffic ticks do not affect these controls.
 export default memo(function ConnectionPath({
+  directTarget,
+  extra,
   status,
   mode,
   running,
@@ -192,7 +198,12 @@ export default memo(function ConnectionPath({
                 {groupName(route[0])}
               </span>
             ) : direction === "direct" ? (
-              t("Direct connection")
+              // Через обход выход называется своим именем (D-186): DIRECT-AUTO, DIRECT-VOLT.
+              directTarget === "DIRECT" ? (
+                t("Direct connection")
+              ) : (
+                directTarget
+              )
             ) : direction === "auto" ? (
               // AUTO выбран и до подключения: «не выбран» было бы неправдой.
               "AUTO"
@@ -200,7 +211,11 @@ export default memo(function ConnectionPath({
               t("No exit selected")
             )
           }
-          description={live ? why : t(WAITING[direction])}
+          description={
+            live
+              ? why
+              : (direction === "direct" && bypassNote(directTarget)) || t(WAITING[direction])
+          }
           meta={
             live &&
             selected &&
@@ -250,6 +265,7 @@ export default memo(function ConnectionPath({
             />
           </Field>
         </div>
+        {extra}
       </div>
     </Card>
   );

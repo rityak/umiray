@@ -27,11 +27,14 @@ export const UNKNOWN_KIND = { Icon: Layers, word: tk("no type") };
 
 /// A target nothing answers to: a renamed or deleted group, a node the subscription dropped.
 /// The build sends such a rule to `umiray` (D-156) — the window says so instead of "group".
-export function lostLook(): { Icon: LucideIcon; tone: Tone; word: string } {
+/// A VOLT exit is lost only while the bypass is off, and the hint says that (D-191).
+export function lostLook(target = ""): { Icon: LucideIcon; tone: Tone; word: string } {
   return {
     Icon: CircleAlert,
     tone: "warn",
-    word: t("not found · goes to the exit chosen in Connection"),
+    word: ["DIRECT-VOLT", "DIRECT-AUTO"].includes(target)
+      ? t("bypass is off · goes to the exit chosen in Connection")
+      : t("not found · goes to the exit chosen in Connection"),
   };
 }
 
@@ -41,14 +44,15 @@ export function targetLook(
   target: string,
   nodes: string[],
 ): { Icon: LucideIcon; tone: Tone; word: string } {
-  if (target === "DIRECT") return { Icon: ArrowUpRight, tone: "neutral", word: t("bypass VPN") };
+  if (["DIRECT", "DIRECT-PLAIN", "DIRECT-VOLT", "DIRECT-AUTO"].includes(target))
+    return { Icon: ArrowUpRight, tone: "neutral", word: t("bypass proxy") };
   if (target === "REJECT") return { Icon: Ban, tone: "danger", word: t("block") };
   // `umiray` follows the choice in Connection, and that choice can be DIRECT: "through
   // VPN" would be a lie there.
   if (target === "umiray")
     return { Icon: Globe, tone: "accent", word: t("whatever you pick in Connection") };
-  if (target === "AUTO") return { Icon: Globe, tone: "accent", word: t("through VPN") };
+  if (target === "AUTO") return { Icon: Globe, tone: "accent", word: t("through proxy") };
   if (nodes.includes(target))
-    return { Icon: Server, tone: "accent", word: t("node · through VPN") };
-  return { Icon: Layers, tone: "accent", word: t("group · through VPN") };
+    return { Icon: Server, tone: "accent", word: t("node · through proxy") };
+  return { Icon: Layers, tone: "accent", word: t("group · through proxy") };
 }

@@ -11,10 +11,10 @@
   <vendor>umiray</vendor>
   <vendor_url>https://github.com/rityak/umiray</vendor_url>
   <action id="com.umiray.client.helper">
-    <description>Run the umiray VPN tunnel</description>
-    <description xml:lang="ru">Запустить туннель VPN umiray</description>
-    <message>umiray needs permission to bring up the VPN tunnel</message>
-    <message xml:lang="ru">umiray нужно разрешение, чтобы поднять туннель VPN</message>
+    <description>Run the umiray network tunnel</description>
+    <description xml:lang="ru">Запустить сетевой туннель umiray</description>
+    <message>umiray needs permission to bring up the network tunnel</message>
+    <message xml:lang="ru">umiray нужно разрешение, чтобы поднять сетевой туннель</message>
     <defaults>
       <allow_any>auth_admin</allow_any>
       <allow_inactive>auth_admin</allow_inactive>

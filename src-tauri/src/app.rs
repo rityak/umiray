@@ -39,3 +39,5 @@ pub mod tick;
 pub mod tray;
 pub mod updates;
 pub mod wake;
+
+pub mod volt;

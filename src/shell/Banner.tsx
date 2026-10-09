@@ -38,7 +38,7 @@ type Props = {
 const ACTIONS: Record<string, { label: string; pick: (props: Props) => () => void }> = {
   coreMissing: { label: tk("Download the core"), pick: (props) => props.onInstall },
   needsElevation: { label: tk("Restart as admin"), pick: (props) => props.onElevate },
-  restartNeeded: { label: tk("Restart VPN"), pick: (props) => props.onRestart },
+  restartNeeded: { label: tk("Reconnect"), pick: (props) => props.onRestart },
 };
 
 export default function Banner(props: Props) {

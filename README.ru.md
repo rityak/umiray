@@ -5,17 +5,18 @@
 <h1 align="center">Umiray</h1>
 
 <p align="center">
-  VPN-клиент для Windows и Linux на ядре <a href="https://github.com/MetaCubeX/mihomo">Mihomo</a>.<br>
+  Прокси-клиент для Windows и Linux на ядре <a href="https://github.com/MetaCubeX/mihomo">Mihomo</a>.<br>
   Tauri 2 · Rust · React · <a href="https://github.com/rityak/rootik">Rootik</a>
 </p>
 
-<p align="center">1.5.1 · <a href="README.md">English</a></p>
+<p align="center">1.6.0 · <a href="README.md">English</a></p>
 
 ![Соединение](screenshots/connection.png)
 
 ## Возможности
 
 - Подключение одним нажатием и отдельный выбор режима Proxy, System или TUN.
+- Мастер при первом запуске: настройки ядра, подписка, режим и маршрут.
 - Маршруты Direct, Auto, Manual или свои правила.
 - Подписки, отдельные ссылки, файлы WireGuard и AmneziaWG, узлы вручную.
   Правки узлов сохраняются при обновлении подписки.
@@ -25,18 +26,7 @@
 - Режим «на людях» скрывает адреса серверов и имена подписок для снимков и трансляций.
 - Подписанные обновления клиента из GitHub Releases, с подтверждением и прогрессом загрузки.
 
-## Скриншоты
-
-| | |
-|---|---|
-| ![Источники](screenshots/sources.png) | ![Группы](screenshots/groups.png) |
-| ![Маршрутизация](screenshots/routing.png) | ![Настройки](screenshots/settings.png) |
-| ![Инструменты](screenshots/tools.png) | ![Логи](screenshots/logs.png) |
-
-На снимках демонстрационные данные и английский интерфейс. Язык можно выбрать в
-«Настройки» → Umiray Settings → «Язык интерфейса»: автоматически, English или Русский.
-
-## Запуск
+## Установка и первый запуск
 
 Скачайте из [Releases](https://github.com/rityak/umiray/releases/latest):
 
@@ -49,6 +39,9 @@
   и `umiray.install` из релиза: `makepkg -si`.
 
 Ядро mihomo клиент скачает с официальной страницы релизов при первом запуске.
+Добавьте подписку, ссылку на прокси или файл конфигурации, выберите узел и нажмите подключение.
+Proxy предоставляет локальный прокси для приложений; System включает системный прокси;
+TUN перехватывает трафик через виртуальный интерфейс. Серверы в комплект не входят.
 
 Для TUN нужны дополнительные права. На Windows клиент может создать задачу в планировщике,
 чтобы запускаться с правами без подтверждения UAC каждый раз. На Linux клиент работает
@@ -59,13 +52,31 @@
 Если установлена русская раскладка клавиатуры, интерфейс выбирает русский язык.
 В остальных случаях — английский.
 
-## Сборка
+## Umiray Core / VOLT
 
-Нужны Node.js 22+, Rust и [зависимости Tauri](https://v2.tauri.app/start/prerequisites/).
+[umiray-core](https://github.com/rityak/umiray-core) содержит дополнительный Windows-механизм
+обработки трафика VOLT. Он меняет разделение и порядок TCP-пакетов, может добавлять ложные
+пакеты, сохраняя реальные данные.
+
+Настройки → Umiray Settings → Anti-DPI → VOLT: прямые соединения и трафик VPN
+настраиваются независимо. При включении клиент скачивает бинарники из релизов core;
+для перехвата нужны права администратора. DIRECT-VOLT всегда использует Relay,
+а DIRECT-AUTO сначала пробует обычное TLS-соединение. VOLT не предоставляет VPN-сервис.
+
+## Зависимости и сборка
+
+Нужны Node.js 22+, Rust stable и [зависимости Tauri](https://v2.tauri.app/start/prerequisites/):
+Microsoft C++ Build Tools и WebView2 на Windows; WebKitGTK 4.1 и перечисленные пакеты
+разработки на Linux. Зависимости JavaScript и Rust устанавливаются через npm и Cargo.
 
 ```sh
 npm ci
 npm run tauri dev
+```
+
+Сборка бинарника без установщика:
+
+```sh
 npm run tauri build -- --no-bundle
 ```
 
@@ -75,12 +86,6 @@ npm run tauri build -- --no-bundle
 Проверки: `npm run lint`, `npm test`, `npx tsc --noEmit` и `cargo test` в `src-tauri`.
 `npm run dev` открывает интерфейс в браузере с демонстрационными данными.
 
-## Статус
-
-Windows x64 и Linux x86_64. Ошибки — в [Issues](https://github.com/rityak/umiray/issues).
-
-Обновления проверяются при запуске и в «Настройки» → Umiray Settings → «Обслуживание».
-Установка проверяет подпись, отключает VPN и сохраняет пользовательские данные.
-На Arch обновления ставит менеджер пакетов; клиент только сообщает, что вышла новая версия.
-
-Выпуск новой версии: [RELEASING.md](RELEASING.md).
+Ошибки — в [Issues](https://github.com/rityak/umiray/issues).
+Код и сборки распространяются как есть; пользователь отвечает за соблюдение законов
+и условий провайдеров. Авторы не несут ответственности за использование.

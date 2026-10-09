@@ -1,0 +1,16 @@
+# Optional packet layout for TCP transports without a recognizable TLS prefix.
+version: 1
+default_action: pass
+
+udp:
+  enabled: false
+
+profiles:
+  - name: vpn-tcp-window
+    match:
+      network: tcp
+    stages:
+      - action: split
+        positions: ['1', '32', '64']
+        packet_limit: 8
+        byte_limit: 32768

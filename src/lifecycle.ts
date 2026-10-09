@@ -125,7 +125,7 @@ on({
       const error = api.asAppError(e);
       boot.message({
         tone: "error",
-        text: t("Couldn't download the core — VPN can't start without it."),
+        text: t("Couldn't download the core — can't connect without it."),
         details: [error.message, ...error.details],
         kind: "coreMissing",
       });

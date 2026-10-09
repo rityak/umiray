@@ -141,6 +141,11 @@ impl Mihomo {
         &self.log
     }
 
+    /// Резолвер работающего ядра для VOLT Relay (D-176). Ядро не работает — `None`.
+    pub fn resolver(&self) -> Option<(String, String)> {
+        self.controller().map(|controller| controller.resolver())
+    }
+
     /// Ручка к API ядра. Приватна намеренно: наружу из `core` торчат доменные операции
     /// (`select`, `traffic`, `reload`), а не устройство ядра (D-033).
     fn controller(&self) -> Option<Controller> {

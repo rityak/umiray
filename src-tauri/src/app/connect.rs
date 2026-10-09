@@ -66,7 +66,7 @@ impl Connection {
             .await
     }
 
-    async fn start_locked(
+    pub(crate) async fn start_locked(
         &self,
         app: &AppHandle,
         state: &AppState,
@@ -131,7 +131,20 @@ impl Connection {
         self.apply_locked(app, state).await
     }
 
-    async fn apply_locked(&self, app: &AppHandle, state: &AppState) -> Result<Status> {
+    /// Помощники VOLT обходят перезагрузку с двух сторон (D-177): нужные поднимаются до неё —
+    /// ядро направит в них трафик, — ненужные гаснут после, когда маршрутов к ним уже нет.
+    /// Отказ помощника здесь не останавливает правку чужого документа: он уходит в лог,
+    /// а строгий ответ даёт окно VOLT (`app::volt::update`).
+    pub(crate) async fn apply_locked(&self, app: &AppHandle, state: &AppState) -> Result<Status> {
+        if let Err(why) = crate::app::volt::prepare(state).await {
+            state.note("error", &format!("VOLT не поднялся: {why}"));
+        }
+        let status = self.reload_locked(app, state).await?;
+        crate::app::volt::settle(state)?;
+        Ok(status)
+    }
+
+    async fn reload_locked(&self, app: &AppHandle, state: &AppState) -> Result<Status> {
         let Some(launched) = state.mihomo.launched() else {
             return Ok(self.shown(app, state));
         };
@@ -140,6 +153,7 @@ impl Connection {
         let effective = crate::render::effective::ConfigRenderer::effective(
             &state.routing.document(state)?,
             state.mihomo.probe_port(),
+            state.volt.route(&crate::config::volt::Options::get()?)?,
         )?;
         let changed = match crate::core::mihomo::apply::Apply::needed(&launched, &effective.yaml)? {
             Some(crate::core::mihomo::apply::Apply::Restart(_)) => {
@@ -217,7 +231,7 @@ impl Connection {
         self.stop_locked(app, state).await
     }
 
-    async fn stop_locked(&self, app: &AppHandle, state: &AppState) -> Status {
+    pub(crate) async fn stop_locked(&self, app: &AppHandle, state: &AppState) -> Status {
         let mut busy = state.busy();
         if busy.is_empty() {
             busy.push(state.settings.get().engine);
@@ -307,6 +321,7 @@ impl Connection {
     pub fn watch(app: AppHandle) {
         tauri::async_runtime::spawn(async move {
             let mut watch = Watch::default();
+            let mut volt = Watch::default();
             let mut seen = Vec::new();
             loop {
                 tokio::time::sleep(TICK).await;
@@ -315,6 +330,7 @@ impl Connection {
                 for engine in EngineId::ALL {
                     let _ = state.engine(engine).refresh().await;
                 }
+                revive_volt(&state, &mut volt).await;
                 let now = EngineId::ALL.map(|engine| (engine, state.engine(engine).state()));
                 // Ядро сменило состояние само — значок догоняет, даже если окно спрятано.
                 let on: Vec<_> = now.iter().map(|(_, engine)| engine.on).collect();
@@ -367,6 +383,30 @@ impl Connection {
     }
 }
 
+/// Упавший помощник VOLT поднимается так же, как ядро (D-057, D-178): три попытки, потом
+/// VOLT выключается до следующего подключения. VPN не рвётся: без Relay перестают работать
+/// только выходы VOLT, а молчать об этом нельзя.
+async fn revive_volt(state: &AppState, watch: &mut Watch) {
+    match watch.step(state.volt.crashed()) {
+        Step::Idle => {}
+        Step::GiveUp => {
+            let why =
+                format!("VOLT не встал с {LIMIT} попыток — выключен до следующего подключения");
+            state.note("error", &why);
+            state.volt.stop();
+            state.volt.fail(&why);
+        }
+        Step::Raise => {
+            let _transition = state.connection.lock().await;
+            let attempt = format!("VOLT упал — подъём {}/{LIMIT}", watch.attempts);
+            match state.volt.revive().await {
+                Ok(()) => state.note("warning", &attempt),
+                Err(why) => state.note("error", &format!("{attempt}: {why}")),
+            }
+        }
+    }
+}
+
 /// Кого погасить, прежде чем поднять `engine`: всех, кто держит трафик или должен держать.
 /// «Должен» тоже: упавшее ядро с `wanted` надзор поднял бы через секунду рядом с новым.
 fn others(busy: &[EngineId], engine: EngineId) -> Vec<EngineId> {
@@ -376,7 +416,7 @@ fn others(busy: &[EngineId], engine: EngineId) -> Vec<EngineId> {
 fn update_safe(running: bool, proxy_backup: bool, kill_switch_backup: bool) -> Result<()> {
     if running || proxy_backup || kill_switch_backup {
         return Err(crate::error::AppError::invalid(
-            "VPN shutdown did not restore networking. The update was not installed.",
+            "Stopping the core did not restore networking. The update was not installed.",
         ));
     }
     Ok(())

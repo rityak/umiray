@@ -4,17 +4,18 @@
 //! `RunEvent::Exit`, а тот гасит ядро — то есть закрыть окно клиента значило отключиться.
 //! Теперь крестик прячет окно, а выход — отдельный пункт меню. Питание тоже здесь
 //! и одним пунктом на оба направления (D-091): у спрятанного клиента это то же основное
-//! действие, что и кнопка в шапке.
+//! действие, что и кнопка в шапке. Рядом — галка «Обход» (D-191), где VOLT есть.
 
 use std::sync::Mutex;
 
 use tauri::image::Image;
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, Runtime};
 
 const TRAY_ID: &str = "main";
 const POWER: &str = "power";
+const BYPASS: &str = "bypass";
 const SHOW: &str = "show";
 const QUIT: &str = "quit";
 
@@ -68,7 +69,11 @@ impl Look {
 
 /// Последнее показанное состояние. Статус опрашивается раз в 1.5 с, и перерисовывать
 /// значок на каждый такт незачем — меняем, только когда действительно изменилось.
-static SHOWN: Mutex<Option<(Look, bool)>> = Mutex::new(None);
+static SHOWN: Mutex<Option<(Look, bool, Option<bool>)>> = Mutex::new(None);
+
+/// Галка «Обход» (D-191): записанное в настройках; `None` — VOLT на платформе нет, и пункта
+/// нет. Ставит её `app::volt` после каждого сохранения, трей только показывает.
+static BYPASS_ON: Mutex<Option<bool>> = Mutex::new(None);
 
 fn light_taskbar() -> bool {
     crate::system::taskbar::Taskbar::is_light()
@@ -78,7 +83,11 @@ fn light_taskbar() -> bool {
 /// пункт питания один на оба направления (D-060, как и кнопка в шапке), и его подпись —
 /// это состояние. Пересборка трёх пунктов раз в несколько минут дешевле, чем хранить
 /// ссылку на пункт в ещё одном глобальном месте.
-fn menu<R: Runtime>(app: &AppHandle<R>, running: bool) -> tauri::Result<Menu<R>> {
+fn menu<R: Runtime>(
+    app: &AppHandle<R>,
+    running: bool,
+    bypass: Option<bool>,
+) -> tauri::Result<Menu<R>> {
     let power = MenuItem::with_id(
         app,
         POWER,
@@ -92,7 +101,15 @@ fn menu<R: Runtime>(app: &AppHandle<R>, running: bool) -> tauri::Result<Menu<R>>
     )?;
     let show = MenuItem::with_id(app, SHOW, "Показать окно", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, QUIT, "Выход", true, None::<&str>)?;
-    Menu::with_items(app, &[&power, &show, &quit])
+    let bypass = bypass
+        .map(|on| CheckMenuItem::with_id(app, BYPASS, "Обход", true, on, None::<&str>))
+        .transpose()?;
+    let mut items: Vec<&dyn IsMenuItem<R>> = vec![&power];
+    if let Some(bypass) = &bypass {
+        items.push(bypass);
+    }
+    items.extend([&show as &dyn IsMenuItem<R>, &quit]);
+    Menu::with_items(app, &items)
 }
 
 pub struct Tray;
@@ -102,10 +119,14 @@ impl Tray {
     /// `connect`, и знать про `connect` в ответ он не должен (иначе модули ссылаются друг
     /// на друга по кругу). Указатель на функцию, а не абстракция: реализация
     /// ровно одна, и живёт она там, где собирается приложение.
-    pub fn build<R: Runtime>(app: &AppHandle<R>, power: fn(&AppHandle<R>)) -> tauri::Result<()> {
+    pub fn build<R: Runtime>(
+        app: &AppHandle<R>,
+        power: fn(&AppHandle<R>),
+        bypass: fn(&AppHandle<R>),
+    ) -> tauri::Result<()> {
         let mut tray = TrayIconBuilder::with_id(TRAY_ID)
             .tooltip(Look::Off.tooltip())
-            .menu(&menu(app, false)?)
+            .menu(&menu(app, false, *BYPASS_ON.lock().unwrap())?)
             // Левая кнопка показывает окно, меню — по правой. Иначе основное действие
             // («покажи окно») требовало бы двух нажатий вместо одного.
             .show_menu_on_left_click(false)
@@ -113,6 +134,7 @@ impl Tray {
                 // Питание доступно, не открывая окна: закрытый крестиком клиент живёт
                 // в трее (D-046), и включать VPN из него — то же основное действие.
                 POWER => power(app),
+                BYPASS => bypass(app),
                 SHOW => Tray::show(app),
                 // Выход именно здесь: `RunEvent::Exit` по-прежнему гасит ядро, иначе
                 // осиротевший mihomo держал бы порт (GOTCHAS).
@@ -136,8 +158,20 @@ impl Tray {
         tray = tray.icon(Image::from_bytes(Look::Off.png(light))?);
 
         tray.build(app)?;
-        *SHOWN.lock().unwrap() = Some((Look::Off, light));
+        *SHOWN.lock().unwrap() = Some((Look::Off, light, *BYPASS_ON.lock().unwrap()));
         Ok(())
+    }
+
+    /// Галка «Обход» — по записанному (D-191). Меню пересобирается и тогда, когда значение
+    /// то же: щелчок уже перевернул галку, а сохранение могло не пройти.
+    pub fn set_bypass<R: Runtime>(app: &AppHandle<R>, on: Option<bool>) {
+        *BYPASS_ON.lock().unwrap() = on;
+        let look = SHOWN
+            .lock()
+            .unwrap()
+            .take()
+            .map_or(Look::Off, |(look, ..)| look);
+        Tray::refresh(app, look);
     }
 
     /// Показать окно и поднять его наверх. Спрятанное окно ещё и свёрнутым может быть —
@@ -164,7 +198,8 @@ impl Tray {
 fn apply<R: Runtime>(app: &AppHandle<R>, look: Look) {
     let mut shown = SHOWN.lock().unwrap();
     let light = light_taskbar();
-    if *shown == Some((look, light)) {
+    let bypass = *BYPASS_ON.lock().unwrap();
+    if *shown == Some((look, light, bypass)) {
         return;
     }
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
@@ -176,10 +211,10 @@ fn apply<R: Runtime>(app: &AppHandle<R>, look: Look) {
     let _ = tray.set_tooltip(Some(look.tooltip()));
     // Подпись питания — часть состояния: «Подключить» при работающем ядре врала бы
     // ровно там, где окна на экране может не быть вовсе.
-    if let Ok(next) = menu(app, look != Look::Off) {
+    if let Ok(next) = menu(app, look != Look::Off, bypass) {
         let _ = tray.set_menu(Some(next));
     }
-    *shown = Some((look, light));
+    *shown = Some((look, light, bypass));
 }
 
 #[cfg(test)]

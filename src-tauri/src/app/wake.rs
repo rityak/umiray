@@ -47,6 +47,7 @@ impl Wake {
         if !state.mihomo.status().running {
             return;
         }
+        crate::app::volt::network_changed(state).await;
         match state.mihomo.recheck().await {
             Ok(0) => return,
             // В кольцо, а не только на stderr: повод редкий — сон или смена сети, — и это

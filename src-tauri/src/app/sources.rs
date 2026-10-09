@@ -111,7 +111,11 @@ impl Sources {
         let mask = crate::config::awg::Mask::get().option();
         let status = state.mihomo.status();
         let through = status.running.then_some(status.port).flatten();
-        let entry = crate::nodes::warp::Warp::issue(tunnel, &keys, mask, through).await?;
+        let entry = {
+            let _transition = state.connection.lock().await;
+            let bootstrap = crate::app::volt::bootstrap_client(state).await?;
+            crate::nodes::warp::Warp::issue(tunnel, &keys, mask, through, bootstrap).await?
+        };
         self.add_proxy(app, state, entry).await
     }
 

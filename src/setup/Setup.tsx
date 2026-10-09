@@ -1,5 +1,5 @@
 import { Gauge, SlidersHorizontal } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button, Callout, ChoiceCards, Dialog, Stepper, Toaster, toast } from "rootik";
 import * as api from "../api";
 import { MODES } from "../connection/ConnectionPath";
@@ -77,6 +77,9 @@ export default function Setup({
   /// Что набор правил уже получил: снятая галка трогает правила, только если её ставили
   /// здесь же, — иначе повторный мастер снял бы блокировку, включённую в «Маршрутизации».
   const [adsSet, setAdsSet] = useState<boolean | null>(null);
+  /// Обход (D-191): галка начинает с записанного и трогает настройки, только если её сменили.
+  const [bypass, setBypass] = useState(false);
+  const bypassSaved = useRef<boolean | null>(null);
   /// Спорные опции (D-169). Первый запуск начинает с совета, повторный — с того, что в файле.
   const [choices, setChoices] = useState<Choices>(ADVISED);
   const [mode, setMode] = useState<api.Choice>(current);
@@ -98,6 +101,17 @@ export default function Setup({
       (snapshot) => {
         setDirection(snapshot.direction);
         setNode(snapshot.node);
+      },
+      () => {},
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!has("volt")) return;
+    api.voltGet().then(
+      (snapshot) => {
+        bypassSaved.current = snapshot.options.directEnabled;
+        setBypass(snapshot.options.directEnabled);
       },
       () => {},
     );
@@ -159,12 +173,38 @@ export default function Setup({
         told.push({ tool: "ads", verdict: "bad", headline: failure(e).text });
       }
     }
+    if (bypassSaved.current !== null && bypass !== bypassSaved.current) {
+      setDoing(t("Saving…"));
+      try {
+        const current = await api.voltGet();
+        await api.voltSet({ ...current.options, directEnabled: bypass });
+        bypassSaved.current = bypass;
+        told.push({
+          tool: "bypass",
+          verdict: "ok",
+          headline: bypass ? t("Bypass is on") : t("Bypass is off"),
+        });
+      } catch (e) {
+        // Без прав включение сохраняется и заработает после перезапуска с ними (D-187).
+        const elevate = api.asAppError(e).kind === "needsElevation";
+        if (elevate) bypassSaved.current = bypass;
+        told.push({
+          tool: "bypass",
+          verdict: elevate ? "ok" : "bad",
+          headline: elevate
+            ? t("Bypass turns on after a restart as administrator")
+            : failure(e).text,
+        });
+      }
+    }
     if (told.length === 0) return;
     // Одной строкой: что подобрано или что не вышло. Подробности — в «Настройках mihomo».
     const name = (report: api.Report) =>
       report.tool === "ads"
         ? t("ads")
-        : (TUNING.find((item) => item.id === report.tool)?.title ?? report.tool);
+        : report.tool === "bypass"
+          ? t("bypass")
+          : (TUNING.find((item) => item.id === report.tool)?.title ?? report.tool);
     const failed = told.filter((report) => report.verdict !== "ok");
     toast({
       title: failed.length === 0 ? t("Settings picked") : t("Not everything was picked"),
@@ -240,7 +280,9 @@ export default function Setup({
             },
           ]}
         />
-        {way === "recommended" && <Tuning ads={ads} onAds={setAds} />}
+        {way === "recommended" && (
+          <Tuning ads={ads} onAds={setAds} bypass={bypass} onBypass={setBypass} />
+        )}
         {/* «Ничего не меняет» — про этот выбор, а не про уже записанный подбор: отменить
             его нечем, и молчать об этом значило бы врать подписью карточки. */}
         {way === "manual" && Object.keys(tuned).length > 0 && (

@@ -23,7 +23,7 @@ type Props = {
 export default function TargetPicker({ value, groups, nodes, label, lost, onChange }: Props) {
   const all = [...new Set([value, ...groups, ...nodes])];
   const options = all.map((target) => {
-    const look = lost(target) ? lostLook() : targetLook(target, nodes);
+    const look = lost(target) ? lostLook(target) : targetLook(target, nodes);
     return {
       value: target,
       label: groupName(target),

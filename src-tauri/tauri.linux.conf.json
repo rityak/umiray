@@ -3,7 +3,7 @@
   "bundle": {
     "targets": ["deb", "rpm"],
     "category": "Utility",
-    "shortDescription": "VPN client on the mihomo core",
+    "shortDescription": "Secure proxy client on the mihomo core",
     "longDescription": "umiray: subscriptions, nodes, routing and TUN on the mihomo core.",
     "linux": {
       "deb": {

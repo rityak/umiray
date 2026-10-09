@@ -40,7 +40,7 @@ export default function ClientUpdate({
                 icon={<Download />}
                 variant="primary"
                 disabled={busy || checking}
-                confirmLabel={t("Disconnect VPN and install?")}
+                confirmLabel={t("Disconnect and install?")}
                 onConfirm={onInstall}
               >
                 {t("Install update")}

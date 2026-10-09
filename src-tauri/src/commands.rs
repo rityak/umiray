@@ -24,3 +24,5 @@ pub mod sources;
 pub mod system;
 pub mod udp;
 pub mod updates;
+
+pub mod volt;

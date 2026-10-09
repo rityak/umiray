@@ -45,12 +45,12 @@ type Props = {
 };
 
 const LOOK: Record<qd.Role, { label: string; word: string; tone: Tone; Icon: LucideIcon }> = {
-  direct: { label: "direct", word: tk("bypass VPN"), tone: "neutral", Icon: ArrowUpRight },
-  tunnel: { label: "tunnel", word: tk("through VPN"), tone: "accent", Icon: Globe },
+  direct: { label: "direct", word: tk("bypass the tunnel"), tone: "neutral", Icon: ArrowUpRight },
+  tunnel: { label: "tunnel", word: tk("through the tunnel"), tone: "accent", Icon: Globe },
   egress: { label: "+egress", word: tk("through the exit node"), tone: "accent", Icon: Plane },
   noEgress: {
     label: "-egress",
-    word: tk("through VPN, never the exit node"),
+    word: tk("through the tunnel, never the exit node"),
     tone: "accent",
     Icon: ShieldCheck,
   },
@@ -182,12 +182,12 @@ export default function QdRouting({ live, onMessage }: Props) {
               <Stat size="sm" label={t("Rules")} value={rules.length} />
               <Stat
                 size="sm"
-                label={t("Through VPN")}
+                label={t("Through the tunnel")}
                 value={rules.filter((rule) => rule.role !== "direct").length}
               />
               <Stat
                 size="sm"
-                label={t("Bypass VPN")}
+                label={t("Bypass the tunnel")}
                 value={rules.filter((rule) => rule.role === "direct").length}
               />
               {allowExit && (

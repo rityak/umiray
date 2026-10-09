@@ -66,7 +66,7 @@ export default function GeoBases({ running, onMessage }: Props) {
           content={
             running
               ? t("The core downloads them from its geox-url.")
-              : t("Turn the VPN on — the core updates its databases itself.")
+              : t("Connect — the core updates its databases itself.")
           }
         >
           <Button

@@ -288,6 +288,7 @@ fn live_the_real_directory_moves_into_the_database() {
         &crate::render::effective::ConfigRenderer::effective(
             &crate::render::plan::Route::default(),
             None,
+            None,
         )
         .unwrap()
         .yaml,
@@ -347,6 +348,7 @@ experimental:
         let effective = crate::render::effective::ConfigRenderer::effective(
             &crate::render::plan::Route::default(),
             None,
+            None,
         )
         .unwrap();
         assert_eq!(effective.mode, step, "режим читается из собранного конфига");
@@ -370,6 +372,7 @@ async fn live_core_routes_through_the_alias() {
     let mihomo = Mihomo::new();
     let effective = crate::render::effective::ConfigRenderer::effective(
         &crate::render::plan::Route::default(),
+        None,
         None,
     )
     .unwrap();
@@ -468,6 +471,7 @@ async fn live_tun_captures_everything() {
     let effective = crate::render::effective::ConfigRenderer::effective(
         &crate::render::plan::Route::default(),
         None,
+        None,
     )
     .unwrap();
     if let Err(why) = mihomo.start(&effective).await {
@@ -522,6 +526,7 @@ async fn live_dns_leak_under_tun() {
     let mihomo = Mihomo::new();
     let effective = crate::render::effective::ConfigRenderer::effective(
         &crate::render::plan::Route::default(),
+        None,
         None,
     )
     .unwrap();
@@ -617,6 +622,7 @@ async fn live_a_user_set_routes_through_its_own_group() {
     let effective = crate::render::effective::ConfigRenderer::effective(
         &state.routing.document(&state).unwrap(),
         None,
+        None,
     )
     .unwrap();
     assert!(
@@ -680,6 +686,7 @@ async fn live_routing_switch_decides_whether_the_set_is_used() {
     let yaml = crate::render::effective::ConfigRenderer::effective(
         &state.routing.document(&state).unwrap(),
         None,
+        None,
     )
     .unwrap()
     .yaml;
@@ -702,6 +709,7 @@ async fn live_routing_switch_decides_whether_the_set_is_used() {
     let yaml = crate::render::effective::ConfigRenderer::effective(
         &state.routing.document(&state).unwrap(),
         None,
+        None,
     )
     .unwrap()
     .yaml;
@@ -719,6 +727,7 @@ async fn live_routing_switch_decides_whether_the_set_is_used() {
         let (ok, log) = core_accepts(
             &crate::render::effective::ConfigRenderer::effective(
                 &state.routing.document(&state).unwrap(),
+                None,
                 None,
             )
             .unwrap()
@@ -753,6 +762,7 @@ async fn live_directions_change_the_exit() {
         .unwrap();
     let effective = crate::render::effective::ConfigRenderer::effective(
         &state.routing.document(&state).unwrap(),
+        None,
         None,
     )
     .unwrap();
@@ -855,6 +865,7 @@ async fn live_source_set_changes_reach_the_generated_groups() {
     let groups = crate::render::effective::ConfigRenderer::effective(
         &crate::render::plan::Route::default(),
         None,
+        None,
     )
     .unwrap()
     .yaml;
@@ -867,6 +878,7 @@ async fn live_source_set_changes_reach_the_generated_groups() {
     let groups = crate::render::effective::ConfigRenderer::effective(
         &crate::render::plan::Route::default(),
         None,
+        None,
     )
     .unwrap()
     .yaml;
@@ -878,6 +890,7 @@ async fn live_source_set_changes_reach_the_generated_groups() {
 
     let yaml = crate::render::effective::ConfigRenderer::effective(
         &crate::render::plan::Route::default(),
+        None,
         None,
     )
     .unwrap()
@@ -926,6 +939,7 @@ async fn live_proxy_ping_goes_through_the_core() {
 
     let effective = crate::render::effective::ConfigRenderer::effective(
         &state.routing.document(&state).unwrap(),
+        None,
         None,
     )
     .unwrap();
@@ -1009,6 +1023,7 @@ async fn live_probe_listener_measures_a_chosen_node() {
     let mut map = Yaml::top_mapping(
         &crate::render::effective::ConfigRenderer::effective(
             &crate::render::plan::Route::default(),
+            None,
             None,
         )
         .unwrap()
@@ -1200,6 +1215,7 @@ async fn live_keepalive_ping_measures_through_our_own_tunnel() {
     let effective = crate::render::effective::ConfigRenderer::effective(
         &state.routing.document(&state).unwrap(),
         Some(probe),
+        None,
     )
     .unwrap();
     assert_eq!(
@@ -1527,6 +1543,7 @@ async fn live_system_proxy_actually_redirects_a_foreign_client() {
     let effective = crate::render::effective::ConfigRenderer::effective(
         &crate::render::plan::Route::default(),
         None,
+        None,
     )
     .unwrap();
     if let Err(why) = mihomo.start(&effective).await {
@@ -1603,6 +1620,7 @@ async fn live_kill_switch_locks_the_way_out_and_gives_it_back() {
     let mihomo = Mihomo::new();
     let effective = crate::render::effective::ConfigRenderer::effective(
         &crate::render::plan::Route::default(),
+        None,
         None,
     )
     .unwrap();
@@ -1718,6 +1736,7 @@ async fn live_kill_switch_heals_itself_after_the_client_dies() {
     let effective = crate::render::effective::ConfigRenderer::effective(
         &crate::render::plan::Route::default(),
         None,
+        None,
     )
     .unwrap();
     if let Err(why) = doomed.mihomo.start(&effective).await {
@@ -1809,6 +1828,7 @@ async fn live_a_rule_sends_traffic_through_the_named_node() {
         let effective = crate::render::effective::ConfigRenderer::effective(
             &crate::render::plan::Route::default(),
             None,
+            None,
         )
         .unwrap();
         mihomo.start(&effective).await.expect("ядро не встало");
@@ -1851,6 +1871,7 @@ async fn live_a_rule_sends_traffic_through_the_named_node() {
 
     let effective = crate::render::effective::ConfigRenderer::effective(
         &state.routing.document(&state).unwrap(),
+        None,
         None,
     )
     .unwrap();
@@ -1914,6 +1935,7 @@ async fn live_the_core_starts_on_what_the_form_wrote() {
     let effective = crate::render::effective::ConfigRenderer::effective(
         &crate::render::plan::Route::default(),
         None,
+        None,
     )
     .unwrap();
     let (ok, log) = core_accepts(&effective.yaml);
@@ -1969,6 +1991,7 @@ async fn live_a_source_the_converter_cannot_read_still_reaches_the_core() {
     // запись, а не ссылку, и его конвертер в деле уже не участвует.
     let effective = crate::render::effective::ConfigRenderer::effective(
         &crate::render::plan::Route::default(),
+        None,
         None,
     )
     .unwrap();
@@ -2736,6 +2759,7 @@ async fn live_a_ruleset_toggle_reloads_instead_of_restarting() {
     let effective = crate::render::effective::ConfigRenderer::effective(
         &state.routing.document(&state).unwrap(),
         Some(probe),
+        None,
     )
     .unwrap();
     if let Err(why) = state.mihomo.start(&effective).await {
@@ -2766,6 +2790,7 @@ async fn live_a_ruleset_toggle_reloads_instead_of_restarting() {
     let changed = crate::render::effective::ConfigRenderer::effective(
         &state.routing.document(&state).unwrap(),
         Some(probe),
+        None,
     )
     .unwrap();
     let launched = state.mihomo.launched().unwrap();
@@ -2983,6 +3008,7 @@ async fn live_the_window_is_told_which_change_needs_a_restart() {
     let effective = crate::render::effective::ConfigRenderer::effective(
         &state.routing.document(&state).unwrap(),
         Some(probe),
+        None,
     )
     .unwrap();
     state.mihomo.start(&effective).await.unwrap();
@@ -3079,6 +3105,7 @@ async fn live_an_edited_ruleset_reaches_the_assembled_config() {
     let effective = crate::render::effective::ConfigRenderer::effective(
         &state.routing.document(&state).unwrap(),
         None,
+        None,
     )
     .unwrap();
     assert!(
@@ -3148,6 +3175,7 @@ async fn live_smart_dns_writes_the_fastest_resolvers() {
     let effective = crate::render::effective::ConfigRenderer::effective(
         &state.routing.document(&state).unwrap(),
         None,
+        None,
     )
     .unwrap();
     for server in &after {
@@ -3181,6 +3209,7 @@ async fn live_a_broken_config_is_explained_before_the_core_starts() {
     // Сколько стоит сухой прогон: он теперь на пути каждого подключения.
     let good = crate::render::effective::ConfigRenderer::effective(
         &crate::render::plan::Route::default(),
+        None,
         None,
     )
     .unwrap();
@@ -3226,6 +3255,7 @@ async fn live_a_broken_config_is_explained_before_the_core_starts() {
     state.routing.set_routing(&state, true).unwrap();
     let effective = crate::render::effective::ConfigRenderer::effective(
         &state.routing.document(&state).unwrap(),
+        None,
         None,
     )
     .unwrap();
@@ -3276,6 +3306,7 @@ async fn live_the_measured_mtu_reaches_the_core_form() {
     let effective = crate::render::effective::ConfigRenderer::effective(
         &state.routing.document(&state).unwrap(),
         None,
+        None,
     )
     .unwrap();
     let said = crate::diag::config::DryRun::accepts(&effective.yaml).unwrap();
@@ -3302,6 +3333,7 @@ async fn live_the_guard_notices_a_tunnel_that_carries_nothing() {
     let effective = crate::render::effective::ConfigRenderer::effective(
         &state.routing.document(&state).unwrap(),
         None,
+        None,
     )
     .unwrap();
     state.mihomo.start(&effective).await.unwrap();
@@ -3322,6 +3354,7 @@ async fn live_the_guard_notices_a_tunnel_that_carries_nothing() {
     .unwrap();
     let effective = crate::render::effective::ConfigRenderer::effective(
         &state.routing.document(&state).unwrap(),
+        None,
         None,
     )
     .unwrap();
@@ -3375,6 +3408,7 @@ async fn live_a_forced_recheck_reaches_every_provider() {
     let effective = crate::render::effective::ConfigRenderer::effective(
         &crate::render::plan::Route::default(),
         None,
+        None,
     )
     .unwrap();
     if let Err(why) = mihomo.start(&effective).await {
@@ -3426,6 +3460,7 @@ async fn live_the_udp_group_is_accepted_by_the_core() {
     state.routing.set_routing(&state, true).unwrap();
     let effective = crate::render::effective::ConfigRenderer::effective(
         &state.routing.document(&state).unwrap(),
+        None,
         None,
     )
     .unwrap();
@@ -3602,7 +3637,7 @@ async fn live_every_catalog_list_is_downloaded_built_and_accepted() {
     };
     let ids: Vec<String> = catalog.iter().map(|entry| entry.id.clone()).collect();
     let effective =
-        crate::render::effective::ConfigRenderer::effective(&rules(&ids), None).unwrap();
+        crate::render::effective::ConfigRenderer::effective(&rules(&ids), None, None).unwrap();
     let providers = effective.yaml.matches("format: mrs").count();
     println!("провайдеров в конфиге: {providers}");
     assert!(providers >= ids.len(), "не все списки дошли до конфига");
@@ -3611,7 +3646,7 @@ async fn live_every_catalog_list_is_downloaded_built_and_accepted() {
 
     ListStore::delete(&ids[0]).unwrap();
     let effective =
-        crate::render::effective::ConfigRenderer::effective(&rules(&ids), None).unwrap();
+        crate::render::effective::ConfigRenderer::effective(&rules(&ids), None, None).unwrap();
     assert!(
         !effective.yaml.contains(&format!("RULE-SET,{},", ids[0])),
         "строка на удалённый список осталась"
@@ -3667,6 +3702,7 @@ async fn live_a_rule_set_sends_its_domains_through_the_vpn() {
                     .into(),
             ),
         },
+        None,
         None,
     )
     .unwrap();
@@ -3906,6 +3942,7 @@ async fn live_the_core_updates_its_geo_databases() {
 
     let effective = crate::render::effective::ConfigRenderer::effective(
         &crate::render::plan::Route::default(),
+        None,
         None,
     )
     .unwrap();
@@ -4226,6 +4263,7 @@ async fn live_spike_tun_mtu() {
             let mihomo = Mihomo::new();
             let effective = crate::render::effective::ConfigRenderer::effective(
                 &crate::render::plan::Route::default(),
+                None,
                 None,
             )
             .unwrap();

@@ -5,17 +5,18 @@
 <h1 align="center">Umiray</h1>
 
 <p align="center">
-  A VPN client for Windows and Linux powered by <a href="https://github.com/MetaCubeX/mihomo">Mihomo</a>.<br>
+  A proxy client for Windows and Linux powered by <a href="https://github.com/MetaCubeX/mihomo">Mihomo</a>.<br>
   Tauri&nbsp;2 · Rust · React · <a href="https://github.com/rityak/rootik">Rootik</a>
 </p>
 
-<p align="center"><b>1.5.1</b> · <a href="README.ru.md">Русская версия</a></p>
+<p align="center"><b>1.6.0</b> · <a href="README.ru.md">Русская версия</a></p>
 
 ![Connection](screenshots/connection.png)
 
 ## Features
 
 - One-click connection with separate Proxy, System and TUN modes.
+- A setup wizard on first launch: core settings, subscription, capture mode and route.
 - Direct, Auto and Manual routing, or your own rules.
 - Subscriptions, individual links, WireGuard and AmneziaWG files, and custom nodes.
   Node edits survive subscription refreshes.
@@ -25,17 +26,7 @@
 - Privacy mode hides server addresses and subscription names for screenshots and streams.
 - Signed client updates from GitHub Releases, with confirmation and download progress.
 
-## Screenshots
-
-| | |
-|---|---|
-| ![Sources](screenshots/sources.png) | ![Groups](screenshots/groups.png) |
-| ![Routing](screenshots/routing.png) | ![Settings](screenshots/settings.png) |
-| ![Tools](screenshots/tools.png) | ![Logs](screenshots/logs.png) |
-
-Screenshots use demo data.
-
-## Getting started
+## Installation and first launch
 
 Download from [Releases](https://github.com/rityak/umiray/releases/latest):
 
@@ -48,6 +39,9 @@ Download from [Releases](https://github.com/rityak/umiray/releases/latest):
   and `umiray.install` from the release: `makepkg -si`.
 
 The client downloads mihomo from its official release page on first launch.
+Add your subscription, proxy link or configuration file, choose a node and press Connect.
+Proxy mode provides a local proxy for applications; System enables the system proxy;
+TUN captures traffic through a virtual interface. Servers are not included.
 
 TUN needs extra rights. On Windows, the client can create a scheduled task to launch with
 administrator rights without asking for UAC confirmation each time. On Linux, the client
@@ -59,13 +53,31 @@ Data is stored in `%LOCALAPPDATA%\umiray` on Windows and `~/.local/share/umiray`
 The interface selects Russian when a Russian keyboard layout is installed; otherwise,
 it selects English. Override this in Settings → Umiray Settings → Interface language.
 
-## Build
+## Umiray Core / VOLT
 
-Requires Node.js 22+, Rust and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
+[umiray-core](https://github.com/rityak/umiray-core) contains the optional Windows traffic
+transformer VOLT. It changes TCP segmentation and packet order and can add decoy packets
+while preserving the real data stream.
 
-```
+Open Settings → Umiray Settings → Anti-DPI → VOLT to configure direct connections and
+VPN traffic independently. Enabling VOLT downloads its binaries from core releases;
+packet capture requires administrator rights. DIRECT-VOLT always uses the Relay,
+while DIRECT-AUTO tries an ordinary TLS connection first. VOLT is not a VPN service.
+
+## Dependencies and build
+
+Requires Node.js 22+, Rust stable and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/):
+Microsoft C++ Build Tools and WebView2 on Windows; WebKitGTK 4.1 and the listed development
+packages on Linux. JavaScript and Rust dependencies are installed by npm and Cargo.
+
+```sh
 npm ci
 npm run tauri dev
+```
+
+Build an executable without an installer:
+
+```sh
 npm run tauri build -- --no-bundle
 ```
 
@@ -76,12 +88,6 @@ Checks: `npm run lint`, `npm test`, `npx tsc --noEmit`, and `cargo test` in `src
 
 `npm run dev` opens the interface in a browser with demo data.
 
-## Status
-
-Windows x64 and Linux x86_64. Report bugs in [Issues](https://github.com/rityak/umiray/issues).
-
-Updates are checked on launch and in Settings → Umiray Settings → Maintenance.
-Installation verifies the signature, disconnects VPN and preserves user data.
-On Arch, the package manager installs updates; the client only tells you a new version is out.
-
-Maintainers: [publishing a release](RELEASING.md).
+Report bugs in [Issues](https://github.com/rityak/umiray/issues).
+Code and builds are provided as is; users are responsible for complying with applicable
+laws and provider terms. The authors accept no liability for use.

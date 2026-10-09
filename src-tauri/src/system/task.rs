@@ -446,7 +446,7 @@ pub(crate) fn document(exe: &Path, at_logon: bool) -> String {
         r#"<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Description>umiray — запуск VPN-клиента с правами администратора</Description>
+    <Description>umiray — запуск с правами администратора</Description>
   </RegistrationInfo>
   <Triggers>{trigger}</Triggers>
   <Principals>

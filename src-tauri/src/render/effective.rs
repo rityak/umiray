@@ -34,8 +34,13 @@ const RULES_HEADER: &str = concat!(
 pub struct ConfigRenderer;
 
 impl ConfigRenderer {
-    /// Всё в один файл — тот самый, который запускает ядро.
-    pub fn effective(route: &Route, probe: Option<u16>) -> Result<Effective> {
+    /// Всё в один файл — тот самый, который запускает ядро. `relay` — выходы VOLT, если
+    /// он включён: их пароль принадлежит работающему клиенту, а не документам (D-176).
+    pub fn effective(
+        route: &Route,
+        probe: Option<u16>,
+        relay: Option<crate::config::volt::Route>,
+    ) -> Result<Effective> {
         let mut layers = Vec::new();
         layers.push(owned(
             &Documents::read(files::GROUPS)?,
@@ -55,7 +60,7 @@ impl ConfigRenderer {
             &sets(route.text.as_deref())?,
             &node_sources(),
             probe,
-            &client(route)?,
+            &client(route, relay)?,
         )
     }
 
@@ -64,7 +69,7 @@ impl ConfigRenderer {
     pub fn built(route: &Route, taken: &[String]) -> Result<Vec<Built>> {
         Ok(super::mihomo_groups::built(
             &node_sources(),
-            &client(route)?,
+            &client(route, None)?,
             taken,
         ))
     }
@@ -77,6 +82,7 @@ impl ConfigRenderer {
                 &node_sources(),
                 None,
                 &Client {
+                    volt: None,
                     health: crate::nodes::health::Check::default(),
                     udp: false,
                     mask: awg::Mask::default(),
@@ -105,8 +111,9 @@ impl ConfigRenderer {
 }
 
 /// Решения клиента о сборке.
-fn client(route: &Route) -> Result<Client> {
+fn client(route: &Route, relay: Option<crate::config::volt::Route>) -> Result<Client> {
     Ok(Client {
+        volt: relay,
         health: crate::nodes::health::HealthCheck::check()?,
         // `NETWORK,udp` — тоже маршрут: выключенная маршрутизация шлёт всё
         // в выбранный выход, UDP тоже (D-166).

@@ -29,6 +29,8 @@ pub struct Routing;
 pub struct Snapshot {
     /// Все узлы всех источников — с диска, при живом и остановленном ядре (D-061).
     nodes: Vec<Node>,
+    direct_target: String,
+    direct_targets: Vec<String>,
     /// Куда идёт трафик — с поправкой на исчезнувший выбранный узел (D-056).
     direction: Direction,
     /// Узел или группа, на которые наведён псевдоним в `manual` (D-172). Вне него пусто:
@@ -71,7 +73,14 @@ impl Routing {
             &names,
             &groups,
         );
+        let volt = crate::config::volt::Options::get()?;
         Ok(Snapshot {
+            direct_target: volt.target().into(),
+            direct_targets: if volt.direct_enabled {
+                vec!["DIRECT-VOLT".into(), "DIRECT-AUTO".into()]
+            } else {
+                vec![]
+            },
             node: (direction == Direction::Manual).then(|| {
                 Direction::target(direction, settings.selected.as_deref(), &names, &groups)
             }),
@@ -212,6 +221,11 @@ impl Routing {
                 .groups
                 .exits(&state.groups.built(&self.document(state)?)?),
         );
+        let target = if target == "DIRECT" {
+            crate::config::volt::Options::get()?.target().to_owned()
+        } else {
+            target
+        };
         let moved = state.mihomo.selected().await.as_deref() != Some(target.as_str());
         state.mihomo.select(&target).await?;
         Ok(moved)

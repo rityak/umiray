@@ -35,6 +35,13 @@ pub const CLIENT: &str = "client";
 /// направлений и для всех наборов правил.
 pub const GROUPS: &str = "groups";
 
+/// Стратегии VOLT — свои документы, а не строки внутри Umiray Settings (D-183): блок `volt`
+/// там остаётся коротким, а экспорт несёт их вместе с остальными документами.
+pub const VOLT_RELAY: &str = "volt-relay";
+pub const VOLT_VPN: &str = "volt-vpn";
+pub const VOLT_RELAY_DEFAULT: &str = include_str!("../../../collections/volt/relay.yaml");
+pub const VOLT_VPN_DEFAULT: &str = include_str!("../../../collections/volt/vpn.yaml");
+
 /// Документ клиента: строка базы со своим шаблоном.
 struct File {
     id: &'static str,
@@ -46,7 +53,7 @@ struct File {
     default: &'static str,
 }
 
-const FILES: [File; 3] = [
+const FILES: [File; 5] = [
     File {
         id: ADVANCED,
         label: "Mihomo Settings",
@@ -68,6 +75,20 @@ const FILES: [File; 3] = [
             "your node groups, shared by all routes; the client builds AUTO and auto groups itself",
         core: true,
         default: GROUPS_DEFAULT,
+    },
+    File {
+        id: VOLT_RELAY,
+        label: "VOLT Relay",
+        hint: "how VOLT changes direct connections; never sent to the core",
+        core: false,
+        default: VOLT_RELAY_DEFAULT,
+    },
+    File {
+        id: VOLT_VPN,
+        label: "VOLT Proxy",
+        hint: "how VOLT changes connections to proxy servers; never sent to the core",
+        core: false,
+        default: VOLT_VPN_DEFAULT,
     },
 ];
 

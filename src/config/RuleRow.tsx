@@ -103,7 +103,7 @@ export default function RuleRow({
   onMove,
   onRemove,
 }: Props) {
-  const look = lost(rule.target) ? lostLook() : targetLook(rule.target, nodes);
+  const look = lost(rule.target) ? lostLook(rule.target) : targetLook(rule.target, nodes);
   const panelId = useId();
   const [text, setText] = useState(() => rule.values.join("\n"));
   const [armed, setArmed] = useState(false);

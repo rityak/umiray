@@ -1,3 +1,8 @@
+import relayYaml from "../../collections/volt/relay.yaml?raw";
+import strategyMock from "../../collections/volt/strategy-mock.json";
+import vpnYaml from "../../collections/volt/vpn.yaml?raw";
+import vpnNoise from "../../collections/volt/vpn-noise.yaml?raw";
+import vpnTcp from "../../collections/volt/vpn-tcp.yaml?raw";
 /**
  * Бэкенд-заглушка для `npm run dev` в обычном браузере (D-142).
  *
@@ -58,7 +63,7 @@ let settings: api.Settings = {
 const DEMO_SOURCES: api.Source[] = [
   {
     id: "demo",
-    name: "Demo VPN",
+    name: "Demo",
     url: "https://panel.example.com/sub/abcdef123456",
     updated: now() - 3600,
     nodes: 9,
@@ -530,6 +535,87 @@ const qdCall = (method: string, path: string, body: Record<string, unknown> | nu
 
 const qdLogs = ["qd  embedded: api on 127.0.0.1:52100", "tunnel  up via Entry A, 9 ms"];
 
+let voltTuning: api.VoltTuneReport | null = null;
+let voltOptions: api.VoltOptions = {
+  directEnabled: false,
+  scope: "services",
+  services: ["youtube", "discord"],
+  domains: [],
+  mode: "auto",
+  relayPort: 3101,
+  autoPort: 3103,
+  relayYaml,
+  vpnEnabled: false,
+  vpnYaml,
+  endpoints: [],
+  bootstrapIps: [],
+  autoSelect: false,
+  probeUrls: [],
+};
+// `?volt=noadmin|missing|failed` — what the bypass looks like when something stands in its way.
+const voltTrouble = new URLSearchParams(location.search).get("volt");
+const voltSnapshot = () => ({
+  options: voltOptions,
+  available: voltTrouble !== "missing",
+  elevated: voltTrouble !== "noadmin",
+  relayRunning: voltOptions.directEnabled && voltTrouble === null,
+  relayError:
+    voltTrouble === "failed" && voltOptions.directEnabled
+      ? "VOLT Relay did not become ready"
+      : null,
+  probeTargets: voltOptions.probeUrls.length
+    ? voltOptions.probeUrls
+    : [
+        "https://www.youtube.com/robots.txt",
+        "https://redirector.googlevideo.com/report_mapping",
+        "https://discord.com/api/v10/gateway",
+      ],
+  relayStats:
+    voltOptions.directEnabled && voltTrouble === null
+      ? {
+          connections: 34,
+          active: 3,
+          modified: 120,
+          faked: 264,
+          failures: 0,
+          lastError: null,
+          autoDirect: voltOptions.scope === "direct" ? 25 : 0,
+          autoBypassed: voltOptions.scope === "direct" ? 9 : 0,
+        }
+      : null,
+  vpnRunning: voltOptions.vpnEnabled && status_().running,
+  endpoints:
+    voltOptions.vpnEnabled && status_().running ? ["45.86.245.83:443", "[2a01:4f8::1]:443"] : [],
+  log: [],
+  relayDefault: relayYaml,
+  vpnDefault: vpnYaml,
+  vpnNoise,
+  vpnTcp,
+  domainPools: [
+    {
+      id: "noise-extended",
+      label: "Extended noise dictionary",
+      count: 910,
+      file: "",
+      source: "https://github.com/hxehex/russia-mobile-internet-whitelist",
+      revision: "preview",
+    },
+    {
+      id: "noise-compact",
+      label: "Compact noise dictionary",
+      count: 317,
+      file: "",
+      source: "https://github.com/kirilllavrov/whitelists",
+      revision: "preview",
+    },
+  ],
+  tuning: voltTuning,
+  services: [
+    { id: "youtube", title: "YouTube", rules: ["DOMAIN-SUFFIX,youtube.com"] },
+    { id: "discord", title: "Discord", rules: ["DOMAIN-SUFFIX,discord.com"] },
+  ],
+});
+
 const HANDLERS: Record<string, (args: Args) => unknown> = {
   core_status: status_,
   core_start: () => {
@@ -567,7 +653,7 @@ const HANDLERS: Record<string, (args: Args) => unknown> = {
     status = { ...status, desiredMode: mode as api.Choice };
     status.restartReason =
       status.running && (mode === "tun") !== (status.mode === "tun")
-        ? "Режим сменился — доедет перезапуском VPN."
+        ? "Режим сменился — доедет переподключением."
         : null;
     return status_();
   },
@@ -673,6 +759,13 @@ const HANDLERS: Record<string, (args: Args) => unknown> = {
     const target = active === undefined ? undefined : routing[active]?.fallback;
     const fallback = settings.routing && target && target !== "umiray" ? target : null;
     return {
+      directTarget:
+        voltOptions.directEnabled && voltOptions.scope === "direct"
+          ? voltOptions.mode === "auto"
+            ? "DIRECT-AUTO"
+            : "DIRECT-VOLT"
+          : "DIRECT",
+      directTargets: voltOptions.directEnabled ? ["DIRECT-VOLT", "DIRECT-AUTO"] : [],
       nodes,
       direction,
       node: direction === "manual" ? selected : null,
@@ -844,6 +937,84 @@ const HANDLERS: Record<string, (args: Args) => unknown> = {
     mask = next as api.Mask;
     return mask;
   },
+  volt_get: voltSnapshot,
+  volt_set: ({ options }) => {
+    voltOptions = options as api.VoltOptions;
+    return voltSnapshot();
+  },
+  volt_strategy_parse: ({ yaml }) => {
+    const presets = new Map<string, unknown>([
+      [relayYaml, strategyMock.relay],
+      [vpnYaml, strategyMock.vpn],
+      [vpnNoise, strategyMock["vpn-noise"]],
+      [vpnTcp, strategyMock["vpn-tcp"]],
+    ]);
+    if (presets.has(String(yaml))) return structuredClone(presets.get(String(yaml)));
+    try {
+      return JSON.parse(String(yaml));
+    } catch {
+      throw { kind: "invalid", message: "Custom YAML requires the desktop client.", details: [] };
+    }
+  },
+  volt_strategy_render: ({ strategy }) => JSON.stringify(strategy, null, 2),
+  volt_tune: () => {
+    // Directly fails, reordering passes: what a blocked network looks like (D-185, D-189).
+    const urls = voltSnapshot().probeTargets;
+    const checks = (ok: boolean, latency: number) =>
+      urls.flatMap((url) =>
+        [1, 2].map((attempt) => ({
+          url,
+          attempt,
+          ok,
+          latencyMs: ok ? latency + attempt * 7 : 5000,
+          error: ok ? null : "timed out",
+        })),
+      );
+    voltTuning = {
+      checkedAt: new Date().toISOString(),
+      scope: "direct-https",
+      urls,
+      selected: "tls-disorder",
+      unblocked: false,
+      candidates: [
+        {
+          id: "direct",
+          label: "Direct",
+          successes: 0,
+          total: urls.length * 2,
+          latencyMs: null,
+          checks: checks(false, 0),
+        },
+        {
+          id: "tls-disorder",
+          label: "Disorder",
+          successes: urls.length * 2,
+          total: urls.length * 2,
+          latencyMs: 182,
+          checks: checks(true, 175),
+        },
+      ],
+    };
+    return voltTuning;
+  },
+  // A name with "blocked" in it does not open directly: enough to see every answer.
+  volt_check_site: ({ url }) => {
+    const raw = String(url).trim();
+    const host = raw
+      .replace(/^https:\/\//, "")
+      .split("/")[0]
+      .toLowerCase();
+    const blocked = host.includes("blocked") || host.includes("rutracker");
+    return {
+      url: raw.includes("://") ? raw : `https://${raw}/`,
+      domain: host.replace(/^www\./, ""),
+      direct: blocked
+        ? { ok: false, latencyMs: null, error: "timed out" }
+        : { ok: true, latencyMs: 140, error: null },
+      bypass: { ok: true, latencyMs: 210, error: null },
+    };
+  },
+  volt_dictionary_pick: () => null,
   client_ping_get: () => ping,
   client_ping_set: ({ method }) => {
     ping = method as api.PingMethod;
@@ -871,6 +1042,7 @@ const HANDLERS: Record<string, (args: Args) => unknown> = {
       ? ["systemProxy", "killSwitch", "autostart"]
       : [
           "qd",
+          "volt",
           "alwaysAdmin",
           "systemProxy",
           "killSwitch",

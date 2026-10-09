@@ -121,7 +121,7 @@ fn replace_running(
         .map(|(a, b, c, _)| format!("{a}.{b}.{c}"))
         .unwrap_or_else(|| "прежней версии".into());
     let question = format!(
-        "Сейчас работает umiray {old}. Закрыть его и запустить {new}?\n\nVPN отключится на несколько секунд.",
+        "Сейчас работает umiray {old}. Закрыть его и запустить {new}?\n\nПодключение прервётся на несколько секунд.",
         new = env!("CARGO_PKG_VERSION"),
     );
     if !ask(&question) {

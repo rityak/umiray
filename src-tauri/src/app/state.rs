@@ -23,6 +23,7 @@ use crate::core::mihomo::Mihomo;
 use crate::core::qd::Qd;
 
 pub struct AppState {
+    pub volt: crate::core::volt::Volt,
     /// Настройки клиента: единственный, кто знает, где они лежат.
     pub settings: SettingsStore,
     /// Питание, «одно ядро», доведение правок до живого ядра, надзор.
@@ -60,6 +61,7 @@ impl AppState {
     /// Диск читается один раз при старте — дальше источник истины здесь.
     pub fn new() -> Self {
         Self {
+            volt: crate::core::volt::Volt::default(),
             settings: SettingsStore::open(),
             connection: Connection::default(),
             routing: Routing,

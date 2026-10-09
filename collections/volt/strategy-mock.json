@@ -1,0 +1,244 @@
+{
+  "relay": {
+    "version": 1,
+    "default_action": "pass",
+    "udp": {
+      "enabled": true,
+      "max_destinations": 32,
+      "idle_timeout_seconds": 60
+    },
+    "auto": {
+      "enabled": true,
+      "listen": "127.0.0.1:2083",
+      "direct_timeout_ms": 1500,
+      "fallback_delay_ms": 250,
+      "hello_timeout_ms": 3000,
+      "fallback_timeout_ms": 5000,
+      "max_hello_bytes": 65536,
+      "route_cache": {
+        "enabled": true,
+        "ttl_seconds": 60,
+        "max_entries": 256
+      }
+    },
+    "profiles": [
+      {
+        "name": "tls-auto-disorder",
+        "match": {
+          "network": "tcp",
+          "payloads": [
+            "tls"
+          ]
+        },
+        "stages": [
+          {
+            "action": "disorder",
+            "payloads": [
+              "tls"
+            ],
+            "positions": [
+              "1",
+              "midsld"
+            ],
+            "packet_limit": 2,
+            "byte_limit": 16384,
+            "fake": {
+              "kind": "tls-auto",
+              "server_name_source": "noise-extended",
+              "repeats": 11
+            }
+          }
+        ]
+      },
+      {
+        "name": "http-split",
+        "match": {
+          "network": "tcp",
+          "payloads": [
+            "http"
+          ]
+        },
+        "stages": [
+          {
+            "action": "split",
+            "positions": [
+              "1",
+              "host+1"
+            ],
+            "packet_limit": 2,
+            "byte_limit": 16384
+          }
+        ]
+      },
+      {
+        "name": "quic-fake",
+        "match": {
+          "network": "udp",
+          "payloads": [
+            "quic"
+          ]
+        },
+        "stages": [
+          {
+            "action": "fake",
+            "packet_limit": 3,
+            "byte_limit": 16384,
+            "fake": {
+              "kind": "quic",
+              "server_name_source": "noise-extended",
+              "repeats": 3
+            }
+          }
+        ]
+      },
+      {
+        "name": "discovery-fake",
+        "match": {
+          "network": "udp",
+          "payloads": [
+            "stun",
+            "discord"
+          ]
+        },
+        "stages": [
+          {
+            "action": "fake",
+            "packet_limit": 4,
+            "byte_limit": 16384,
+            "fake": {
+              "kind": "zero",
+              "repeats": 3
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "vpn": {
+    "version": 1,
+    "default_action": "pass",
+    "udp": {
+      "enabled": false
+    },
+    "profiles": [
+      {
+        "name": "vpn-tls-split",
+        "match": {
+          "network": "tcp",
+          "payloads": [
+            "tls"
+          ]
+        },
+        "stages": [
+          {
+            "action": "split",
+            "positions": [
+              "1",
+              "midsld"
+            ],
+            "packet_limit": 2,
+            "byte_limit": 16384
+          }
+        ]
+      }
+    ]
+  },
+  "vpn-noise": {
+    "version": 1,
+    "default_action": "pass",
+    "udp": {
+      "enabled": true
+    },
+    "profiles": [
+      {
+        "name": "vpn-tls-noise",
+        "match": {
+          "network": "tcp",
+          "payloads": [
+            "tls"
+          ]
+        },
+        "stages": [
+          {
+            "action": "disorder",
+            "positions": [
+              "1",
+              "midsld"
+            ],
+            "packet_limit": 2,
+            "byte_limit": 16384,
+            "fake": {
+              "kind": "tls-auto",
+              "server_name_source": "noise-extended",
+              "repeats": 1
+            }
+          }
+        ]
+      },
+      {
+        "name": "vpn-quic-noise",
+        "match": {
+          "network": "udp",
+          "payloads": [
+            "quic"
+          ]
+        },
+        "stages": [
+          {
+            "action": "fake",
+            "packet_limit": 2,
+            "byte_limit": 16384,
+            "fake": {
+              "kind": "quic",
+              "server_name_source": "noise-extended",
+              "repeats": 1
+            }
+          }
+        ]
+      },
+      {
+        "name": "vpn-unknown-udp-pass",
+        "match": {
+          "network": "udp",
+          "payloads": [
+            "unknown"
+          ]
+        },
+        "stages": [
+          {
+            "action": "pass",
+            "packet_limit": 1,
+            "byte_limit": 65536
+          }
+        ]
+      }
+    ]
+  },
+  "vpn-tcp": {
+    "version": 1,
+    "default_action": "pass",
+    "udp": {
+      "enabled": false
+    },
+    "profiles": [
+      {
+        "name": "vpn-tcp-window",
+        "match": {
+          "network": "tcp"
+        },
+        "stages": [
+          {
+            "action": "split",
+            "positions": [
+              "1",
+              "32",
+              "64"
+            ],
+            "packet_limit": 8,
+            "byte_limit": 32768
+          }
+        ]
+      }
+    ]
+  }
+}

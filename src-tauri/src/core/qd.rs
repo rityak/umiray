@@ -7,7 +7,6 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 
 use crate::core::process::CoreProcess;
 use crate::core::process::LogRing;
@@ -23,10 +22,8 @@ const HELLO: &str = "{\"qdEmbedded\"";
 
 /// Лента релизов, а не API (D-161): `api.github.com` режут по DNS, а `/releases/latest`
 /// у qd пуст — все релизы pre-release. Лента знает их и идёт от нового к старому.
-const FEED: &str = "https://github.com/jaywehosl/qd/releases.atom";
-const DOWNLOAD: &str = "https://github.com/jaywehosl/qd/releases/download";
+const REPO: &str = "https://github.com/jaywehosl/qd";
 const ASSET: &str = "qd-core-windows-amd64.exe";
-const SUMS: &str = "checksums.txt";
 const MAX_BINARY: usize = 128 * 1024 * 1024;
 
 /// Работающий процесс. Всё, что знаем о туннеле, живёт здесь же: умер процесс — вместе
@@ -291,28 +288,8 @@ impl Qd {
         if !Features::has(Feature::Qd) {
             return Err(AppError::invalid("qd на этой системе не работает"));
         }
-        let client = Http::client()?;
-        let feed = Http::fetch(&client, FEED, 1024 * 1024)
-            .await
-            .map_err(|e| AppError::network(format!("Не удалось узнать версию qd: {e}")))?;
-        let tag = newest_tag(&String::from_utf8_lossy(&feed))
-            .ok_or_else(|| AppError::network("У qd нет ни одного релиза"))?;
-        let link = |name: &str| format!("{DOWNLOAD}/{tag}/{name}");
-
-        let sums = Http::fetch(&client, &link(SUMS), 64 * 1024).await?;
-        let want = checksum(&String::from_utf8_lossy(&sums), ASSET)
-            .ok_or_else(|| AppError::invalid(format!("В {SUMS} нет строки для {ASSET}")))?;
-
-        let binary = Http::fetch(&client, &link(ASSET), MAX_BINARY).await?;
-        let got: String = Sha256::digest(&binary)
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect();
-        if got != want {
-            return Err(AppError::invalid(
-                "Контрольная сумма qd не совпала — файл не записан",
-            ));
-        }
+        let (tag, binary) =
+            crate::core::release::Release::fetch(REPO, ASSET, MAX_BINARY, "qd").await?;
         if !binary.starts_with(b"MZ") {
             return Err(AppError::invalid(
                 "Скачанный qd не похож на программу Windows",
@@ -385,25 +362,6 @@ async fn adopt_pending(api: &str, token: &str) {
     {
         let _ = Db::remove(Table::State, PENDING, "");
     }
-}
-
-/// Лента релизов → самый новый тег: первая ссылка `…/releases/tag/<тег>`.
-fn newest_tag(feed: &str) -> Option<String> {
-    let (_, rest) = feed.split_once("/releases/tag/")?;
-    let tag: String = rest
-        .chars()
-        .take_while(|c| !matches!(c, '"' | '\'' | '<' | '>') && !c.is_whitespace())
-        .collect();
-    (!tag.is_empty()).then_some(tag)
-}
-
-/// Строка `checksums.txt` для файла → его SHA-256 строчными. Формат `sha256sum`:
-/// хеш, пробелы, имя; звёздочка перед именем — двоичный режим.
-fn checksum(sums: &str, file: &str) -> Option<String> {
-    sums.lines().find_map(|line| {
-        let (hash, name) = line.split_once(char::is_whitespace)?;
-        (name.trim().trim_start_matches('*') == file).then(|| hash.to_ascii_lowercase())
-    })
 }
 
 /// Жив ли процесс; мёртвый заодно забываем.
@@ -492,30 +450,5 @@ mod tests {
             dead.wanted && !dead.on && !dead.recovering,
             "процесс умер — это падение"
         );
-    }
-
-    /// Лента идёт от нового к старому; тег — до кавычки, как в настоящей ленте GitHub.
-    #[test]
-    fn the_newest_tag_is_the_first_one_in_the_feed() {
-        let feed = r#"<feed><entry><link rel="alternate" type="text/html" href="https://github.com/jaywehosl/qd/releases/tag/v0.1.7-alpha"/></entry>
-<entry><link href="https://github.com/jaywehosl/qd/releases/tag/v0.1.6-alpha"/></entry></feed>"#;
-        assert_eq!(newest_tag(feed).as_deref(), Some("v0.1.7-alpha"));
-        assert_eq!(newest_tag("<feed></feed>"), None);
-        assert_eq!(newest_tag(r#"href=".../releases/tag/""#), None);
-    }
-
-    #[test]
-    fn the_checksum_line_is_found_by_file_name() {
-        let sums = "ABC123  qd-core-windows-amd64.exe\n\
-                    def456 *qd-windows-amd64.exe\n";
-        assert_eq!(
-            checksum(sums, "qd-core-windows-amd64.exe").as_deref(),
-            Some("abc123")
-        );
-        assert_eq!(
-            checksum(sums, "qd-windows-amd64.exe").as_deref(),
-            Some("def456")
-        );
-        assert_eq!(checksum(sums, "qd-core-linux-amd64"), None);
     }
 }

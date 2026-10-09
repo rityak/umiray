@@ -34,6 +34,9 @@ pub struct Plan {
 ///   не бывало и молча не слушает (D-133) — отказать можно только до него.
 /// - `process` тоже «до»: не поднявшееся ядро отменяет всё остальное.
 /// - `alias` после процесса: наводить псевдоним не на чем, пока ядро не работает (D-056).
+/// - `volt-vpn` до процесса: перехват VPN обязан стоять раньше первого рукопожатия.
+/// - `volt` после: Relay спрашивает имена у резолвера ядра, а его нет до ядра (D-176).
+///   Отказ Relay ядро не гасит — выходы VOLT ответят ошибкой, причина уйдёт в лог.
 const START: &[Hook<Plan>] = &[
     Hook {
         phase: Phase::Start,
@@ -66,6 +69,13 @@ const START: &[Hook<Plan>] = &[
     Hook {
         phase: Phase::Start,
         when: When::Before,
+        id: "volt-vpn",
+        label: "перехват прокси-серверов для VOLT",
+        run: volt_vpn,
+    },
+    Hook {
+        phase: Phase::Start,
+        when: When::Before,
         id: "process",
         label: "запуск ядра",
         run: process,
@@ -77,12 +87,24 @@ const START: &[Hook<Plan>] = &[
         label: "наведение псевдонима",
         run: alias,
     },
+    Hook {
+        phase: Phase::Start,
+        when: When::After,
+        id: "volt",
+        label: "VOLT Relay",
+        run: volt_relay,
+    },
 ];
 
 impl Engine for Mihomo {
     fn start<'a>(&'a self, state: &'a AppState) -> Job<'a> {
         Box::pin(async move {
-            Lifecycle::run(START, Phase::Start, state, &mut Plan::default(), self.log()).await
+            let result =
+                Lifecycle::run(START, Phase::Start, state, &mut Plan::default(), self.log()).await;
+            if result.is_err() {
+                state.volt.stop();
+            }
+            result
         })
     }
 
@@ -173,6 +195,7 @@ fn config<'a>(state: &'a AppState, plan: &'a mut Plan) -> Job<'a> {
         plan.effective = Some(crate::render::effective::ConfigRenderer::effective(
             &state.routing.document(state)?,
             Some(crate::core::Ports::free_port()?),
+            state.volt.route(&crate::config::volt::Options::get()?)?,
         )?);
         Ok(())
     })
@@ -257,6 +280,14 @@ fn process<'a>(state: &'a AppState, plan: &'a mut Plan) -> Job<'a> {
 /// а не дочерний процесс.
 fn alias<'a>(state: &'a AppState, _plan: &'a mut Plan) -> Job<'a> {
     Box::pin(async move { state.routing.point_alias(state).await.map(|_| ()) })
+}
+
+fn volt_vpn<'a>(state: &'a AppState, _plan: &'a mut Plan) -> Job<'a> {
+    Box::pin(crate::app::volt::prepare_vpn(state))
+}
+
+fn volt_relay<'a>(state: &'a AppState, _plan: &'a mut Plan) -> Job<'a> {
+    Box::pin(crate::app::volt::start_relay(state))
 }
 
 #[cfg(test)]

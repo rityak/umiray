@@ -21,6 +21,9 @@ import PanelSwitch, { type Panel } from "./PanelSwitch";
 import Speed from "./Speed";
 
 type Props = {
+  /** Under the capture, knowing where DIRECT goes (VOLT, D-187). */
+  extra?: (direction: api.Direction) => React.ReactNode;
+  directTarget: string;
   status: api.Status;
   mode: api.Choice;
   busy: boolean;
@@ -57,6 +60,8 @@ type Props = {
  * и набор к ним отношения не имеет. Он живёт там, где правится, — в «Маршрутизации».
  */
 export default function Connection({
+  directTarget,
+  extra,
   status,
   mode,
   busy: appBusy,
@@ -328,6 +333,7 @@ export default function Connection({
       />
     ) : (
       <NodesView
+        directTarget={directTarget}
         nodes={nodes}
         sources={sources}
         hidden={hidden}
@@ -349,6 +355,8 @@ export default function Connection({
     <div className="grid min-h-0 flex-1 grid-cols-[340px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-3">
       <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
         <ConnectionPath
+          directTarget={directTarget}
+          extra={extra?.(direction)}
           status={status}
           mode={mode}
           running={api.runningMode(status)}

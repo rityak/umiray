@@ -118,7 +118,7 @@ if (process.env.UI_CHECK_SETUP === "1") {
   check("узел выбирается плиткой", walked.node !== null && walked.picked === walked.node);
   // «Рекомендованная» на живом клиенте меряет резолверы одноразовым ядром — десятки секунд.
   check(
-    "«Подключить» закрывает мастер и поднимает VPN",
+    "«Подключить» закрывает мастер и подключает",
     await session.until(
       "!document.querySelector('dialog[open]') && document.querySelector('header [role=\"status\"]').textContent.includes('Подключён')",
       { timeout: 120000 },
@@ -169,12 +169,12 @@ const conn = await run(`
   await dock('Соединение');
   const radios = (label) => [...document.querySelectorAll('[aria-label="' + label + '"] input[type="radio"]')].map((r) => r.closest('label')?.textContent.trim());
   return {
-    power: document.querySelector('[aria-label="VPN"]')?.hasAttribute('aria-pressed') ?? false,
+    power: document.querySelector('.rk-power')?.hasAttribute('aria-pressed') ?? false,
     modes: radios('Перехват'),
     // Выход выбирается в списке (D-166): DIRECT и AUTO — первые строки, сегмента «Маршрут» нет.
     first: [...document.querySelectorAll('[data-node]')].slice(0, 2).map((n) => n.dataset.node),
     segment: !!document.querySelector('[aria-label="Маршрут"]'),
-    exit: !!document.querySelector('[aria-label="VPN"]')?.closest('.rk-card')?.querySelector('.rk-item-title')?.textContent.trim(),
+    exit: !!document.querySelector('.rk-power')?.closest('.rk-card')?.querySelector('.rk-item-title')?.textContent.trim(),
     load: !!byText('.rk-card-title', 'Трафик'),
     nodes: !!byText('.rk-card-title', 'Узлы'),
   };
@@ -370,14 +370,12 @@ await session.send("Emulation.clearDeviceMetricsOverride");
 
 if (process.env.UI_CHECK_CONNECT === "1") {
   await run("await dock('Соединение'); return 1;");
-  const was = await run(
-    "return document.querySelector('[aria-label=\"VPN\"]').getAttribute('aria-pressed');",
-  );
-  if (was === "true") await session.clickReal('[aria-label="VPN"]');
+  const was = await run("return document.querySelector('.rk-power').getAttribute('aria-pressed');");
+  if (was === "true") await session.clickReal(".rk-power");
   await session.until(
-    "document.querySelector('[aria-label=\"VPN\"]').getAttribute('aria-pressed') === 'false'",
+    "document.querySelector('.rk-power').getAttribute('aria-pressed') === 'false'",
   );
-  await session.clickReal('[aria-label="VPN"]');
+  await session.clickReal(".rk-power");
   const up = await session.until(
     "document.querySelector('header [role=\"status\"]').textContent.includes('Подключён')",
     { timeout: 30000 },
@@ -392,7 +390,7 @@ if (process.env.UI_CHECK_CONNECT === "1") {
   check("нагрузка показывает приём и отдачу", load);
   await session.shot("connected");
   if (was !== "true") {
-    await session.clickReal('[aria-label="VPN"]');
+    await session.clickReal(".rk-power");
     check(
       "и гасит его",
       await session.until(

@@ -23,7 +23,7 @@ pub fn core_status(app: tauri::AppHandle, state: State<AppState>) -> Status {
 
 #[tauri::command]
 pub fn core_logs(engine: EngineId, state: State<AppState>) -> Vec<String> {
-    state.engine(engine).log().lines()
+    state.logs(engine)
 }
 
 #[tauri::command]

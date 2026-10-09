@@ -24,6 +24,8 @@ pub struct Route {
     pub adapter: String,
     pub gateway: String,
     pub metric: u32,
+    /// Номер адаптера в системе: им привязывают сокет к адаптеру (VOLT, D-176). На Linux 0.
+    pub index: u32,
 }
 
 /// Резолверы, прописанные системой на адаптере.
@@ -65,7 +67,7 @@ impl NetInfo {
     pub fn default_routes() -> Result<Vec<Route>> {
         let raw = powershell(
         "Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | \
-         ForEach-Object { \"$($_.InterfaceAlias)|$($_.NextHop)|$($_.RouteMetric + $_.InterfaceMetric)\" }",
+         ForEach-Object { \"$($_.InterfaceAlias)|$($_.NextHop)|$($_.RouteMetric + $_.InterfaceMetric)|$($_.ifIndex)\" }",
     )?;
         let mut routes = parse_routes(&raw);
         // Побеждает меньшая метрика — сортируем сразу, чтобы читающий не считал сам.
@@ -140,6 +142,7 @@ fn chosen_route(line: &str) -> Option<Route> {
         adapter: after("dev")?,
         gateway: after("via").unwrap_or_default(),
         metric: 0,
+        index: 0,
     })
 }
 
@@ -165,12 +168,13 @@ fn parse_owner(raw: &str) -> Option<String> {
 
 #[cfg(any(windows, test))]
 fn parse_routes(raw: &str) -> Vec<Route> {
-    fields(raw, 3)
+    fields(raw, 4)
         .filter_map(|parts| {
             Some(Route {
                 adapter: parts[0].to_string(),
                 gateway: parts[1].to_string(),
                 metric: parts[2].parse().ok()?,
+                index: parts[3].parse().ok()?,
             })
         })
         .collect()
@@ -220,16 +224,18 @@ mod tests {
     /// Маршрут по умолчанию бывает не один — и выигрывает тот, у кого метрика меньше.
     #[test]
     fn routes_carry_the_metric_that_decides() {
-        let list = parse_routes("Ethernet|192.168.1.1|35\nMeta|0.0.0.0|4\n");
+        let list = parse_routes("Ethernet|192.168.1.1|35|12\nMeta|0.0.0.0|4|58\n");
         assert_eq!(list.len(), 2);
         assert_eq!(list[1].adapter, "Meta");
         assert_eq!(list[1].metric, 4);
+        assert_eq!((list[0].index, list[1].index), (12, 58));
     }
 
     /// Строка без числа — не маршрут: пропускаем, а не падаем.
     #[test]
     fn a_broken_line_is_skipped() {
-        assert!(parse_routes("Ethernet|192.168.1.1|как-то так\n").is_empty());
+        assert!(parse_routes("Ethernet|192.168.1.1|как-то так|12\n").is_empty());
+        assert!(parse_routes("Ethernet|192.168.1.1|35\n").is_empty());
         assert!(parse_routes("одно поле\n").is_empty());
     }
 

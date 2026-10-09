@@ -2,7 +2,7 @@ import { FileCog, Ruler, Server } from "lucide-react";
 import type { ReactNode } from "react";
 import { Item, ItemGroup, Switch, Text } from "rootik";
 import type * as api from "../api";
-import { available, type Feature } from "../features";
+import { available, type Feature, has } from "../features";
 import { t, tk } from "../i18n";
 
 type Tune = {
@@ -55,10 +55,13 @@ type Props = {
   /// Блокировать рекламу: DNS только из блокирующих и готовый набор правил (D-169).
   ads: boolean;
   onAds: (on: boolean) => void;
+  /// Обход для выбранных сервисов (D-191); галка — только где VOLT есть (D-174).
+  bypass: boolean;
+  onBypass: (on: boolean) => void;
 };
 
 /// Список под карточкой «Рекомендованная»: что будет записано и замерено.
-export default function Tuning({ ads, onAds }: Props) {
+export default function Tuning({ ads, onAds, bypass, onBypass }: Props) {
   return (
     <div className="flex flex-col gap-3">
       <Text size="sm" tone="muted">
@@ -77,6 +80,16 @@ export default function Tuning({ ads, onAds }: Props) {
         checked={ads}
         onChange={(event) => onAds(event.target.checked)}
       />
+      {has("volt") && (
+        <Switch
+          label={t("Bypass for YouTube and Discord")}
+          description={t(
+            "They go directly, without proxy, with packets disguised. The list and method are in VOLT settings.",
+          )}
+          checked={bypass}
+          onChange={(event) => onBypass(event.target.checked)}
+        />
+      )}
       <Text size="xs" tone="muted">
         {t("Everything is saved to Mihomo Settings, where you can change it.")}
       </Text>

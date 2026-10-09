@@ -11,6 +11,8 @@ use serde::Serialize;
 pub enum Feature {
     /// Второе ядро. Его сборка — только под Windows (WinDivert).
     Qd,
+    /// Обход VOLT: WinDivert, только Windows (D-182).
+    Volt,
     /// «Всегда от администратора» — задача планировщика (D-087).
     AlwaysAdmin,
     /// Прописать адрес ядра системе (D-047).
@@ -36,6 +38,7 @@ impl Features {
         if cfg!(windows) {
             features.extend([
                 Feature::Qd,
+                Feature::Volt,
                 Feature::AlwaysAdmin,
                 Feature::IcmpPing,
                 Feature::MtuProbe,

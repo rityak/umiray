@@ -89,6 +89,7 @@ impl Maintenance {
 
 /// Погасить все ядра — без обвязки: её снимает вызывающий, каждый по-своему.
 async fn stop_engines(state: &AppState) {
+    state.volt.stop();
     for id in EngineId::ALL {
         let _ = state.engine(id).stop().await;
     }

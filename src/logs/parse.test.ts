@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Line, matches, parseLine } from "./parse";
+import { type Line, logSource, matches, parseLine } from "./parse";
 
 describe("parseLine", () => {
   it("parses a regular core line", () => {
@@ -61,5 +61,19 @@ describe("matches", () => {
   // "all" filter it is visible, and that is what matters.
   it("an unparsed line is visible with the all filter", () => {
     expect(matches(line({ level: "raw" }), "all", "")).toBe(true);
+  });
+});
+
+describe("logSource", () => {
+  it("separates client, core and VOLT without matching text inside a message", () => {
+    expect(logSource("umiray: connecting", "mihomo")).toEqual({
+      source: "umiray",
+      message: "connecting",
+    });
+    expect(logSource("volt: Relay started", "mihomo")).toEqual({
+      source: "volt",
+      message: "Relay started",
+    });
+    expect(logSource("request to volt: failed", "mihomo").source).toBe("mihomo");
   });
 });

@@ -49,8 +49,13 @@ pub async fn config_write(
 /// он в документах. Служебный вход замера не подмешиваем — он нужен живому ядру, а не читателю.
 #[tauri::command]
 pub fn config_assembled(state: State<AppState>) -> Result<String> {
-    crate::render::effective::ConfigRenderer::effective(&state.routing.document(&state)?, None)
-        .map(|built| built.yaml)
+    let relay = state.volt.route(&crate::config::volt::Options::get()?)?;
+    crate::render::effective::ConfigRenderer::effective(
+        &state.routing.document(&state)?,
+        None,
+        relay,
+    )
+    .map(|built| built.yaml)
 }
 
 /// Умолчание у файла клиента — шаблон, у части набора — собранное клиентом, поэтому

@@ -103,6 +103,14 @@ fn main() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            commands::volt::volt_get,
+            commands::volt::volt_set,
+            commands::volt::volt_strategy_parse,
+            commands::volt::volt_strategy_render,
+            commands::volt::volt_strategy_preset,
+            commands::volt::volt_tune,
+            commands::volt::volt_check_site,
+            commands::volt::volt_dictionary_pick,
             commands::core::core_status,
             commands::core::core_logs,
             commands::settings::settings_get,
@@ -215,6 +223,7 @@ fn main() {
                 // Выход приходит на главный поток, а фаза остановки асинхронна (D-101):
                 // ждём её здесь, иначе процесс уйдёт раньше, чем ядро погашено.
                 tauri::async_runtime::block_on(state.connection.stop(app, &state));
+                state.volt.stop();
             }
         });
 }

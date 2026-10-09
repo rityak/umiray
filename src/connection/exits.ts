@@ -22,7 +22,7 @@ const exit = (name: string, kind: string, supported: boolean): api.Node => ({
 /// DIRECT и AUTO. Без узлов AUTO выбирать не из чего — он виден, но не нажимается.
 export function exits(nodes: number): api.Node[] {
   return [
-    exit(DIRECT, t("bypass VPN"), true),
+    exit(DIRECT, t("bypass proxy"), true),
     exit(AUTO, t("spread across working nodes"), nodes > 0),
   ];
 }
@@ -43,4 +43,11 @@ export function choice(name: string): { direction: api.Direction; node?: string 
   if (name === DIRECT) return { direction: "direct" };
   if (name === AUTO) return { direction: "auto" };
   return { direction: "manual", node: name };
+}
+
+/// Выход DIRECT через обход называется своим выходом ядра (D-186); подпись — как он идёт.
+export function bypassNote(target: string): string | null {
+  if (target === "DIRECT-AUTO") return t("without proxy, bypass when needed");
+  if (target === "DIRECT-VOLT") return t("without proxy, always bypassing");
+  return null;
 }

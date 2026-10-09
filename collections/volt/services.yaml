@@ -1,0 +1,62 @@
+# Сервисы, которые VOLT берёт в обход напрямую, без прокси (D-182).
+# Правило — без цели: её дописывает сборка (`DIRECT-VOLT`). Правится как обычный файл.
+# `probe` — что проверяет подбор стратегии (D-189); нет — `https://<первый домен>/`.
+#
+# Сверено 09.10.2026 с flowseal/zapret-discord-youtube: lists/list-google.txt (YouTube,
+# без общих доменов Google) и lists/list-general.txt (Discord, без Cloudflare и Twitch).
+version: 1
+services:
+  - id: youtube
+    title: YouTube
+    # Видео идёт с googlevideo: страница может открываться, а видео — нет.
+    probe:
+      - https://www.youtube.com/robots.txt
+      - https://redirector.googlevideo.com/report_mapping
+    rules:
+      - DOMAIN-SUFFIX,youtube.com
+      - DOMAIN-SUFFIX,youtu.be
+      - DOMAIN-SUFFIX,youtube-nocookie.com
+      - DOMAIN-SUFFIX,youtubekids.com
+      - DOMAIN-SUFFIX,googlevideo.com
+      - DOMAIN-SUFFIX,ytimg.com
+      - DOMAIN,yt3.ggpht.com
+      - DOMAIN,yt4.ggpht.com
+      - DOMAIN,yt3.googleusercontent.com
+      - DOMAIN,youtubei.googleapis.com
+      - DOMAIN,youtube.googleapis.com
+      - DOMAIN,youtubeembeddedplayer.googleapis.com
+      - DOMAIN,jnn-pa.googleapis.com
+      - DOMAIN,wide-youtube.l.google.com
+      - DOMAIN,youtube-ui.l.google.com
+      - DOMAIN,yt-video-upload.l.google.com
+      - DOMAIN,ytimg.l.google.com
+  - id: discord
+    title: Discord
+    probe:
+      - https://discord.com/api/v10/gateway
+    rules:
+      - DOMAIN-SUFFIX,discord.com
+      - DOMAIN-SUFFIX,discord.gg
+      - DOMAIN-SUFFIX,discord.media
+      - DOMAIN-SUFFIX,discord.app
+      - DOMAIN-SUFFIX,discord.co
+      - DOMAIN-SUFFIX,discord.design
+      - DOMAIN-SUFFIX,discord.dev
+      - DOMAIN-SUFFIX,discord.gift
+      - DOMAIN-SUFFIX,discord.gifts
+      - DOMAIN-SUFFIX,discord.new
+      - DOMAIN-SUFFIX,discord.store
+      - DOMAIN-SUFFIX,discord.status
+      - DOMAIN-SUFFIX,discord-activities.com
+      - DOMAIN-SUFFIX,discordactivities.com
+      - DOMAIN-SUFFIX,discordapp.com
+      - DOMAIN-SUFFIX,discordapp.net
+      - DOMAIN-SUFFIX,discordcdn.com
+      - DOMAIN-SUFFIX,discordsays.com
+      - DOMAIN-SUFFIX,discordstatus.com
+      - DOMAIN-SUFFIX,dis.gd
+      - DOMAIN,discord-attachments-uploads-prd.storage.googleapis.com
+      # Голос: UDP на адрес из Voice Ready, имени у него нет — только порты, как
+      # у zapret (`--filter-udp=50000-50100`). Relay меняет лишь пакеты вида STUN
+      # и Discord IP Discovery, остальное проходит как есть.
+      - AND,((NETWORK,UDP),(DST-PORT,50000-50100))

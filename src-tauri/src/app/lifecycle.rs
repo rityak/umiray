@@ -131,6 +131,14 @@ const HOOKS: &[Hook<EngineId>] = &[
         label: "остановка ядра",
         run: stop_engine,
     },
+    // После ядра: сначала уходят маршруты в Relay, потом сам Relay (D-176).
+    Hook {
+        phase: Phase::Stop,
+        when: When::After,
+        id: "volt",
+        label: "остановка VOLT",
+        run: stop_volt,
+    },
 ];
 
 pub struct Lifecycle;
@@ -212,6 +220,13 @@ fn start_engine<'a>(state: &'a AppState, engine: &'a mut EngineId) -> Job<'a> {
 
 fn stop_engine<'a>(state: &'a AppState, engine: &'a mut EngineId) -> Job<'a> {
     state.engine(*engine).stop()
+}
+
+fn stop_volt<'a>(state: &'a AppState, _engine: &'a mut EngineId) -> Job<'a> {
+    Box::pin(async move {
+        state.volt.stop();
+        Ok(())
+    })
 }
 
 fn start_proxy<'a>(state: &'a AppState, engine: &'a mut EngineId) -> Job<'a> {

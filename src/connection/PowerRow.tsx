@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { PowerButton, Text } from "rootik";
+import { t } from "../i18n";
 
 type Props = {
   on: boolean;
@@ -27,7 +28,7 @@ export default function PowerRow({
   return (
     <div className="flex items-center gap-4">
       <PowerButton
-        label="VPN"
+        label={t("Connection")}
         size="sm"
         on={on}
         pending={powering}

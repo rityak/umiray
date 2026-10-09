@@ -28,10 +28,14 @@ pub const LISTS: &str = "lists";
 /// Имя коллекции-папки со встроенными наборами правил (D-083).
 pub const RULES: &str = "rules";
 
+/// Сервисы, которые VOLT берёт в обход напрямую (D-182).
+pub const VOLT: &str = "volt";
+
 /// Образцы, вшитые в бинарь. Единственное место, где коллекции живут внутри кода,
 /// и только затем, чтобы было чем засеять пустую таблицу.
 const DNS_SHIPPED: &str = include_str!("../../collections/dns.yaml");
 const LISTS_SHIPPED: &str = include_str!("../../collections/lists.yaml");
+const VOLT_SHIPPED: &str = include_str!("../../collections/volt/services.yaml");
 
 /// Наборы правил — та же раздача, только папкой. Пара «идентификатор, содержимое».
 const RULES_SHIPPED: [(&str, &str); 4] = [
@@ -128,6 +132,44 @@ pub struct CatalogList {
     pub urls: Vec<String>,
 }
 
+/// Сервисы VOLT (D-182): правила без цели — её дописывает сборка.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VoltServices {
+    pub version: u32,
+    pub services: Vec<VoltService>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VoltService {
+    pub id: String,
+    pub title: String,
+    #[serde(default, rename = "title_en", skip_serializing_if = "Option::is_none")]
+    pub title_en: Option<String>,
+    /// Что проверяет подбор стратегии (D-189); пусто — первый домен из правил.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub probe: Vec<String>,
+    pub rules: Vec<String>,
+}
+
+impl VoltService {
+    /// Адреса проверки сервиса: свои или `https://<первый домен>/`.
+    pub fn probe_targets(&self) -> Vec<String> {
+        if !self.probe.is_empty() {
+            return self.probe.clone();
+        }
+        self.rules
+            .iter()
+            .find_map(|rule| {
+                rule.strip_prefix("DOMAIN-SUFFIX,")
+                    .or_else(|| rule.strip_prefix("DOMAIN,"))
+            })
+            .map(|host| vec![format!("https://{host}/")])
+            .unwrap_or_default()
+    }
+}
+
 pub struct Collections;
 
 impl Collections {
@@ -144,7 +186,11 @@ impl Collections {
             return Ok(());
         }
         Db::batch(|batch| {
-            for (name, shipped) in [(DNS, DNS_SHIPPED), (LISTS, LISTS_SHIPPED)] {
+            for (name, shipped) in [
+                (DNS, DNS_SHIPPED),
+                (LISTS, LISTS_SHIPPED),
+                (VOLT, VOLT_SHIPPED),
+            ] {
                 batch.put(Table::Collections, name, "", shipped)?;
             }
             for (id, shipped) in RULES_SHIPPED {
@@ -209,6 +255,12 @@ impl Collections {
     /// Прочитать каталог rule sets (D-157).
     pub fn lists() -> Result<ListCatalog> {
         parse_named(LISTS, LISTS_SHIPPED)
+    }
+
+    /// Сервисы VOLT (D-182). Строки нет — вшитый образец: установка старше коллекции
+    /// получает его без переезда.
+    pub fn volt() -> Result<VoltServices> {
+        parse_named(VOLT, VOLT_SHIPPED)
     }
 
     /// Вшитый образец резолверов — тестам, которым нужна поставка, а не копия на машине.
@@ -346,6 +398,17 @@ fn read<T: serde::de::DeserializeOwned>(text: &str, name: &str) -> Result<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Образец сервисов VOLT читается, а его правила — без цели: её дописывает сборка.
+    #[test]
+    fn shipped_volt_services_are_rules_without_a_target() {
+        let shipped: VoltServices = read(VOLT_SHIPPED, VOLT).unwrap();
+        let ids: Vec<&str> = shipped.services.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["youtube", "discord"]);
+        for rule in shipped.services.iter().flat_map(|service| &service.rules) {
+            assert!(!rule.contains("DIRECT") && !rule.ends_with(','), "{rule}");
+        }
+    }
 
     /// Образцы обязаны читаться своей же схемой: вшитый в бинарь битый файл означал бы,
     /// что на чистой машине раздел не открывается вовсе.

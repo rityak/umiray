@@ -1,15 +1,26 @@
 import { ScrollText } from "lucide-react";
 import { useMemo } from "react";
-import { Card, CopyButton, EmptyState, type LogLevel, type LogLine, LogView } from "rootik";
+import {
+  Button,
+  Card,
+  CopyButton,
+  EmptyState,
+  type LogLevel,
+  type LogLine,
+  LogView,
+  Menu,
+  MenuCheckboxItem,
+} from "rootik";
 import * as api from "../api";
 import { useCached } from "../hooks/useCached";
 import { unchanged, usePoll } from "../hooks/usePoll";
 import { t } from "../i18n";
-import { type Level, parseLine } from "./parse";
+import { type Level, logSource, parseLine } from "./parse";
 
 /// Core level as the kit's log level. Unparsed text (usually a core panic) gets no level:
 /// it does not hide under a filter.
 const LEVEL: Record<Level, LogLevel | undefined> = {
+  trace: "trace",
   error: "error",
   warning: "warn",
   info: "info",
@@ -17,14 +28,28 @@ const LEVEL: Record<Level, LogLevel | undefined> = {
   raw: undefined,
 };
 
-/// Lines the client writes itself (`supervisor::note`): they get lost among the core's
-/// output, yet they are exactly what explains what a button press did. The source names them.
-const OWN = "umiray:";
-
 /// Output of the engine the sections show (D-154). Polled only while the section is open:
 /// the reason for a failed start arrives in the error's `details` anyway (D-028).
 export default function Logs({ engine, hidden }: { engine: api.Engine; hidden: boolean }) {
   const [raw, setRaw] = useCached<string[]>(`logs.${engine}`, []);
+
+  const [sources, setSources] = useCached<string[]>(`logs.${engine}.sources`, [
+    "umiray",
+    engine,
+    "volt",
+  ]);
+  const [levels, setLevels] = useCached<LogLevel[]>(`logs.${engine}.levels`, [
+    "trace",
+    "debug",
+    "info",
+    "warn",
+    "error",
+  ]);
+  const labels: Record<string, string> = {
+    umiray: "Umiray",
+    [engine]: engine,
+    volt: "VOLT",
+  };
 
   usePoll(() => {
     api.coreLogs(engine).then(unchanged(setRaw), () => {});
@@ -34,13 +59,8 @@ export default function Logs({ engine, hidden }: { engine: api.Engine; hidden: b
     () =>
       raw.map((text) => {
         const line = parseLine(text);
-        const own = line.text.startsWith(OWN);
-        return {
-          message: own ? line.text.slice(OWN.length).trim() : line.text,
-          level: LEVEL[line.level],
-          time: line.time ?? undefined,
-          source: own ? "umiray" : engine,
-        };
+        const { source, message } = logSource(line.text, engine);
+        return { message, level: LEVEL[line.level], time: line.time ?? undefined, source };
       }),
     [raw, engine],
   );
@@ -72,8 +92,46 @@ export default function Logs({ engine, hidden }: { engine: api.Engine; hidden: b
       showSource
       // Time arrives as an "hh:mm:ss" string — shown as is.
       timeFormat={(time) => String(time)}
-      lines={lines}
-      actions={<CopyButton size="sm" value={() => raw.join("\n")} label={t("Copy log")} />}
+      lines={lines
+        .filter((line) => sources.includes(line.source as string))
+        .map((line) => ({ ...line, source: labels[line.source as string] }))}
+      levels={levels}
+      onLevelsChange={setLevels}
+      actions={
+        <>
+          <Menu
+            placement="bottom-end"
+            trigger={
+              <Button size="sm" variant="ghost">
+                {t("Log sources")} ({sources.length}/3)
+              </Button>
+            }
+          >
+            {["umiray", engine, "volt"].map((source) => (
+              <MenuCheckboxItem
+                key={source}
+                checked={sources.includes(source)}
+                onCheckedChange={(checked) =>
+                  setSources((current) =>
+                    checked ? [...current, source] : current.filter((item) => item !== source),
+                  )
+                }
+              >
+                {labels[source]}
+              </MenuCheckboxItem>
+            ))}
+          </Menu>
+          <CopyButton
+            size="sm"
+            value={() =>
+              raw
+                .filter((text) => sources.includes(logSource(parseLine(text).text, engine).source))
+                .join("\n")
+            }
+            label={t("Copy log")}
+          />
+        </>
+      }
     />
   );
 }

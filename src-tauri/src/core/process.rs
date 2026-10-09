@@ -81,6 +81,16 @@ impl LogRing {
         stream: impl Read + Send + 'static,
         prefix: &'static str,
     ) -> tokio::sync::oneshot::Receiver<String> {
+        self.pump_map_until(stream, prefix, Some)
+    }
+
+    /// `format` отдаёт строку журнала; `None` — строка не для журнала (счётчики, D-188).
+    pub fn pump_map_until(
+        &self,
+        stream: impl Read + Send + 'static,
+        prefix: &'static str,
+        format: impl Fn(String) -> Option<String> + Send + 'static,
+    ) -> tokio::sync::oneshot::Receiver<String> {
         let (tell, heard) = tokio::sync::oneshot::channel();
         let ring = self.clone();
         std::thread::spawn(move || {
@@ -92,7 +102,9 @@ impl LogRing {
                         continue;
                     }
                 }
-                ring.push(line);
+                if let Some(line) = format(line) {
+                    ring.push(line);
+                }
             }
         });
         heard

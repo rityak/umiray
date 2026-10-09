@@ -5,6 +5,255 @@ import type { Entry } from "../i18n";
  * `locales.test.ts` checks that every key used in code is here and nothing here is unused.
  */
 const ru: Record<string, Entry> = {
+  ms: "мс",
+  "Directly, without VOLT": "Напрямую, без VOLT",
+  "bypass is off · goes to the exit chosen in Connection":
+    "обход выключен · уйдёт в выход, выбранный в «Соединении»",
+  "Bypass for YouTube and Discord": "Обход для YouTube и Discord",
+  "They go directly, without proxy, with packets disguised. The list and method are in VOLT settings.":
+    "Они пойдут напрямую, без прокси, с изменёнными пакетами. Список и метод — в настройках VOLT.",
+  "Bypass is on": "Обход включён",
+  "Bypass is off": "Обход выключен",
+  "Bypass turns on after a restart as administrator":
+    "Обход заработает после перезапуска от администратора",
+  bypass: "обход",
+  "voice over UDP": "голос по UDP",
+  "Check a site": "Проверить сайт",
+  "Directly and with the bypass, like the strategy check.":
+    "Напрямую и с обходом — так же, как проверка шаблонов.",
+  "Checking…": "Проверяем…",
+  Check: "Проверить",
+  Directly: "Напрямую",
+  "With the bypass": "С обходом",
+  "opens, {ms} ms": "открывается, {ms} мс",
+  "does not open{why}": "не открывается{why}",
+  "Add {domain} to your domains": "Добавить {domain} в свои домены",
+  "Checks: {list}": "Проверяет: {list}",
+  "Empty checks what goes through the bypass. Your own: at most four HTTPS URLs, one per line.":
+    "Пусто — проверяется то, что идёт в обход. Свои — до четырёх HTTPS-адресов, по одному на строку.",
+  "Relay runs with it on this network; your saved method is unchanged.":
+    "Relay работает с ней в этой сети; сохранённый метод не менялся.",
+  "connections: {n}": "соединений: {n}",
+  "packets changed: {n}": "изменено пакетов: {n}",
+  "directly: {direct}, bypassed: {bypassed}": "напрямую: {direct}, с обходом: {bypassed}",
+  "errors: {n}": "ошибок: {n}",
+  "last error: {why}": "последняя ошибка: {why}",
+  "Proxy servers captured: {n}": "Перехватываются прокси-серверы: {n}",
+  "VOLT files are not downloaded": "файлы VOLT не скачаны",
+  "needs administrator rights": "нужны права администратора",
+  "Relay did not start: {why}": "Relay не запустился: {why}",
+  "Relay is not running": "Relay не работает",
+  "all DIRECT traffic · idle: the exit is not DIRECT":
+    "весь трафик DIRECT · не участвует: выход не DIRECT",
+  "Quick settings, step by step and code": "Быстрые настройки, по шагам и код",
+  "Step by step: profiles, UDP, AUTO": "По шагам: профили, UDP, AUTO",
+  "Discord voice goes over UDP, and UDP through Relay is off in Fine-tuning → Step by step.":
+    "Голос Discord идёт по UDP, а UDP через Relay выключен: «Тонкости» → «По шагам».",
+  "Only if issuing a WARP key fails: real addresses of api.cloudflareclient.com, one per line. Empty asks system DNS.":
+    "Нужны, только если ключ WARP не выпускается: настоящие адреса api.cloudflareclient.com, по одному на строку. Пусто — системный DNS.",
+  "Proxy method": "Метод для прокси",
+  "Everything opened directly — no bypass needed here. The strategy was kept.":
+    "Всё открылось напрямую — обход здесь не нужен. Стратегия не менялась.",
+  Bypass: "Обход",
+  "all DIRECT traffic · auto": "весь трафик DIRECT · авто",
+  "all DIRECT traffic · always": "весь трафик DIRECT · всегда",
+  "lists · {list}": "списки · {list}",
+  "Disguises direct connections from the provider's filter":
+    "Маскирует прямые соединения от фильтра провайдера",
+  "The core gets the DIRECT-VOLT and DIRECT-AUTO exits: Routing can send rules to them.":
+    "В ядре появятся выходы DIRECT-VOLT и DIRECT-AUTO — в «Маршрутизации» их можно ставить целью правил.",
+  "Only these and your domains, always bypassed — with any exit, proxy too.":
+    "Только они и ваши домены — всегда с обходом, при любом выходе, даже через прокси.",
+  "All DIRECT traffic": "Весь трафик DIRECT",
+  "Everything through the DIRECT exit when it is chosen. Routing rules to DIRECT stay as they are.":
+    "Всё, что идёт через выход DIRECT, когда он выбран. Правила маршрута к DIRECT не меняются.",
+  How: "Как",
+  "“Directly first” misses a site that connects and then slows down.":
+    "«Сначала напрямую» не замечает сайт, который соединяется, а потом тормозит.",
+  "Directly first": "Сначала напрямую",
+  "Bypass only when the site does not answer directly. Exit DIRECT-AUTO.":
+    "Обход — только если сайт не ответил напрямую. Выход DIRECT-AUTO.",
+  "Always bypass": "Всегда с обходом",
+  "Every connection goes through the bypass. Exit DIRECT-VOLT.":
+    "Каждое соединение идёт через обход. Выход DIRECT-VOLT.",
+  "When the connection to the proxy itself does not get through":
+    "Когда не проходит само подключение к прокси",
+  "without proxy, bypass when needed": "без прокси, обход по необходимости",
+  "without proxy, always bypassing": "без прокси, всегда с обходом",
+  "applying…": "применяем…",
+  "off · proxy traffic only": "выключен · только трафик прокси",
+  off: "выключен",
+  "your domains": "свои домены",
+  "What goes through the bypass": "Что пускать в обход",
+  "Selected services": "Выбранные сервисы",
+  "Your domains": "Свои домены",
+  "One per line, subdomains included": "По одному на строку, с поддоменами",
+  "How packets change. The check picks the one that works on your network.":
+    "Как меняются пакеты. Проверка выберет тот, что работает в вашей сети.",
+  Running: "Работает",
+  "Starts with the connection": "Включится вместе с подключением",
+  s: "с",
+  bytes: "байт",
+  Passed: "Успешно",
+  Failed: "Ошибка",
+  Fragmentation: "Разрезание",
+  "Packet reordering": "Перестановка пакетов",
+  "Noise only": "Только шум",
+  "Noise + fragmentation": "Шум и разрезание",
+  "Noise + reordering": "Шум и перестановка",
+  "Choose a preset at startup": "Подбирать при запуске",
+  "Check presets": "Проверить шаблоны",
+  "Apply changes before checking.": "Перед проверкой примените изменения.",
+  "Enable direct connections to check presets.":
+    "Для проверки включите VOLT для прямых соединений.",
+  "Traffic preset": "Шаблон обработки",
+  "TCP fragmentation": "Разрезание TCP",
+  "TLS + QUIC noise (experimental)": "Шум TLS и QUIC (эксперимент)",
+  "Custom strategy · Code": "Своя стратегия · Код",
+  "Edit custom strategy in Code": "Править свою стратегию в коде",
+  "Process the start of a connection": "Обрабатывать начало соединения",
+  "First {n} packets": "Первых пакетов: {n}",
+  "Noise amount": "Сколько шума",
+  "{n} decoys per packet": "Ложных на пакет: {n}",
+  Compact: "Компактный",
+  Extended: "Расширенный",
+  "Dictionary from Code": "Словарь из кода",
+  "HTTPS addresses for strategy checks": "Адреса HTTPS для проверки стратегий",
+  "Checking strategies…": "Проверяем стратегии…",
+  "Chosen strategy: {name}": "Выбрана стратегия: {name}",
+  "No strategy passed every check. The saved strategy was kept.":
+    "Ни одна стратегия не прошла все проверки. Сохранённая стратегия оставлена.",
+  "Last check": "Последняя проверка",
+  "Attempt {n}": "Попытка {n}",
+  "Saved strategy": "Сохранённая стратегия",
+  "TLS fragmentation": "Фрагментация TLS",
+  "Extended noise dictionary": "Расширенный словарь шума",
+  "Compact noise dictionary": "Компактный словарь шума",
+  "Step {n}": "Этап {n}",
+  "Move step earlier": "Переместить этап выше",
+  "Move step later": "Переместить этап ниже",
+  "Remove step": "Удалить этап",
+  "What to do with traffic": "Как изменять трафик",
+  "Pass unchanged": "Пропускать без изменений",
+  "Split into smaller packets": "Разделять на пакеты меньшего размера",
+  "Split and send fragments out of order": "Разделять и менять порядок отправки",
+  "Add decoy packets": "Добавлять ложные пакеты",
+  "Where to split": "Где разделять пакет",
+  "Choose a readable layout or enter up to seven byte positions. The real stream is restored by TCP.":
+    "Выберите схему или задайте до семи границ в байтах. TCP восстанавливает исходный поток.",
+  "At the start and inside the TLS hostname": "В начале и внутри имени сервера TLS",
+  "At the start and inside the HTTP Host header": "В начале и внутри заголовка Host HTTP",
+  "At bytes 1, 32 and 64": "После байтов 1, 32 и 64",
+  "Custom split positions": "Свои границы разделения",
+  "Split positions": "Границы разделения",
+  "Bytes or markers: 1, midsld, sni+1, host+1. Missing markers leave the packet unchanged.":
+    "Байты или метки: 1, midsld, sni+1, host+1. Если метки нет, пакет остаётся без изменений.",
+  "Only the first packets": "Изменять только первые пакеты",
+  "Stop changing this connection after this many packets per step.":
+    "Число пакетов соединения, которые может изменить этот этап.",
+  "Only the first bytes": "Изменять только первые байты",
+  "Limit how much of the connection this step may change.":
+    "Сколько байтов в начале соединения может изменить этот этап.",
+  "Overlap adjacent fragments": "Перекрытие соседних фрагментов",
+  "Repeat these bytes at the fragment boundary. Zero disables overlap.":
+    "Повторить это число байтов на границе фрагментов. Ноль отключает перекрытие.",
+  "Add decoys before real fragments": "Добавлять ложные пакеты перед фрагментами",
+  "Decoy packet appearance": "Содержимое ложных пакетов",
+  "TLS handshake based on the real connection": "TLS-рукопожатие на основе текущего соединения",
+  "Independent TLS handshake": "Отдельное TLS-рукопожатие",
+  "HTTP request": "HTTP-запрос",
+  "QUIC handshake": "QUIC-рукопожатие",
+  "Empty binary payload": "Нулевые байты",
+  "My own payload file": "Содержимое из своего файла",
+  "Decoy repetitions": "Сколько раз повторять ложные пакеты",
+  "Per changed packet and step. TLS AUTO sends two decoys per repetition; more noise can increase delays.":
+    "На каждый изменяемый пакет и этап. TLS AUTO отправляет два ложных пакета за повтор; увеличение шума может добавить задержку.",
+  "Decoy lifetime": "Время жизни ложных пакетов в сети",
+  "Advanced decoy settings": "Дополнительные настройки ложных пакетов",
+  "Decoy hop limit is {ttl}. A low value can discard decoys before they reach the network filter. If all strategies fail, set Decoy lifetime to 0 in Advanced decoy settings to keep the original packet's value.":
+    "Для ложных пакетов установлен TTL {ttl}. Слишком малое значение может отбросить их до сетевого фильтра. Если все стратегии не проходят проверки, откройте дополнительные настройки ложных пакетов и установите время жизни 0 — это сохранит TTL исходного пакета.",
+  "IP hop limit for decoys. Zero keeps the original value; real packets keep their own lifetime.":
+    "Число переходов через маршрутизаторы (TTL). Ноль сохраняет исходное значение; у настоящих пакетов TTL не меняется.",
+  "Noise dictionary": "Словарь шума",
+  "A random hostname is selected for each new connection. Destination, real TLS hostname and certificates stay unchanged.":
+    "Для нового соединения выбирается случайное имя из словаря. Адрес назначения, настоящее имя TLS и сертификаты не меняются.",
+  "One hostname": "Одно имя сервера",
+  "My hostname list": "Мой список доменов",
+  "My dictionary file": "Свой .txt",
+  "Dictionary source": "Источник словаря",
+  "Bundled snapshot; availability varies by provider and region.":
+    "Встроен в VOLT. Доступность различается по провайдерам и регионам.",
+  "Decoy hostname": "Имя сервера в ложном пакете",
+  "Hostnames, one per line": "Домены, по одному на строку",
+  "Dictionary file": "Файл словаря",
+  "Choose a .txt file with one hostname per line. Comments start with #.":
+    "Выберите .txt с одним доменом на строку. Комментарии начинаются с #.",
+  "Choose .txt": "Выбрать .txt",
+  "Payload file": "Файл содержимого пакета",
+  "Absolute path or relative to VOLT runtime data. Existing hexadecimal payloads remain available in Code.":
+    "Полный путь или путь относительно рабочих данных VOLT. Существующее содержимое в hex-формате доступно в разделе «Код».",
+  "This step only changes these payloads: {kinds}": "Этот этап изменяет только: {kinds}",
+  "The visual editor cannot read this strategy. Open Code to fix it.":
+    "Форма не смогла прочитать стратегию. Откройте «Код», чтобы её исправить.",
+  "Traffic profile": "Профиль трафика",
+  "The first matching profile wins. Profiles below it do not run; steps inside one profile run in order.":
+    "Используется первый подходящий профиль. Профили ниже не запускаются; этапы внутри одного профиля выполняются по порядку.",
+  "No traffic profiles": "Нет профилей трафика",
+  "Add traffic profile": "Добавить профиль трафика",
+  "Move profile earlier": "Переместить профиль выше",
+  "Move profile later": "Переместить профиль ниже",
+  "Remove traffic profile": "Удалить профиль трафика",
+  "Profile name": "Название профиля",
+  "Letters, digits, hyphens and underscores; up to 64 characters.":
+    "Латинские буквы, цифры, дефис и подчёркивание; до 64 символов.",
+  "Recognizable traffic": "Тип содержимого пакетов",
+  "Nothing selected means any payload. Unknown encrypted UDP remains intact; arbitrary UDP fragmentation is unsupported.":
+    "Ничего не выбрано — любое содержимое. Неизвестный зашифрованный UDP остаётся целым; произвольное разделение UDP не поддерживается.",
+  "Unrecognized payload": "Неизвестный формат",
+  "Discord voice": "Голос Discord",
+  "Limit this profile to destinations": "Ограничить профиль адресами",
+  "Destination hostnames": "Домены назначения",
+  "Empty means any destination. Hostname suffixes are matched; these are real destinations, separate from decoy dictionaries.":
+    "Пусто — любые адреса. Совпадение по окончанию домена. Это настоящие адреса назначения, отдельно от словарей ложных пакетов.",
+  "Leave these hostnames unchanged": "Не изменять трафик этих доменов",
+  "Destination ports": "Порты назначения",
+  "Empty means any port. One port or range per line, for example 443 or 5000-5100.":
+    "Пусто — любые порты. По одному порту или диапазону на строку, например 443 или 5000-5100.",
+  "This profile also has advanced matching. Those conditions are preserved; edit them in Code.":
+    "В профиле есть дополнительные условия. Они сохранены; редактировать их можно в разделе «Код».",
+  "Add transformation step": "Добавить этап изменения",
+  "UDP connection limits": "Ограничения UDP-соединений",
+  "UDP processing": "Обработка UDP",
+  "Modify UDP traffic": "Изменять UDP-трафик",
+  "Allow UDP through Relay": "Передавать UDP через Relay",
+  "UDP destinations per connection": "Адресов UDP на соединение",
+  "Close idle UDP connections after": "Закрывать неактивные UDP-соединения через",
+  "DIRECT-AUTO timing and memory": "DIRECT-AUTO: задержки и запоминание маршрутов",
+  "Wait before trying VOLT in parallel": "Задержка параллельного запуска VOLT",
+  "Direct TLS starts immediately. VOLT starts after this delay if direct has not succeeded.":
+    "Прямое TLS-соединение запускается сразу. Если оно ещё не установлено, после этой задержки запускается VOLT.",
+  "Direct handshake timeout": "Тайм-аут прямого рукопожатия",
+  "VOLT handshake timeout": "Тайм-аут рукопожатия через VOLT",
+  "Remember which route worked": "Запоминать работающий маршрут",
+  "Remember a route for": "Запоминать маршрут на",
+  "Remembered destinations": "Максимум запомненных адресов",
+  "VOLT for proxy traffic": "VOLT для трафика прокси",
+  "Log sources": "Источники",
+  "Listener addresses are managed by the client. This YAML controls traffic transformations.":
+    "Адреса слушателей задаёт клиент. Этот YAML управляет изменением трафика.",
+  Discard: "Отменить изменения",
+  "Apply VOLT settings": "Применить настройки VOLT",
+  "Cloudflare bootstrap IPs": "IP для выпуска Cloudflare WARP",
+  "One real IP:port per line. Empty resolves configured server addresses before connecting; maximum 64.":
+    "Реальный IP:порт, по одному на строку. Пустое поле — адреса серверов разрешаются перед подключением; максимум 64.",
+  "Proxy endpoints": "Адреса прокси-серверов",
+  "Restore preset": "Восстановить пресет",
+  "Relay strategy YAML": "Стратегия Relay в YAML",
+  "Restart the client as administrator to run VOLT.":
+    "Для запуска VOLT перезапустите клиент с правами администратора.",
+  "VOLT is not downloaded yet. Turning it on downloads it.":
+    "VOLT ещё не скачан — включение скачает его.",
+  "VOLT settings": "Настройки VOLT",
   "Interface language": "Язык интерфейса",
   Startup: "Запуск",
   Window: "Окно",
@@ -52,8 +301,8 @@ const ru: Record<string, Entry> = {
   "Every 6 hours": "Раз в 6 часов",
   "Every day": "Раз в сутки",
   Rules: "Правила",
-  "Through VPN": "Через VPN",
-  "Bypass VPN": "Без VPN",
+  "Through the tunnel": "Через туннель",
+  "Bypass the tunnel": "Без туннеля",
   Block: "Блокировать",
   "Filter rules by target": "Фильтр правил по цели",
   All: "Все",
@@ -145,7 +394,7 @@ const ru: Record<string, Entry> = {
   "Saved to preset «{name}». Another preset is in use; press Use to switch.":
     "Сохранено в набор «{name}». Сейчас используется другой набор; нажмите «Использовать», чтобы переключиться.",
   "Saved.": "Сохранено.",
-  "Saved and applied to the running VPN.": "Сохранено и применено к работающему VPN.",
+  "Saved and applied to the running core.": "Сохранено и применено к работающему ядру.",
   "Saved. Applies when you connect.": "Сохранено. Применится при подключении.",
   "Now using preset «{name}». The core was restarted.":
     "Теперь работает набор «{name}». Ядро перезапущено.",
@@ -160,8 +409,8 @@ const ru: Record<string, Entry> = {
   "Mihomo core": "Ядро mihomo",
   Client: "Клиент",
   "downloading mihomo": "скачиваю mihomo",
-  "Couldn't download the core — VPN can't start without it.":
-    "Ядро не скачалось само — без него VPN не запустится.",
+  "Couldn't download the core — can't connect without it.":
+    "Ядро не скачалось само — без него не подключиться.",
   Sources: "Источники",
   Logs: "Логи",
   "System proxy is already set to {proxy}. Switch to System to replace it, or find the app that set it.":
@@ -309,20 +558,20 @@ const ru: Record<string, Entry> = {
   "set the address in your app": "адрес указывается в приложении",
   "system proxy": "системный прокси",
   "all device traffic": "весь трафик устройства",
-  "Only apps where you enter the umiray address go through VPN. Everything else goes direct.":
-    "Через VPN идут только программы, в которых вы указали адрес umiray. Остальное работает напрямую.",
+  "Only apps where you enter the umiray address go through the proxy. Everything else goes direct.":
+    "Через прокси идут только программы, в которых вы указали адрес umiray. Остальное работает напрямую.",
   "umiray becomes the system proxy. Browsers and most apps pick it up, but games and some programs don't.":
     "umiray становится системным прокси. Браузеры и большинство программ подхватят его сами, а игры и часть приложений — нет.",
-  "All traffic on this computer goes through VPN, games and UDP included. No setup in apps.":
-    "Через VPN идёт весь трафик компьютера, включая игры и UDP. В программах ничего настраивать не нужно.",
+  "All traffic on this computer goes through the proxy, games and UDP included. No setup in apps.":
+    "Через прокси идёт весь трафик компьютера, включая игры и UDP. В программах ничего настраивать не нужно.",
   "spread across working nodes": "по всем рабочим узлам",
   "assigned by your rules": "назначен вашими правилами",
-  "bypass VPN — no server": "в обход VPN, сервер не нужен",
+  "bypass proxy — no server": "в обход прокси, сервер не нужен",
   "select a node from the list": "выберите узел в списке",
   "selected automatically": "выбран автоматически",
   "selected manually": "выбран вручную",
   "core missing — download it in Settings": "ядра нет — скачайте его в «Настройках»",
-  "{mode} turns on with VPN": "{mode} включится вместе с VPN",
+  "{mode} turns on when you connect": "{mode} включится при подключении",
   "all device traffic goes through the adapter": "весь трафик устройства идёт через адаптер",
   "proxy set in system settings": "прокси прописан в настройках системы",
   "enter the address below in your browser or app": "укажите адрес ниже в браузере или приложении",
@@ -566,7 +815,7 @@ const ru: Record<string, Entry> = {
     "своё управление скоростью; нужен сервер с той же поддержкой",
   "Download the core": "Скачать ядро",
   "Restart as admin": "Перезапустить от администратора",
-  "Restart VPN": "Перезапустить VPN",
+  Reconnect: "Переподключиться",
   Protocol: "Протокол",
   "Reset to default": "Сбросить к умолчанию",
   "Reset for sure?": "Точно сбросить?",
@@ -584,13 +833,15 @@ const ru: Record<string, Entry> = {
   "first alive": "первый доступный",
   "load balancing": "распределение",
   "no type": "без типа",
-  "bypass VPN": "без VPN",
+  "bypass proxy": "без прокси",
+  "bypass the tunnel": "без туннеля",
   block: "блокировать",
-  "through VPN": "через VPN",
+  "through proxy": "через прокси",
+  "through the tunnel": "через туннель",
   "not found · goes to the exit chosen in Connection":
     "не найдено · уйдёт в выход, выбранный в «Соединении»",
-  "node · through VPN": "узел · через VPN",
-  "group · through VPN": "группа · через VPN",
+  "node · through proxy": "узел · через прокси",
+  "group · through proxy": "группа · через прокси",
   "No sources": "Источников нет",
   "Add a subscription or a link — the provider's response will show up here.":
     "Добавьте подписку или ссылку — здесь появится ответ провайдера.",
@@ -706,8 +957,8 @@ const ru: Record<string, Entry> = {
     "Одно значение на строку. Можно вставить список целиком.",
   "Fastest, but many ISPs block it": "самый быстрый, но многие провайдеры его блокируют",
   "Also checks whether the port is open": "заодно проверяет, открыт ли порт",
-  "Closest to real use. Needs VPN on": "ближе всего к реальной работе; нужен включённый VPN",
-  "Leaves out the handshake. Needs VPN on": "без учёта рукопожатия; нужен включённый VPN",
+  "Closest to real use. Needs a connection": "ближе всего к реальной работе; нужно подключение",
+  "Leaves out the handshake. Needs a connection": "без учёта рукопожатия; нужно подключение",
   "Never check": "Не определять",
   "Every week": "Раз в неделю",
   "Every month": "Раз в месяц",
@@ -725,10 +976,10 @@ const ru: Record<string, Entry> = {
   Firewall: "Брандмауэр",
   "Active: all traffic outside the tunnel is blocked":
     "работает: трафик в обход туннеля заблокирован",
-  "On but idle: works only in TUN mode with VPN on":
-    "включён, но не действует — работает только в режиме TUN при включённом VPN",
-  "Blocks traffic outside VPN. If the client crashes, internet stays blocked until restart":
-    "блокирует трафик в обход VPN. Если клиент упадёт, интернета не будет до перезапуска",
+  "On but idle: works only in TUN mode while connected":
+    "включён, но не действует — работает только в режиме TUN при подключении",
+  "Blocks traffic that bypasses the tunnel. If the client crashes, internet stays blocked until restart":
+    "блокирует трафик в обход туннеля. Если клиент упадёт, интернета не будет до перезапуска",
   "WireGuard can be spotted and blocked by its first packet. Junk packets before the handshake hide it.":
     "WireGuard распознают и блокируют по первому пакету. Мусорные пакеты перед рукопожатием мешают распознаванию.",
   "Latency check": "Замер задержки",
@@ -754,7 +1005,7 @@ const ru: Record<string, Entry> = {
   Maintenance: "Обслуживание",
   "Update core": "Обновить ядро",
   "From the official GitHub release. Disconnect before replacing the core":
-    "из официального релиза на GitHub; перед заменой отключите VPN",
+    "из официального релиза на GitHub; перед заменой отключитесь",
   "Client version": "Версия клиента",
   "Device ID": "Идентификатор устройства",
   "HWID is how your provider knows this device. Each new one takes a device slot in the subscription":
@@ -784,8 +1035,8 @@ const ru: Record<string, Entry> = {
   "Lifecycle hooks": "Хуки жизненного цикла",
   Follow: "Следить",
   "No steps yet": "Шагов пока нет",
-  "Steps show up when the core starts and stops — turn VPN on":
-    "шаги появятся при запуске и остановке ядра — включите VPN",
+  "Steps show up when the core starts and stops — connect":
+    "шаги появятся при запуске и остановке ядра — подключитесь",
   Phase: "фаза",
   Step: "шаг",
   Time: "время",
@@ -805,7 +1056,7 @@ const ru: Record<string, Entry> = {
   "Checks on launch; installs only when you say so.":
     "Проверяется при запуске; установка — только с вашего согласия.",
   "Check for updates": "Проверить обновления",
-  "Disconnect VPN and install?": "Отключить VPN и установить?",
+  "Disconnect and install?": "Отключиться и установить?",
   "Install update": "Установить обновление",
   "Mbit/s": "Мбит/с",
   "qd engine": "Ядро qd",
@@ -867,7 +1118,7 @@ const ru: Record<string, Entry> = {
     "qd принимает только ссылку qd://. Остальные ссылки добавляются на виде mihomo.",
   "qd picks the entry node itself.": "Входной узел qd выбирает сам.",
   "through the exit node": "через выходной узел",
-  "through VPN, never the exit node": "через VPN, но не через выходной узел",
+  "through the tunnel, never the exit node": "через туннель, но не через выходной узел",
   "Rules pick apps by process. An app without a rule goes to MATCH, together with traffic Windows sends on its own behalf.":
     "Правила выбирают приложения по процессу. Приложение без правила уходит в MATCH — вместе с трафиком, который Windows отправляет от своего имени.",
   "Through the exit node": "Через выход",
@@ -984,8 +1235,7 @@ const ru: Record<string, Entry> = {
   "Refresh «{name}»": "Обновить «{name}»",
   "Open «{name}» on GitHub": "Открыть «{name}» на GitHub",
   "The core downloads them from its geox-url.": "Ядро скачает их по своим geox-url.",
-  "Turn the VPN on — the core updates its databases itself.":
-    "Включите VPN — базы обновляет само ядро.",
+  "Connect — the core updates its databases itself.": "Подключитесь — базы обновляет само ядро.",
   "{n} subnets": ["{n} подсеть", "{n} подсети", "{n} подсетей"],
   "Ready-made sets": "Готовые наборы",
   "ready rules, each with its own exit you can change":
@@ -1053,7 +1303,7 @@ const ru: Record<string, Entry> = {
   Idle: "Ожидание",
   "conn.": "соед.",
   Load: "Нагрузка",
-  "Direct, without VPN": "Напрямую, без VPN",
+  "Direct, without proxy": "Напрямую, без прокси",
   "{n} of {total} nodes": "{n} узлов из {total}",
   "{n} chosen of {total}": "{n} выбрано из {total}",
   "Choose nodes for AUTO": "Выбрать узлы для AUTO",

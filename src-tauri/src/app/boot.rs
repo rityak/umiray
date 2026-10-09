@@ -249,7 +249,10 @@ fn session(app: &AppHandle) -> Done {
 /// Что делает пункт питания, трей не знает: действие приходит отсюда, из места сборки
 /// приложения.
 fn icon(app: &AppHandle) -> Done {
-    Tray::build(app, Connection::toggle).map_err(|why| why.to_string())
+    Tray::build(app, Connection::toggle, crate::app::volt::toggle_from_tray)
+        .map_err(|why| why.to_string())?;
+    crate::app::volt::show_in_tray(app);
+    Ok(())
 }
 
 /// Запись в `Run` из прошлой сборки получает флаг, по которому `smart` узнаёт вход

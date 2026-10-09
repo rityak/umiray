@@ -73,7 +73,7 @@ export default function Debug() {
           <EmptyState
             size="sm"
             title={t("No steps yet")}
-            hint={t("Steps show up when the core starts and stops — turn VPN on")}
+            hint={t("Steps show up when the core starts and stops — connect")}
           />
         ) : (
           <DataTable

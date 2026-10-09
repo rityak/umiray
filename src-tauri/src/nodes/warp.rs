@@ -44,13 +44,24 @@ impl Warp {
         keys: &WgKeys,
         mask: Option<Value>,
         through: Option<u16>,
+        bootstrap: Option<reqwest::Client>,
     ) -> Result<Mapping> {
-        let client = client(through)?;
+        let volt = bootstrap.is_some();
+        let client = match bootstrap {
+            Some(client) => client,
+            None => client(through)?,
+        };
         let serial = crate::stamp::Stamp::id()?;
         let body = register_body(&keys.public, &serial, &crate::stamp::Stamp::utc());
         let device = call(&client, reqwest::Method::POST, "/reg", None, &body)
             .await
-            .map_err(|error| unreachable(error, through))?;
+            .map_err(|error| {
+                if volt {
+                    error
+                } else {
+                    unreachable(error, through)
+                }
+            })?;
         if device.id.is_empty() || device.token.is_empty() {
             return Err(AppError::network(
                 "Cloudflare зарегистрировал устройство, но не вернул его номер",
@@ -105,11 +116,11 @@ fn unreachable(error: AppError, through: Option<u16>) -> AppError {
     }
     match through {
         None => AppError::network(
-            "API Cloudflare недоступен напрямую — в России его режут. Подключитесь к любому \
-             узлу и выпустите снова: запрос пойдёт через VPN",
+            "API Cloudflare недоступен напрямую. Подключитесь к любому \
+             узлу и выпустите снова: запрос пойдёт через прокси",
         ),
         Some(_) => AppError::network(format!(
-            "API Cloudflare не ответил и через VPN — проверьте, что узел работает ({message})"
+            "API Cloudflare не ответил и через прокси — проверьте, что узел работает ({message})"
         )),
     }
 }
@@ -197,7 +208,7 @@ mod tests {
         let direct = unreachable(silent(), None).to_string();
         assert!(direct.contains("Подключитесь"), "{direct}");
         let proxied = unreachable(silent(), Some(2080)).to_string();
-        assert!(proxied.contains("через VPN"), "{proxied}");
+        assert!(proxied.contains("через прокси"), "{proxied}");
         let refused = unreachable(AppError::network("Cloudflare отказал: 400"), None);
         assert!(
             refused.to_string().contains("отказал"),

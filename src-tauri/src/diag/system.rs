@@ -44,6 +44,7 @@ mod tests {
             adapter: adapter.to_string(),
             gateway: "0.0.0.0".to_string(),
             metric,
+            index: 0,
         }
     }
 

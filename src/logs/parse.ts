@@ -1,7 +1,7 @@
 /// The levels mihomo writes, plus `raw` for everything without structure. A core panic
 /// and Go runtime output arrive as plain text and must not be lost: that is exactly where
 /// you see why the core did not come up.
-export type Level = "debug" | "info" | "warning" | "error" | "raw";
+export type Level = "trace" | "debug" | "info" | "warning" | "error" | "raw";
 
 export type Line = {
   level: Level;
@@ -11,6 +11,7 @@ export type Line = {
 };
 
 const LEVELS: Record<string, Level> = {
+  trace: "trace",
   debug: "debug",
   info: "info",
   warn: "warning",
@@ -52,10 +53,18 @@ export function parseLine(raw: string): Line {
 export const FILTERS = ["all", "warning", "error"] as const;
 export type Filter = (typeof FILTERS)[number];
 
-const RANK: Record<Level, number> = { debug: 0, info: 1, raw: 1, warning: 2, error: 3 };
+const RANK: Record<Level, number> = { trace: -1, debug: 0, info: 1, raw: 1, warning: 2, error: 3 };
 
 export function matches(line: Line, filter: Filter, search: string): boolean {
   if (filter !== "all" && RANK[line.level] < RANK[filter]) return false;
   if (search === "") return true;
   return line.text.toLowerCase().includes(search.toLowerCase());
+}
+
+export function logSource(text: string, engine: string): { source: string; message: string } {
+  for (const source of ["umiray", "volt"]) {
+    const prefix = `${source}:`;
+    if (text.startsWith(prefix)) return { source, message: text.slice(prefix.length).trim() };
+  }
+  return { source: engine, message: text };
 }

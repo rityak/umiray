@@ -1,4 +1,4 @@
-// Run against a browser demo on UI_CHECK_PORT, never against a live VPN client.
+// Run against a browser demo on UI_CHECK_PORT, never against a live client.
 import assert from "node:assert/strict";
 import { attach } from "./cdp.mjs";
 
@@ -58,7 +58,7 @@ try {
     document.querySelector('[aria-label="Junk packets before handshake"]').click(); await wait();
     button('Client updates').click(); await wait();
     button('Install update', document.querySelector('dialog[open]')).click(); await wait();
-    button('Disconnect VPN and install?', document.querySelector('dialog[open]')).click(); await wait();
+    button('Disconnect and install?', document.querySelector('dialog[open]')).click(); await wait();
     return true;
   `);
   assert.equal(await run("return window.updateInstalls;"), 0, "Unsaved form blocks installation");
@@ -78,7 +78,7 @@ try {
   );
   assert.equal(await run("return window.updateInstalls;"), 0, "First click only confirms");
   await run(
-    "button('Disconnect VPN and install?', document.querySelector('dialog[open]')).click(); await wait(); return true;",
+    "button('Disconnect and install?', document.querySelector('dialog[open]')).click(); await wait(); return true;",
   );
   assert.equal(await run("return window.updateInstalls;"), 0, "Unsaved YAML blocks installation");
   assert.ok(
@@ -93,7 +93,7 @@ try {
       "]').click(); await wait(); button('Client updates').click(); await wait(); return true;",
   );
   await run(
-    "button('Install update', document.querySelector('dialog[open]')).click(); await wait(); button('Disconnect VPN and install?', document.querySelector('dialog[open]')).click(); await wait(); return true;",
+    "button('Install update', document.querySelector('dialog[open]')).click(); await wait(); button('Disconnect and install?', document.querySelector('dialog[open]')).click(); await wait(); return true;",
   );
   assert.equal(await run("return window.updateInstalls;"), 1);
   assert.ok(await run("return !!document.querySelector('dialog[open] [role=progressbar]');"));

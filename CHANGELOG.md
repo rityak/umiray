@@ -3,6 +3,34 @@
 The version comes from `package.json`, is mirrored in `Cargo.toml`, and appears in
 the subscription User-Agent as `umiray/<version>`.
 
+## 1.6.0
+
+### New
+
+- VOLT (Windows): chosen services, or all DIRECT traffic, go out through the
+  [umiray-core](https://github.com/rityak/umiray-core) helpers, which change how outgoing
+  packets are split and ordered. Turning it on downloads the helpers from the umiray-core
+  release and checks them against its `checksums.txt`; it needs administrator rights.
+- Auto-tune picks a VOLT method that works on this network; "Check site" tries one address
+  the same way. VOLT can also handle connections to the proxy servers themselves.
+- VOLT shows whether it actually works: a status in Connection, live counters, a switch in
+  the tray and in the setup wizard. A crashed helper is restarted up to three times without
+  dropping the connection.
+- Logs: the trace level and a filter by source — core, client, VOLT.
+
+### Changes
+
+- umiray is described as a secure proxy client. The window says "through proxy" and
+  "without proxy" where it used to say VPN; the README has a disclaimer and new screenshots.
+
+Install from this release's assets:
+- Windows x64: `umiray_1.6.0_x64-setup.exe`
+- Debian, Ubuntu: `umiray_1.6.0_amd64.deb` (`sudo apt install ./umiray_1.6.0_amd64.deb`)
+- Fedora: `umiray-1.6.0-1.x86_64.rpm` (`sudo dnf install ./umiray-1.6.0-1.x86_64.rpm`)
+- Arch: `umiray-bin` from the AUR, or `PKGBUILD` with `umiray.install` from this release (`makepkg -si`)
+
+Existing installations update from within the client; on Arch, with the package manager.
+
 ## 1.5.1
 
 ### New

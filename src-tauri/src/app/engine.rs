@@ -80,6 +80,18 @@ pub trait Engine: Send + Sync {
 }
 
 impl AppState {
+    pub fn logs(&self, id: EngineId) -> Vec<String> {
+        let mut lines = self.engine(id).log().lines();
+        lines.extend(self.volt.logs());
+        lines.sort_by_cached_key(|line| {
+            line.strip_prefix("time=\"")
+                .and_then(|tail| tail.split('"').next())
+                .unwrap_or("")
+                .replace(' ', "T")
+        });
+        lines
+    }
+
     /// Реестр ядер. Новое ядро — ветка здесь и вариант `EngineId`, больше нигде (D-154).
     pub fn engine(&self, id: EngineId) -> &dyn Engine {
         match id {

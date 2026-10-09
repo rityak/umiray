@@ -76,6 +76,9 @@ impl MihomoRenderer {
         }
         bare_flags(&mut map);
         // Последним: к этому месту заведены все группы, в которые правило может целиться.
+        if let Some(route) = &client.volt {
+            crate::render::mihomo_volt::apply(&mut map, route)?;
+        }
         missing_targets(&mut map);
 
         let port = match mode {
@@ -787,6 +790,7 @@ mod tests {
     /// у нового клиента (D-118).
     fn plain() -> Client {
         Client {
+            volt: None,
             health: Check::default(),
             udp: false,
             mask: crate::config::awg::Mask::default(),
@@ -1233,6 +1237,7 @@ mod tests {
                 sources,
                 None,
                 &Client {
+                    volt: None,
                     health: Check::default(),
                     udp: rule,
                     mask: crate::config::awg::Mask::default(),
@@ -1359,6 +1364,7 @@ mod tests {
                 &nodes(&["a1"]),
                 None,
                 &Client {
+                    volt: None,
                     health: Check {
                         url: mine.to_string(),
                         interval: 600,
