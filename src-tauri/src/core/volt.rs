@@ -29,8 +29,6 @@ pub struct Snapshot {
     pub log: Vec<String>,
     pub relay_default: &'static str,
     pub vpn_default: &'static str,
-    pub vpn_noise: &'static str,
-    pub vpn_tcp: &'static str,
     pub domain_pools: Vec<crate::config::volt::DomainPool>,
     pub tuning: Option<TuneReport>,
     /// Почему Relay не работает (D-187): ответ последнего запуска; удачный его стирает.
@@ -73,6 +71,10 @@ pub struct RelayStats {
     /// AUTO: сколько рукопожатий ушло напрямую и сколько — через обход.
     pub auto_direct: u64,
     pub auto_bypassed: u64,
+    /// Ротация стратегий по хосту: сколько раз переключились и сколько ранних
+    /// блокировок засёк детектор (ядро, #6).
+    pub rotations: u64,
+    pub detected_failures: u64,
 }
 
 const STATS_EVERY: &str = "5s";
@@ -138,8 +140,6 @@ impl Volt {
             log: self.log.tail(30),
             relay_default: crate::config::volt::RELAY_DEFAULT,
             vpn_default: crate::config::volt::VPN_DEFAULT,
-            vpn_noise: include_str!("../../../collections/volt/vpn-noise.yaml"),
-            vpn_tcp: include_str!("../../../collections/volt/vpn-tcp.yaml"),
             domain_pools: self.domain_pools(&directory)?,
             tuning,
             relay_error: self.failure.lock().unwrap().clone(),
@@ -465,7 +465,16 @@ impl Volt {
             return Ok(());
         }
         let directory = Self::directory();
-        let file = strategy_file("vpn.yaml", &options.vpn_yaml)?;
+        let mut vpn_yaml = options.vpn_yaml.clone();
+        if options.auto_ttl {
+            // Probe the path to the endpoints once and bound the decoys so they
+            // expire before the server (#5). A failed probe leaves the strategy
+            // as written.
+            if let Some(ttl) = crate::core::hops::probe_decoy_ttl(&endpoints).await {
+                vpn_yaml = crate::core::hops::inject_ttl(&vpn_yaml, ttl);
+            }
+        }
+        let file = strategy_file("vpn.yaml", &vpn_yaml)?;
         let mut command = Command::new(directory.join("volt.exe"));
         command.args([
             "-config",
@@ -697,6 +706,8 @@ fn relay_stats(raw: &str) -> Option<RelayStats> {
             .map(str::to_owned),
         auto_direct: count(auto, "direct_succeeded"),
         auto_bypassed: count(auto, "fallbacks"),
+        rotations: count(stats, "rotations"),
+        detected_failures: count(stats, "detected_failures"),
     })
 }
 
@@ -797,6 +808,8 @@ mod tests {
                 last_error: Some("timeout".into()),
                 auto_direct: 20,
                 auto_bypassed: 9,
+                rotations: 0,
+                detected_failures: 0,
             })
         );
         assert_eq!(

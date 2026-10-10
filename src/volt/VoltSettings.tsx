@@ -7,7 +7,6 @@ import { locale, t } from "../i18n";
 import AutoTune from "./AutoTune";
 import SimpleControls from "./SimpleControls";
 import SiteCheck from "./SiteCheck";
-import StrategyForm from "./StrategyForm";
 import type { VoltController } from "./useVolt";
 import { activity } from "./VoltRow";
 
@@ -55,19 +54,12 @@ function composition(rules: string[]) {
 }
 const filled = (list: string[]) => list.map((line) => line.trim()).filter(Boolean);
 
-type Half = "direct" | "vpn";
-/** Parts that parse or render a strategy; Apply waits for all of them. */
-type Pending =
-  | "directSelect"
-  | "directKnobs"
-  | "directSteps"
-  | "vpnSelect"
-  | "vpnKnobs"
-  | "vpnSteps";
+/** Parts that parse or render the Relay strategy; Apply waits for all of them. */
+type Pending = "select" | "knobs";
 
 /**
- * VOLT in two halves (D-182, D-186, D-187): the bypass for direct connections and VOLT for
- * VPN traffic. Each has its switch, its method and its own Fine-tuning with code.
+ * VOLT in two halves (D-182, D-186, D-187): the bypass for direct connections — its method,
+ * noise and Code (D-193) — and VOLT for proxy traffic, only its YAML (D-192).
  */
 function VoltSettings({
   volt,
@@ -85,8 +77,7 @@ function VoltSettings({
   const snapshot = volt.snapshot;
   const [draft, setDraft] = useState<VoltOptions | null>(snapshot?.options ?? null);
   const [dirty, setDirty] = useState(false);
-  const [fine, setFine] = useState<Record<Half, boolean>>({ direct: false, vpn: false });
-  const [code, setCode] = useState<Record<Half, boolean>>({ direct: false, vpn: false });
+  const [code, setCode] = useState(false);
   const [pending, setPending] = useState<Partial<Record<Pending, boolean>>>({});
   const [tuning, setTuning] = useState(false);
   const [relayStrategy, setRelayStrategy] = useState<VoltStrategy | null>(null);
@@ -94,14 +85,7 @@ function VoltSettings({
   const pend = useMemo(() => {
     const make = (id: Pending) => (value: boolean) =>
       setPending((current) => (current[id] === value ? current : { ...current, [id]: value }));
-    return {
-      directSelect: make("directSelect"),
-      directKnobs: make("directKnobs"),
-      directSteps: make("directSteps"),
-      vpnSelect: make("vpnSelect"),
-      vpnKnobs: make("vpnKnobs"),
-      vpnSteps: make("vpnSteps"),
-    };
+    return { select: make("select"), knobs: make("knobs") };
   }, []);
   useEffect(() => {
     if (!dirty && snapshot) setDraft(snapshot.options);
@@ -115,10 +99,7 @@ function VoltSettings({
     setDraft((current) => (current ? { ...current, ...patch } : current));
     setDirty(true);
   };
-  const open = (half: Half) => {
-    setFine((current) => ({ ...current, [half]: true }));
-    setCode((current) => ({ ...current, [half]: true }));
-  };
+  const open = () => setCode(true);
   const busy = Object.values(pending).some(Boolean);
   const locked = disabled || volt.busy || tuning;
   const english = !locale().startsWith("ru");
@@ -131,46 +112,12 @@ function VoltSettings({
         draft.services.includes(service.id) &&
         service.rules.some((rule) => rule.includes("NETWORK,UDP")),
     );
-  const strategyParts = (half: Half) => {
-    const relay = half === "direct";
-    return {
-      yaml: relay ? draft.relayYaml : draft.vpnYaml,
-      disabled: locked,
-      relay,
-      pools: snapshot.domainPools,
-      onChange: (yaml: string) => change(relay ? { relayYaml: yaml } : { vpnYaml: yaml }),
-    };
+  const relay = {
+    yaml: draft.relayYaml,
+    disabled: locked,
+    pools: snapshot.domainPools,
+    onChange: (relayYaml: string) => change({ relayYaml }),
   };
-  const fineSwitch = (half: Half) => (
-    <Switch
-      label={t("Fine-tuning")}
-      description={t("Quick settings, step by step and code")}
-      checked={fine[half]}
-      onChange={(event) => setFine((current) => ({ ...current, [half]: event.target.checked }))}
-    />
-  );
-  const codeSwitch = (half: Half) => (
-    <Switch
-      label={t("Code")}
-      checked={code[half]}
-      onChange={(event) => setCode((current) => ({ ...current, [half]: event.target.checked }))}
-    />
-  );
-  const steps = (half: Half) => (
-    <details className="min-w-0 rounded-md border border-[var(--rk-line)] p-3">
-      <summary className="cursor-pointer text-sm font-medium">
-        {t("Step by step: profiles, UDP, AUTO")}
-      </summary>
-      <div className="mt-3">
-        <StrategyForm
-          {...strategyParts(half)}
-          // AUTO settles DIRECT only under "all DIRECT · directly first" (D-186, D-187).
-          directAuto={half === "direct" && draft.scope === "direct" && draft.mode === "auto"}
-          onPending={half === "direct" ? pend.directSteps : pend.vpnSteps}
-        />
-      </div>
-    </details>
-  );
   return (
     <div className="flex min-w-0 flex-col gap-4">
       {status && (
@@ -242,7 +189,7 @@ function VoltSettings({
               {voice && relayStrategy && !relayStrategy.udp?.enabled && (
                 <Callout tone="warn">
                   {t(
-                    "Discord voice goes over UDP, and UDP through Relay is off in Fine-tuning → Step by step.",
+                    "Discord voice goes over UDP, and UDP through Relay is off — the switch is below the method.",
                   )}
                 </Callout>
               )}
@@ -286,14 +233,20 @@ function VoltSettings({
           )}
           <SimpleControls
             part="select"
-            {...strategyParts("direct")}
-            vpnTcp={snapshot.vpnTcp}
-            vpnNoise={snapshot.vpnNoise}
+            {...relay}
+            template={snapshot.relayDefault}
             label={t("Method")}
             hint={t("How packets change. The check picks the one that works on your network.")}
-            onPending={pend.directSelect}
+            onPending={pend.select}
             onParsed={setRelayStrategy}
-            onCode={() => open("direct")}
+            onCode={open}
+          />
+          <SimpleControls
+            part="knobs"
+            {...relay}
+            template={snapshot.relayDefault}
+            onPending={pend.knobs}
+            onCode={open}
           />
           <AutoTune
             options={draft}
@@ -301,7 +254,7 @@ function VoltSettings({
             targets={snapshot.probeTargets}
             disabled={locked || busy}
             dirty={dirty}
-            code={code.direct}
+            code={code}
             onChange={change}
             onBusy={setTuning}
             onTune={volt.tune}
@@ -311,60 +264,51 @@ function VoltSettings({
             canAdd={(domain) => draft.scope === "services" && !draft.domains.includes(domain)}
             onAdd={(domain) => change({ domains: [...filled(draft.domains), domain] })}
           />
-          {fineSwitch("direct")}
-          {fine.direct && (
-            <div className="flex min-w-0 flex-col gap-4 border-l border-[var(--rk-line)] pl-3">
-              <SimpleControls
-                part="knobs"
-                {...strategyParts("direct")}
-                vpnTcp={snapshot.vpnTcp}
-                vpnNoise={snapshot.vpnNoise}
-                onPending={pend.directKnobs}
-                onCode={() => open("direct")}
-              />
-              {steps("direct")}
-              {codeSwitch("direct")}
-              {code.direct && (
-                <>
-                  <Field
-                    label={t("Relay strategy YAML")}
-                    hint={t(
-                      "Listener addresses are managed by the client. This YAML controls traffic transformations.",
-                    )}
-                  >
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={locked}
-                      onClick={() => change({ relayYaml: snapshot.relayDefault })}
-                    >
-                      {t("Restore preset")}
-                    </Button>
-                    <div className="h-72 min-w-0 overflow-hidden rounded-md border border-[var(--rk-line)]">
-                      <Editor
-                        value={draft.relayYaml}
-                        readOnly={locked}
-                        onChange={(relayYaml) => change({ relayYaml })}
-                      />
-                    </div>
-                  </Field>
-                  <Field
-                    label={t("Cloudflare bootstrap IPs")}
-                    hint={t(
-                      "Only if issuing a WARP key fails: real addresses of api.cloudflareclient.com, one per line. Empty asks system DNS.",
-                    )}
-                  >
-                    <Textarea
-                      mono
-                      rows={2}
-                      value={draft.bootstrapIps.join("\n")}
-                      disabled={locked}
-                      onChange={(event) => change({ bootstrapIps: lines(event.target.value) })}
-                    />
-                  </Field>
-                </>
-              )}
-            </div>
+          <Switch
+            label={t("Code")}
+            description={t("Everything else in the strategy: profiles, AUTO timings, UDP limits")}
+            checked={code}
+            onChange={(event) => setCode(event.target.checked)}
+          />
+          {code && (
+            <>
+              <Field
+                label={t("Relay strategy YAML")}
+                hint={t(
+                  "Listener addresses are managed by the client. This YAML controls traffic transformations.",
+                )}
+              >
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={locked}
+                  onClick={() => change({ relayYaml: snapshot.relayDefault })}
+                >
+                  {t("Restore preset")}
+                </Button>
+                <div className="h-72 min-w-0 overflow-hidden rounded-md border border-[var(--rk-line)]">
+                  <Editor
+                    value={draft.relayYaml}
+                    readOnly={locked}
+                    onChange={(relayYaml) => change({ relayYaml })}
+                  />
+                </div>
+              </Field>
+              <Field
+                label={t("Cloudflare bootstrap IPs")}
+                hint={t(
+                  "Only if issuing a WARP key fails: real addresses of api.cloudflareclient.com, one per line. Empty asks system DNS.",
+                )}
+              >
+                <Textarea
+                  mono
+                  rows={2}
+                  value={draft.bootstrapIps.join("\n")}
+                  disabled={locked}
+                  onChange={(event) => change({ bootstrapIps: lines(event.target.value) })}
+                />
+              </Field>
+            </>
           )}
         </>
       )}
@@ -377,14 +321,50 @@ function VoltSettings({
       />
       {draft.vpnEnabled && (
         <>
-          <SimpleControls
-            part="select"
-            {...strategyParts("vpn")}
-            vpnTcp={snapshot.vpnTcp}
-            vpnNoise={snapshot.vpnNoise}
-            label={t("Proxy method")}
-            onPending={pend.vpnSelect}
-            onCode={() => open("vpn")}
+          <Field
+            label={t("Proxy strategy YAML")}
+            hint={t("How VOLT changes connections to the proxy servers")}
+          >
+            <Button
+              size="sm"
+              variant="ghost"
+              className="self-start"
+              disabled={locked || draft.vpnYaml === snapshot.vpnDefault}
+              onClick={() => change({ vpnYaml: snapshot.vpnDefault })}
+            >
+              {t("Restore preset")}
+            </Button>
+            <div className="h-64 min-w-0 overflow-hidden rounded-md border border-[var(--rk-line)]">
+              <Editor
+                value={draft.vpnYaml}
+                readOnly={locked}
+                onChange={(vpnYaml) => change({ vpnYaml })}
+              />
+            </div>
+          </Field>
+          <Field
+            label={t("Proxy endpoints")}
+            hint={t(
+              "One real IP:port per line. Empty resolves configured server addresses before connecting; maximum 64.",
+            )}
+          >
+            <Textarea
+              mono
+              rows={3}
+              value={draft.endpoints.join("\n")}
+              disabled={locked}
+              onChange={(event) => change({ endpoints: lines(event.target.value) })}
+              placeholder="45.86.245.83:443"
+            />
+          </Field>
+          <Switch
+            label={t("Auto-TTL for decoys")}
+            description={t(
+              "Measure the hops to the proxy servers so decoys expire in the network, not on your server",
+            )}
+            checked={draft.autoTtl}
+            disabled={locked}
+            onChange={(event) => change({ autoTtl: event.target.checked })}
           />
           {snapshot.vpnRunning && snapshot.endpoints.length > 0 && (
             <details className="min-w-0 text-sm">
@@ -397,47 +377,6 @@ function VoltSettings({
                 ))}
               </div>
             </details>
-          )}
-          {fineSwitch("vpn")}
-          {fine.vpn && (
-            <div className="flex min-w-0 flex-col gap-4 border-l border-[var(--rk-line)] pl-3">
-              <SimpleControls
-                part="knobs"
-                {...strategyParts("vpn")}
-                vpnTcp={snapshot.vpnTcp}
-                vpnNoise={snapshot.vpnNoise}
-                onPending={pend.vpnKnobs}
-                onCode={() => open("vpn")}
-              />
-              {steps("vpn")}
-              {codeSwitch("vpn")}
-              {code.vpn && (
-                <>
-                  <div className="h-64 min-w-0 overflow-hidden rounded-md border border-[var(--rk-line)]">
-                    <Editor
-                      value={draft.vpnYaml}
-                      readOnly={locked}
-                      onChange={(vpnYaml) => change({ vpnYaml })}
-                    />
-                  </div>
-                  <Field
-                    label={t("Proxy endpoints")}
-                    hint={t(
-                      "One real IP:port per line. Empty resolves configured server addresses before connecting; maximum 64.",
-                    )}
-                  >
-                    <Textarea
-                      mono
-                      rows={3}
-                      value={draft.endpoints.join("\n")}
-                      disabled={locked}
-                      onChange={(event) => change({ endpoints: lines(event.target.value) })}
-                      placeholder="45.86.245.83:443"
-                    />
-                  </Field>
-                </>
-              )}
-            </div>
           )}
         </>
       )}

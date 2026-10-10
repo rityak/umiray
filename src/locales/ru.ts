@@ -37,6 +37,7 @@ const ru: Record<string, Entry> = {
   "packets changed: {n}": "изменено пакетов: {n}",
   "directly: {direct}, bypassed: {bypassed}": "напрямую: {direct}, с обходом: {bypassed}",
   "errors: {n}": "ошибок: {n}",
+  "rotations: {n}": "ротаций: {n}",
   "last error: {why}": "последняя ошибка: {why}",
   "Proxy servers captured: {n}": "Перехватываются прокси-серверы: {n}",
   "VOLT files are not downloaded": "файлы VOLT не скачаны",
@@ -45,13 +46,13 @@ const ru: Record<string, Entry> = {
   "Relay is not running": "Relay не работает",
   "all DIRECT traffic · idle: the exit is not DIRECT":
     "весь трафик DIRECT · не участвует: выход не DIRECT",
-  "Quick settings, step by step and code": "Быстрые настройки, по шагам и код",
-  "Step by step: profiles, UDP, AUTO": "По шагам: профили, UDP, AUTO",
-  "Discord voice goes over UDP, and UDP through Relay is off in Fine-tuning → Step by step.":
-    "Голос Discord идёт по UDP, а UDP через Relay выключен: «Тонкости» → «По шагам».",
+  "Discord voice goes over UDP, and UDP through Relay is off — the switch is below the method.":
+    "Голос Discord идёт по UDP, а UDP через Relay выключен — переключатель под методом.",
+  "Discord voice and games go over UDP": "Голос Discord и игры идут по UDP",
+  "Everything else in the strategy: profiles, AUTO timings, UDP limits":
+    "Остальное в стратегии: профили, тайминги AUTO, ограничения UDP",
   "Only if issuing a WARP key fails: real addresses of api.cloudflareclient.com, one per line. Empty asks system DNS.":
     "Нужны, только если ключ WARP не выпускается: настоящие адреса api.cloudflareclient.com, по одному на строку. Пусто — системный DNS.",
-  "Proxy method": "Метод для прокси",
   "Everything opened directly — no bypass needed here. The strategy was kept.":
     "Всё открылось напрямую — обход здесь не нужен. Стратегия не менялась.",
   Bypass: "Обход",
@@ -92,8 +93,6 @@ const ru: Record<string, Entry> = {
     "Как меняются пакеты. Проверка выберет тот, что работает в вашей сети.",
   Running: "Работает",
   "Starts with the connection": "Включится вместе с подключением",
-  s: "с",
-  bytes: "байт",
   Passed: "Успешно",
   Failed: "Ошибка",
   Fragmentation: "Разрезание",
@@ -106,11 +105,7 @@ const ru: Record<string, Entry> = {
   "Apply changes before checking.": "Перед проверкой примените изменения.",
   "Enable direct connections to check presets.":
     "Для проверки включите VOLT для прямых соединений.",
-  "Traffic preset": "Шаблон обработки",
-  "TCP fragmentation": "Разрезание TCP",
-  "TLS + QUIC noise (experimental)": "Шум TLS и QUIC (эксперимент)",
   "Custom strategy · Code": "Своя стратегия · Код",
-  "Edit custom strategy in Code": "Править свою стратегию в коде",
   "Process the start of a connection": "Обрабатывать начало соединения",
   "First {n} packets": "Первых пакетов: {n}",
   "Noise amount": "Сколько шума",
@@ -127,116 +122,10 @@ const ru: Record<string, Entry> = {
   "Attempt {n}": "Попытка {n}",
   "Saved strategy": "Сохранённая стратегия",
   "TLS fragmentation": "Фрагментация TLS",
-  "Extended noise dictionary": "Расширенный словарь шума",
-  "Compact noise dictionary": "Компактный словарь шума",
-  "Step {n}": "Этап {n}",
-  "Move step earlier": "Переместить этап выше",
-  "Move step later": "Переместить этап ниже",
-  "Remove step": "Удалить этап",
-  "What to do with traffic": "Как изменять трафик",
-  "Pass unchanged": "Пропускать без изменений",
-  "Split into smaller packets": "Разделять на пакеты меньшего размера",
-  "Split and send fragments out of order": "Разделять и менять порядок отправки",
-  "Add decoy packets": "Добавлять ложные пакеты",
-  "Where to split": "Где разделять пакет",
-  "Choose a readable layout or enter up to seven byte positions. The real stream is restored by TCP.":
-    "Выберите схему или задайте до семи границ в байтах. TCP восстанавливает исходный поток.",
-  "At the start and inside the TLS hostname": "В начале и внутри имени сервера TLS",
-  "At the start and inside the HTTP Host header": "В начале и внутри заголовка Host HTTP",
-  "At bytes 1, 32 and 64": "После байтов 1, 32 и 64",
-  "Custom split positions": "Свои границы разделения",
-  "Split positions": "Границы разделения",
-  "Bytes or markers: 1, midsld, sni+1, host+1. Missing markers leave the packet unchanged.":
-    "Байты или метки: 1, midsld, sni+1, host+1. Если метки нет, пакет остаётся без изменений.",
-  "Only the first packets": "Изменять только первые пакеты",
-  "Stop changing this connection after this many packets per step.":
-    "Число пакетов соединения, которые может изменить этот этап.",
-  "Only the first bytes": "Изменять только первые байты",
-  "Limit how much of the connection this step may change.":
-    "Сколько байтов в начале соединения может изменить этот этап.",
-  "Overlap adjacent fragments": "Перекрытие соседних фрагментов",
-  "Repeat these bytes at the fragment boundary. Zero disables overlap.":
-    "Повторить это число байтов на границе фрагментов. Ноль отключает перекрытие.",
-  "Add decoys before real fragments": "Добавлять ложные пакеты перед фрагментами",
-  "Decoy packet appearance": "Содержимое ложных пакетов",
-  "TLS handshake based on the real connection": "TLS-рукопожатие на основе текущего соединения",
-  "Independent TLS handshake": "Отдельное TLS-рукопожатие",
-  "HTTP request": "HTTP-запрос",
-  "QUIC handshake": "QUIC-рукопожатие",
-  "Empty binary payload": "Нулевые байты",
-  "My own payload file": "Содержимое из своего файла",
-  "Decoy repetitions": "Сколько раз повторять ложные пакеты",
-  "Per changed packet and step. TLS AUTO sends two decoys per repetition; more noise can increase delays.":
-    "На каждый изменяемый пакет и этап. TLS AUTO отправляет два ложных пакета за повтор; увеличение шума может добавить задержку.",
-  "Decoy lifetime": "Время жизни ложных пакетов в сети",
-  "Advanced decoy settings": "Дополнительные настройки ложных пакетов",
-  "Decoy hop limit is {ttl}. A low value can discard decoys before they reach the network filter. If all strategies fail, set Decoy lifetime to 0 in Advanced decoy settings to keep the original packet's value.":
-    "Для ложных пакетов установлен TTL {ttl}. Слишком малое значение может отбросить их до сетевого фильтра. Если все стратегии не проходят проверки, откройте дополнительные настройки ложных пакетов и установите время жизни 0 — это сохранит TTL исходного пакета.",
-  "IP hop limit for decoys. Zero keeps the original value; real packets keep their own lifetime.":
-    "Число переходов через маршрутизаторы (TTL). Ноль сохраняет исходное значение; у настоящих пакетов TTL не меняется.",
   "Noise dictionary": "Словарь шума",
-  "A random hostname is selected for each new connection. Destination, real TLS hostname and certificates stay unchanged.":
-    "Для нового соединения выбирается случайное имя из словаря. Адрес назначения, настоящее имя TLS и сертификаты не меняются.",
-  "One hostname": "Одно имя сервера",
-  "My hostname list": "Мой список доменов",
   "My dictionary file": "Свой .txt",
-  "Dictionary source": "Источник словаря",
-  "Bundled snapshot; availability varies by provider and region.":
-    "Встроен в VOLT. Доступность различается по провайдерам и регионам.",
-  "Decoy hostname": "Имя сервера в ложном пакете",
-  "Hostnames, one per line": "Домены, по одному на строку",
-  "Dictionary file": "Файл словаря",
-  "Choose a .txt file with one hostname per line. Comments start with #.":
-    "Выберите .txt с одним доменом на строку. Комментарии начинаются с #.",
   "Choose .txt": "Выбрать .txt",
-  "Payload file": "Файл содержимого пакета",
-  "Absolute path or relative to VOLT runtime data. Existing hexadecimal payloads remain available in Code.":
-    "Полный путь или путь относительно рабочих данных VOLT. Существующее содержимое в hex-формате доступно в разделе «Код».",
-  "This step only changes these payloads: {kinds}": "Этот этап изменяет только: {kinds}",
-  "The visual editor cannot read this strategy. Open Code to fix it.":
-    "Форма не смогла прочитать стратегию. Откройте «Код», чтобы её исправить.",
-  "Traffic profile": "Профиль трафика",
-  "The first matching profile wins. Profiles below it do not run; steps inside one profile run in order.":
-    "Используется первый подходящий профиль. Профили ниже не запускаются; этапы внутри одного профиля выполняются по порядку.",
-  "No traffic profiles": "Нет профилей трафика",
-  "Add traffic profile": "Добавить профиль трафика",
-  "Move profile earlier": "Переместить профиль выше",
-  "Move profile later": "Переместить профиль ниже",
-  "Remove traffic profile": "Удалить профиль трафика",
-  "Profile name": "Название профиля",
-  "Letters, digits, hyphens and underscores; up to 64 characters.":
-    "Латинские буквы, цифры, дефис и подчёркивание; до 64 символов.",
-  "Recognizable traffic": "Тип содержимого пакетов",
-  "Nothing selected means any payload. Unknown encrypted UDP remains intact; arbitrary UDP fragmentation is unsupported.":
-    "Ничего не выбрано — любое содержимое. Неизвестный зашифрованный UDP остаётся целым; произвольное разделение UDP не поддерживается.",
-  "Unrecognized payload": "Неизвестный формат",
-  "Discord voice": "Голос Discord",
-  "Limit this profile to destinations": "Ограничить профиль адресами",
-  "Destination hostnames": "Домены назначения",
-  "Empty means any destination. Hostname suffixes are matched; these are real destinations, separate from decoy dictionaries.":
-    "Пусто — любые адреса. Совпадение по окончанию домена. Это настоящие адреса назначения, отдельно от словарей ложных пакетов.",
-  "Leave these hostnames unchanged": "Не изменять трафик этих доменов",
-  "Destination ports": "Порты назначения",
-  "Empty means any port. One port or range per line, for example 443 or 5000-5100.":
-    "Пусто — любые порты. По одному порту или диапазону на строку, например 443 или 5000-5100.",
-  "This profile also has advanced matching. Those conditions are preserved; edit them in Code.":
-    "В профиле есть дополнительные условия. Они сохранены; редактировать их можно в разделе «Код».",
-  "Add transformation step": "Добавить этап изменения",
-  "UDP connection limits": "Ограничения UDP-соединений",
-  "UDP processing": "Обработка UDP",
-  "Modify UDP traffic": "Изменять UDP-трафик",
   "Allow UDP through Relay": "Передавать UDP через Relay",
-  "UDP destinations per connection": "Адресов UDP на соединение",
-  "Close idle UDP connections after": "Закрывать неактивные UDP-соединения через",
-  "DIRECT-AUTO timing and memory": "DIRECT-AUTO: задержки и запоминание маршрутов",
-  "Wait before trying VOLT in parallel": "Задержка параллельного запуска VOLT",
-  "Direct TLS starts immediately. VOLT starts after this delay if direct has not succeeded.":
-    "Прямое TLS-соединение запускается сразу. Если оно ещё не установлено, после этой задержки запускается VOLT.",
-  "Direct handshake timeout": "Тайм-аут прямого рукопожатия",
-  "VOLT handshake timeout": "Тайм-аут рукопожатия через VOLT",
-  "Remember which route worked": "Запоминать работающий маршрут",
-  "Remember a route for": "Запоминать маршрут на",
-  "Remembered destinations": "Максимум запомненных адресов",
   "VOLT for proxy traffic": "VOLT для трафика прокси",
   "Log sources": "Источники",
   "Listener addresses are managed by the client. This YAML controls traffic transformations.":
@@ -247,8 +136,14 @@ const ru: Record<string, Entry> = {
   "One real IP:port per line. Empty resolves configured server addresses before connecting; maximum 64.":
     "Реальный IP:порт, по одному на строку. Пустое поле — адреса серверов разрешаются перед подключением; максимум 64.",
   "Proxy endpoints": "Адреса прокси-серверов",
+  "Auto-TTL for decoys": "Авто-TTL для приманок",
+  "Measure the hops to the proxy servers so decoys expire in the network, not on your server":
+    "Замерить число хопов до прокси-серверов, чтобы приманки истекали в сети, а не на вашем сервере",
   "Restore preset": "Восстановить пресет",
   "Relay strategy YAML": "Стратегия Relay в YAML",
+  "Proxy strategy YAML": "Стратегия для прокси в YAML",
+  "How VOLT changes connections to the proxy servers":
+    "Как VOLT меняет соединения с прокси-серверами",
   "Restart the client as administrator to run VOLT.":
     "Для запуска VOLT перезапустите клиент с правами администратора.",
   "VOLT is not downloaded yet. Turning it on downloads it.":

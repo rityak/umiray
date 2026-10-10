@@ -33,7 +33,7 @@ profiles:
         fake:
           kind: tls-auto
           server_name_source: noise-extended
-          repeats: 11
+          repeats: 3
 
   - name: http-split
     match:

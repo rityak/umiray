@@ -1,5 +1,4 @@
 import type { VoltProfile, VoltStrategy, VoltTransform } from "../api/volt";
-import { fakeSource, stepsOf, withFakeSource } from "./strategy";
 
 export type SimplePreset =
   | "custom"
@@ -7,27 +6,49 @@ export type SimplePreset =
   | "tls-disorder"
   | "tls-fake"
   | "tls-fake-split"
-  | "tls-auto"
-  | "tcp-split";
+  | "tls-auto";
 
+/// What the page shows of a strategy (D-193): the method, its packet window, and the noise
+/// when it has one.
 export type SimpleSettings = {
   preset: SimplePreset;
   packets: number | null;
   repeats: number | null;
-  noisePackets: number | null;
   source: string | null;
   file: string | null;
 };
 
+type Fake = NonNullable<VoltTransform["fake"]>;
 type Target = { profile: number; stage: number; value: VoltTransform };
 const custom: SimpleSettings = {
   preset: "custom",
   packets: null,
   repeats: null,
-  noisePackets: null,
   source: null,
   file: null,
 };
+
+const stepsOf = (profile: VoltProfile): VoltTransform[] =>
+  profile.stages ?? (profile.transform ? [profile.transform] : []);
+
+function fakeSource(fake: Fake): string {
+  if (fake.server_name_source !== undefined) return fake.server_name_source;
+  if (fake.server_name_file !== undefined) return "file";
+  if (fake.server_names !== undefined) return "inline";
+  return "fixed";
+}
+
+/// The four dictionary fields exclude each other in the core: one goes in, the rest go.
+function withFakeSource(fake: Fake, source: string): Fake {
+  const next = { ...fake };
+  delete next.server_name;
+  delete next.server_name_source;
+  delete next.server_names;
+  delete next.server_name_file;
+  if (source === "file") next.server_name_file = fake.server_name_file ?? "domains.txt";
+  else next.server_name_source = source;
+  return next;
+}
 
 function onlyTls(value: unknown): boolean {
   return Array.isArray(value) && value.length > 0 && value.every((item) => item === "tls");
@@ -71,23 +92,6 @@ function method(stage: VoltTransform): SimplePreset {
   return "custom";
 }
 
-function rawTcp(profile: VoltProfile): boolean {
-  const stages = stepsOf(profile);
-  const stage = stages[0];
-  return (
-    !profile.match.payloads?.length &&
-    ["all", "any", "not", "signatures"].every((key) => profile.match[key] === undefined) &&
-    stages.length === 1 &&
-    stage.action === "split" &&
-    JSON.stringify(stage.positions) === JSON.stringify(["1", "32", "64"]) &&
-    !stage.payloads?.length &&
-    !stage.fake &&
-    (stage.sequence_overlap ?? 0) === 0 &&
-    bounded(stage.packet_limit || 4, 1, 8) &&
-    stage.byte_limit === 32768
-  );
-}
-
 function inspect(strategy: VoltStrategy): { preset: SimplePreset; targets: Target[] } {
   const targets: Target[] = [];
   let preset: SimplePreset | null = null;
@@ -100,19 +104,20 @@ function inspect(strategy: VoltStrategy): { preset: SimplePreset; targets: Targe
       .map((value, stage) => ({ profile: profileIndex, stage, value }))
       .filter(({ value }) => onlyTls(value.payloads) || (matched && !value.payloads?.length));
     if (!relevant.length) {
-      if (profile.match.payloads?.includes("tls")) return { preset: "custom", targets: [] };
-      if (!profile.match.payloads?.length && stages.some((stage) => !stage.payloads?.length)) {
-        if (!rawTcp(profile)) return { preset: "custom", targets: [] };
-        relevant.push({ profile: profileIndex, stage: 0, value: stages[0] });
-      } else continue;
+      if (
+        profile.match.payloads?.includes("tls") ||
+        (!profile.match.payloads?.length && stages.some((stage) => !stage.payloads?.length))
+      )
+        return { preset: "custom", targets: [] };
+      continue;
     }
     if (
       relevant.length !== 1 ||
       stages.some((stage) => stage.payloads?.includes("tls") && !onlyTls(stage.payloads)) ||
-      (!matched && stages.some((stage) => !stage.payloads?.length) && !rawTcp(profile))
+      (!matched && stages.some((stage) => !stage.payloads?.length))
     )
       return { preset: "custom", targets: [] };
-    const next = rawTcp(profile) ? "tcp-split" : method(relevant[0].value);
+    const next = method(relevant[0].value);
     if (next === "custom" || (preset !== null && preset !== next))
       return { preset: "custom", targets: [] };
     preset = next;
@@ -134,7 +139,6 @@ export function readSimple(strategy: VoltStrategy): SimpleSettings {
     preset,
     packets: same(targets.map(({ value }) => value.packet_limit || 4)),
     repeats,
-    noisePackets: fakes.length ? (repeats === null ? null : repeats * 2) : 0,
     source: same(fakes.map(fakeSource)),
     file: same(fakes.map((fake) => fake.server_name_file ?? null)),
   };
@@ -168,6 +172,11 @@ function update(
 export function setPackets(strategy: VoltStrategy, packets: number): VoltStrategy {
   if (!bounded(packets, 1, 8)) throw new Error("Packet window must be 1..8");
   return update(strategy, (stage) => ({ ...stage, packet_limit: packets }));
+}
+
+/// UDP through Relay belongs to the whole strategy, not to a template: any strategy has it.
+export function setUdp(strategy: VoltStrategy, enabled: boolean): VoltStrategy {
+  return { ...strategy, udp: { ...strategy.udp, enabled } };
 }
 
 export function setRepeats(strategy: VoltStrategy, repeats: number): VoltStrategy {

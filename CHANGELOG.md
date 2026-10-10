@@ -3,6 +3,20 @@
 The version comes from `package.json`, is mirrored in `Cargo.toml`, and appears in
 the subscription User-Agent as `umiray/<version>`.
 
+## 1.7.0
+
+### Changes
+
+- Volt: adapt client to umiray-core v0.2.0 (auto-TTL, rotation stats, presets)
+
+Install from this release's assets:
+- Windows x64: `umiray_1.7.0_x64-setup.exe`
+- Debian, Ubuntu: `umiray_1.7.0_amd64.deb` (`sudo apt install ./umiray_1.7.0_amd64.deb`)
+- Fedora: `umiray-1.7.0-1.x86_64.rpm` (`sudo dnf install ./umiray-1.7.0-1.x86_64.rpm`)
+- Arch: `umiray-bin` from the AUR, or `PKGBUILD` with `umiray.install` from this release (`makepkg -si`)
+
+Existing installations update from within the client; on Arch, with the package manager.
+
 ## 1.6.1
 
 ### New

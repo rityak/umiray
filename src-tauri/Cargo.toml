@@ -1,6 +1,6 @@
 [package]
 name = "umiray"
-version = "1.6.1"
+version = "1.7.0"
 edition = "2021"
 autobins = false
 
@@ -31,6 +31,9 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 # rt и macros — только ради живых тестов, помеченных ignore; Tauri тянет их всё равно.
 # net — UDP для запросов к резолверам (D-097); остальное было и раньше.
 tokio = { version = "1", features = ["time", "rt", "macros", "net", "sync", "signal"] }
+# IP TTL на сокете до connect — для авто-TTL приманок VPN-пути (#5). Ставится
+# только через socket2; уже в дереве через tokio, прямая ссылка ничего не удорожает.
+socket2 = "0.6"
 sha2 = "0.10"
 # Ключ ECDSA P-256 устройства WARP под MASQUE (D-165). Уже в дереве через rustls.
 ring = "0.17"

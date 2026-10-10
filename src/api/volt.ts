@@ -16,6 +16,7 @@ export const VoltOptions = z.object({
   bootstrapIps: z.array(z.string()),
   autoSelect: z.boolean().default(false),
   probeUrls: z.array(z.string()).default([]),
+  autoTtl: z.boolean().default(false),
 });
 export type VoltOptions = z.infer<typeof VoltOptions>;
 
@@ -56,8 +57,6 @@ export const VoltSnapshot = z.object({
   log: z.array(z.string()),
   relayDefault: z.string(),
   vpnDefault: z.string(),
-  vpnNoise: z.string(),
-  vpnTcp: z.string(),
   domainPools: z
     .array(
       z.object({
@@ -83,6 +82,8 @@ export const VoltSnapshot = z.object({
       lastError: z.string().nullable(),
       autoDirect: z.number().int().min(0),
       autoBypassed: z.number().int().min(0),
+      rotations: z.number().int().min(0).default(0),
+      detectedFailures: z.number().int().min(0).default(0),
     })
     .nullable()
     .default(null),

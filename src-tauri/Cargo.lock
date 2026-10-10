@@ -4679,7 +4679,7 @@ dependencies = [
 
 [[package]]
 name = "umiray"
-version = "1.6.1"
+version = "1.7.0"
 dependencies = [
  "base64 0.22.1",
  "flate2",
@@ -4693,6 +4693,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha2",
+ "socket2",
  "tauri",
  "tauri-build",
  "tauri-plugin-single-instance",

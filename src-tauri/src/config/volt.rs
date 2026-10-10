@@ -78,6 +78,10 @@ pub struct Options {
     pub auto_select: bool,
     /// Свои адреса проверки подбора; пусто — по тому, что обходится (D-189).
     pub probe_urls: Vec<String>,
+    /// Авто-TTL для приманок VPN-пути (#5): перед запуском зондируется число хопов
+    /// до endpoint'ов, и decoy получает TTL, при котором умирает в сети, не дойдя
+    /// до сервера. Выключено — приманки идут как в стратегии.
+    pub auto_ttl: bool,
 }
 
 /// Прежние умолчания адресов проверки: в документе они значат «по выбору» (D-189).
@@ -110,6 +114,7 @@ impl Default for Options {
             bootstrap_ips: Vec::new(),
             auto_select: false,
             probe_urls: Vec::new(),
+            auto_ttl: false,
         }
     }
 }
@@ -409,18 +414,7 @@ mod tests {
         let preview: serde_json::Value =
             serde_json::from_str(include_str!("../../../collections/volt/strategy-mock.json"))
                 .unwrap();
-        for (name, yaml) in [
-            ("relay", RELAY_DEFAULT),
-            ("vpn", VPN_DEFAULT),
-            (
-                "vpn-noise",
-                include_str!("../../../collections/volt/vpn-noise.yaml"),
-            ),
-            (
-                "vpn-tcp",
-                include_str!("../../../collections/volt/vpn-tcp.yaml"),
-            ),
-        ] {
+        for (name, yaml) in [("relay", RELAY_DEFAULT), ("vpn", VPN_DEFAULT)] {
             assert_eq!(preview[name], strategy_parse(yaml).unwrap());
         }
     }

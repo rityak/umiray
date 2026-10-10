@@ -1,27 +1,26 @@
 import { FileText } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Button, Callout, Field, Select, Slider } from "rootik";
+import { Button, Callout, Field, Select, Slider, Switch } from "rootik";
 import { asAppError } from "../api/call";
 import * as api from "../api/volt";
 import { t } from "../i18n";
 import { candidateName } from "./AutoTune";
-import { readSimple, setDictionary, setPackets, setRepeats } from "./simple";
+import { readSimple, setDictionary, setPackets, setRepeats, setUdp } from "./simple";
 
 const TLS_PRESETS = ["tls-split", "tls-disorder", "tls-fake", "tls-fake-split", "tls-auto"];
 
 /**
- * A strategy seen as a template (D-187): `select` — the method, recognized from the YAML
- * itself; `knobs` — the template's quick settings for Fine-tuning. Two parts of one
- * reading, so the page shows each strategy field once.
+ * The Relay strategy seen as a template (D-187, D-193): `select` — the method, recognized
+ * from the YAML itself; `knobs` — what a person actually changes: the packet window, noise
+ * amount and dictionary when the method has them, and UDP. Two parts of one reading, so
+ * the page shows each strategy field once; the rest is Code.
  */
 export default function SimpleControls({
   part,
   yaml,
   disabled,
-  relay,
   pools,
-  vpnTcp,
-  vpnNoise,
+  template,
   label,
   hint,
   onChange,
@@ -32,10 +31,10 @@ export default function SimpleControls({
   part: "select" | "knobs";
   yaml: string;
   disabled: boolean;
-  relay: boolean;
   pools: api.VoltSnapshot["domainPools"];
-  vpnTcp: string;
-  vpnNoise: string;
+  /// The shipped strategy: a method starts from it when the current one has no TLS steps
+  /// after a Code edit, so the list always leads back.
+  template: string;
   label?: string;
   hint?: string;
   onChange: (yaml: string) => void;
@@ -124,12 +123,9 @@ export default function SimpleControls({
     setLoading(true);
     onPending(true);
     try {
-      const rendered =
-        id === "tcp-split"
-          ? vpnTcp
-          : id === "vpn-noise"
-            ? vpnNoise
-            : await api.voltStrategyPreset(yaml, id);
+      const rendered = await api
+        .voltStrategyPreset(yaml, id)
+        .catch(() => api.voltStrategyPreset(template, id));
       const parsed = await api.voltStrategyParse(rendered);
       if (version !== revision.current) return;
       current.current = parsed;
@@ -157,29 +153,16 @@ export default function SimpleControls({
   };
   const simple = strategy ? readSimple(strategy) : null;
   const locked = disabled || loading;
-  const quic = strategy?.profiles.some(
-    (profile) =>
-      profile.match.network === "udp" &&
-      profile.match.payloads?.includes("quic") &&
-      (profile.stages ?? [profile.transform]).some((stage) => stage?.fake?.kind === "quic"),
-  );
-  const preset =
-    !relay && simple?.preset === "tls-auto" && quic ? "vpn-noise" : (simple?.preset ?? "custom");
+  const preset = simple?.preset ?? "custom";
   const source = simple?.source ?? "custom";
   if (part === "select")
     return (
-      <Field label={label ?? t("Traffic preset")} hint={hint}>
+      <Field label={label} hint={hint}>
         <Select
           value={preset}
           disabled={locked}
           options={[
             ...TLS_PRESETS.map((id) => ({ value: id, label: candidateName(id, id) })),
-            ...(!relay
-              ? [
-                  { value: "tcp-split", label: t("TCP fragmentation") },
-                  { value: "vpn-noise", label: t("TLS + QUIC noise (experimental)") },
-                ]
-              : []),
             { value: "custom", label: t("Custom strategy · Code") },
           ]}
           onChange={(id) => {
@@ -192,17 +175,6 @@ export default function SimpleControls({
     );
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      {simple?.preset === "custom" && (
-        <Button
-          size="sm"
-          variant="ghost"
-          className="self-start"
-          icon={<FileText />}
-          onClick={onCode}
-        >
-          {t("Edit custom strategy in Code")}
-        </Button>
-      )}
       {simple?.packets !== null && simple?.packets !== undefined && (
         <Slider
           label={t("Process the start of a connection")}
@@ -266,6 +238,15 @@ export default function SimpleControls({
             )}
           </Field>
         </>
+      )}
+      {strategy && (
+        <Switch
+          label={t("Allow UDP through Relay")}
+          description={t("Discord voice and games go over UDP")}
+          checked={strategy.udp?.enabled ?? false}
+          disabled={locked}
+          onChange={(event) => edit((parsed) => setUdp(parsed, event.target.checked))}
+        />
       )}
     </div>
   );

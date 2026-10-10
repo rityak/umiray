@@ -2,26 +2,36 @@
 import { describe, expect, it } from "vitest";
 import mock from "../../collections/volt/strategy-mock.json";
 import { VoltStrategy } from "../api/volt";
-import { readSimple, setDictionary, setPackets, setRepeats } from "./simple";
+import { readSimple, setDictionary, setPackets, setRepeats, setUdp } from "./simple";
 
 const relay = () => VoltStrategy.parse(mock.relay);
+/// Code-edited Relay without TLS steps: no template to read, nothing to tune.
+const tcpOnly = () =>
+  VoltStrategy.parse({
+    version: 1,
+    profiles: [
+      {
+        name: "tcp-window",
+        match: { network: "tcp" },
+        stages: [
+          { action: "split", positions: ["1", "32", "64"], packet_limit: 8, byte_limit: 32768 },
+        ],
+      },
+    ],
+  });
 
 describe("VOLT simple settings", () => {
-  it("reads the actual default and reports emitted packets instead of repetitions", () => {
+  it("reads the actual default: the method, its packet window and noise", () => {
     expect(readSimple(relay())).toEqual({
       preset: "tls-auto",
       packets: 2,
-      repeats: 11,
-      noisePackets: 22,
+      repeats: 3,
       source: "noise-extended",
       file: null,
     });
+    expect(readSimple(VoltStrategy.parse(mock.vpn))).toMatchObject({ repeats: null, source: null });
     expect(readSimple(VoltStrategy.parse(mock.vpn)).preset).toBe("tls-split");
-    expect(readSimple(VoltStrategy.parse(mock["vpn-tcp"]))).toMatchObject({
-      preset: "tcp-split",
-      packets: 8,
-      noisePackets: 0,
-    });
+    expect(readSimple(tcpOnly()).preset).toBe("custom");
   });
 
   it.each([
@@ -48,7 +58,7 @@ describe("VOLT simple settings", () => {
     profile.stages![0].custom_step = "keep";
     const before = structuredClone(strategy);
     const changed = setPackets(setRepeats(strategy, 3), 5);
-    expect(readSimple(changed)).toMatchObject({ packets: 5, repeats: 3, noisePackets: 6 });
+    expect(readSimple(changed)).toMatchObject({ packets: 5, repeats: 3 });
     expect(strategy).toEqual(before);
     expect(changed.custom).toEqual(before.custom);
     expect(changed.auto).toEqual(before.auto);
@@ -74,13 +84,13 @@ describe("VOLT simple settings", () => {
     expect(readSimple(file)).toMatchObject({ source: "file", file: "D:\\Noise\\domains.txt" });
     expect(file.profiles[0].transform!.fake).toEqual({
       kind: "tls-auto",
-      repeats: 11,
+      repeats: 3,
       server_name_file: "D:\\Noise\\domains.txt",
     });
     const builtin = setDictionary(file, "noise-compact");
     expect(builtin.profiles[0].transform!.fake).toEqual({
       kind: "tls-auto",
-      repeats: 11,
+      repeats: 3,
       server_name_source: "noise-compact",
     });
     expect(strategy.profiles[0].transform!.fake!.server_names).toEqual(["one.test", "two.test"]);
@@ -96,7 +106,7 @@ describe("VOLT simple settings", () => {
       { not: { hosts: ["private.test"] } },
     ];
     expect(readSimple(strategy).preset).toBe("tls-auto");
-    const changed = setPackets(strategy, 4);
+    const changed = setRepeats(strategy, 4);
     expect(changed.profiles[0].match).toEqual(profile.match);
     expect(changed.profiles.slice(1)).toEqual(strategy.profiles.slice(1));
     profile.match.all = [{ any: [{ payloads: ["tls"] }, { payloads: ["http"] }] }];
@@ -118,7 +128,7 @@ describe("VOLT simple settings", () => {
       const strategy = relay();
       Object.assign(strategy.profiles[0].stages![0], patch);
       expect(readSimple(strategy).preset).toBe("custom");
-      expect(() => setPackets(strategy, 2)).toThrow("Open Code");
+      expect(() => setRepeats(strategy, 2)).toThrow("Open Code");
     }
     const strategy = relay();
     strategy.profiles[0].stages!.push({ action: "split", positions: ["1"], byte_limit: 16384 });
@@ -163,7 +173,13 @@ describe("VOLT simple settings", () => {
     expect(() => setDictionary(strategy, "inline")).toThrow();
     expect(() => setDictionary(strategy, "../pool")).toThrow();
     expect(() => setRepeats(VoltStrategy.parse(mock.vpn), 3)).toThrow("Open Code");
-    const raw = VoltStrategy.parse(mock["vpn-tcp"]);
-    expect(readSimple(setPackets(raw, 4))).toMatchObject({ preset: "tcp-split", packets: 4 });
+    expect(() => setRepeats(tcpOnly(), 4)).toThrow("Open Code");
+  });
+
+  it("turns UDP on in any strategy, a custom one too, keeping its limits", () => {
+    const custom = tcpOnly();
+    custom.udp = { enabled: false, max_destinations: 8 };
+    expect(setUdp(custom, true).udp).toEqual({ enabled: true, max_destinations: 8 });
+    expect(custom.udp.enabled).toBe(false);
   });
 });

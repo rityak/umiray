@@ -76,6 +76,7 @@ export function activity(snapshot: Snapshot): string | null {
         direct: stats.autoDirect,
         bypassed: stats.autoBypassed,
       }),
+    stats.rotations > 0 && t("rotations: {n}", { n: stats.rotations }),
     t("errors: {n}", { n: stats.failures }),
   ]
     .filter(Boolean)

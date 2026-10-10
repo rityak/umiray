@@ -1,8 +1,6 @@
 import relayYaml from "../../collections/volt/relay.yaml?raw";
 import strategyMock from "../../collections/volt/strategy-mock.json";
 import vpnYaml from "../../collections/volt/vpn.yaml?raw";
-import vpnNoise from "../../collections/volt/vpn-noise.yaml?raw";
-import vpnTcp from "../../collections/volt/vpn-tcp.yaml?raw";
 /**
  * Бэкенд-заглушка для `npm run dev` в обычном браузере (D-142).
  *
@@ -15,6 +13,7 @@ import vpnTcp from "../../collections/volt/vpn-tcp.yaml?raw";
  * из `api.ts`; поведение ядра проверяется только в настоящем окне.
  */
 import type * as api from "../api";
+import { VoltStrategy } from "../api/volt";
 
 const now = () => Math.floor(Date.now() / 1000);
 
@@ -551,6 +550,7 @@ let voltOptions: api.VoltOptions = {
   bootstrapIps: [],
   autoSelect: false,
   probeUrls: [],
+  autoTtl: false,
 };
 // `?volt=noadmin|missing|failed` — what the bypass looks like when something stands in its way.
 const voltTrouble = new URLSearchParams(location.search).get("volt");
@@ -589,8 +589,6 @@ const voltSnapshot = () => ({
   log: [],
   relayDefault: relayYaml,
   vpnDefault: vpnYaml,
-  vpnNoise,
-  vpnTcp,
   domainPools: [
     {
       id: "noise-extended",
@@ -946,8 +944,6 @@ const HANDLERS: Record<string, (args: Args) => unknown> = {
     const presets = new Map<string, unknown>([
       [relayYaml, strategyMock.relay],
       [vpnYaml, strategyMock.vpn],
-      [vpnNoise, strategyMock["vpn-noise"]],
-      [vpnTcp, strategyMock["vpn-tcp"]],
     ]);
     if (presets.has(String(yaml))) return structuredClone(presets.get(String(yaml)));
     try {
@@ -957,6 +953,38 @@ const HANDLERS: Record<string, (args: Args) => unknown> = {
     }
   },
   volt_strategy_render: ({ strategy }) => JSON.stringify(strategy, null, 2),
+  // Like `volt_tune::selected_yaml`: the method lands on the TLS step; a strategy without one
+  // is refused, as in the desktop client.
+  volt_strategy_preset: ({ yaml, id }) => {
+    const methods: Record<string, ["split" | "disorder" | "fake", boolean]> = {
+      "tls-split": ["split", false],
+      "tls-disorder": ["disorder", false],
+      "tls-fake": ["fake", true],
+      "tls-fake-split": ["split", true],
+      "tls-auto": ["disorder", true],
+    };
+    const [action, noise] = methods[String(id)];
+    const shipped = new Map<string, unknown>([
+      [relayYaml, strategyMock.relay],
+      [vpnYaml, strategyMock.vpn],
+    ]);
+    const source = shipped.get(String(yaml)) ?? JSON.parse(String(yaml));
+    const strategy = VoltStrategy.parse(structuredClone(source));
+    const stage = strategy.profiles.find((profile) => profile.match.payloads?.includes("tls"))
+      ?.stages?.[0];
+    if (!stage)
+      throw {
+        kind: "invalid",
+        message: "VOLT strategy has no TLS transforms for this preset",
+        details: [],
+      };
+    stage.action = action;
+    if (action === "fake") delete stage.positions;
+    else stage.positions = ["1", "midsld"];
+    if (!noise) delete stage.fake;
+    else stage.fake = { ...stage.fake, kind: "tls-auto", repeats: stage.fake?.repeats ?? 3 };
+    return JSON.stringify(strategy, null, 2);
+  },
   volt_tune: () => {
     // Directly fails, reordering passes: what a blocked network looks like (D-185, D-189).
     const urls = voltSnapshot().probeTargets;
