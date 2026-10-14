@@ -22,7 +22,6 @@ pub struct NodeFact {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Client {
-    pub volt: Option<crate::config::volt::Route>,
     pub health: crate::nodes::health::Check,
     pub udp: bool,
     pub mask: crate::config::awg::Mask,

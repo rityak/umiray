@@ -12,5 +12,3 @@ export * from "./settings";
 export * from "./sources";
 export * from "./system";
 export * from "./updates";
-
-export * from "./volt";

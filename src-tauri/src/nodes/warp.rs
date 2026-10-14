@@ -44,24 +44,13 @@ impl Warp {
         keys: &WgKeys,
         mask: Option<Value>,
         through: Option<u16>,
-        bootstrap: Option<reqwest::Client>,
     ) -> Result<Mapping> {
-        let volt = bootstrap.is_some();
-        let client = match bootstrap {
-            Some(client) => client,
-            None => client(through)?,
-        };
+        let client = client(through)?;
         let serial = crate::stamp::Stamp::id()?;
         let body = register_body(&keys.public, &serial, &crate::stamp::Stamp::utc());
         let device = call(&client, reqwest::Method::POST, "/reg", None, &body)
             .await
-            .map_err(|error| {
-                if volt {
-                    error
-                } else {
-                    unreachable(error, through)
-                }
-            })?;
+            .map_err(|error| unreachable(error, through))?;
         if device.id.is_empty() || device.token.is_empty() {
             return Err(AppError::network(
                 "Cloudflare зарегистрировал устройство, но не вернул его номер",

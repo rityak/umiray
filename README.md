@@ -9,7 +9,7 @@
   Tauri&nbsp;2 · Rust · React · <a href="https://github.com/rityak/rootik">Rootik</a>
 </p>
 
-<p align="center"><b>1.7.0</b> · <a href="README.ru.md">Русская версия</a></p>
+<p align="center"><b>1.8.0</b> · <a href="README.ru.md">Русская версия</a></p>
 
 > **Umiray is a proxy client for Windows and Linux powered by Mihomo.** It runs solely on the user’s computer, at their request, and provides local proxy, system proxy or TUN modes. It includes no servers, does not encrypt or tunnel traffic by itself, and grants no access to any service. The code and builds are provided as is. You are responsible for using them in accordance with the laws of your country and the terms of your network provider. The authors do not encourage any violation of these rules and accept no liability for any use.
 
@@ -55,12 +55,6 @@ Data is stored in `%LOCALAPPDATA%\umiray` on Windows and `~/.local/share/umiray`
 
 The interface selects Russian when a Russian keyboard layout is installed; otherwise,
 it selects English. Override this in Settings → Umiray Settings → Interface language.
-
-## Umiray Core / VOLT
-
-[umiray-core](https://github.com/rityak/umiray-core) contains the optional Windows traffic
-transformer VOLT. It changes TCP segmentation and packet order and can add decoy packets
-while preserving the real data stream.
 
 ## Dependencies and build
 

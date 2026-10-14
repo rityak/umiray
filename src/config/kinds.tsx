@@ -27,14 +27,11 @@ export const UNKNOWN_KIND = { Icon: Layers, word: tk("no type") };
 
 /// A target nothing answers to: a renamed or deleted group, a node the subscription dropped.
 /// The build sends such a rule to `umiray` (D-156) — the window says so instead of "group".
-/// A VOLT exit is lost only while the bypass is off, and the hint says that (D-191).
-export function lostLook(target = ""): { Icon: LucideIcon; tone: Tone; word: string } {
+export function lostLook(): { Icon: LucideIcon; tone: Tone; word: string } {
   return {
     Icon: CircleAlert,
     tone: "warn",
-    word: ["DIRECT-VOLT", "DIRECT-AUTO"].includes(target)
-      ? t("bypass is off · goes to the exit chosen in Connection")
-      : t("not found · goes to the exit chosen in Connection"),
+    word: t("not found · goes to the exit chosen in Connection"),
   };
 }
 
@@ -44,8 +41,7 @@ export function targetLook(
   target: string,
   nodes: string[],
 ): { Icon: LucideIcon; tone: Tone; word: string } {
-  if (["DIRECT", "DIRECT-PLAIN", "DIRECT-VOLT", "DIRECT-AUTO"].includes(target))
-    return { Icon: ArrowUpRight, tone: "neutral", word: t("bypass proxy") };
+  if (target === "DIRECT") return { Icon: ArrowUpRight, tone: "neutral", word: t("bypass proxy") };
   if (target === "REJECT") return { Icon: Ban, tone: "danger", word: t("block") };
   // `umiray` follows the choice in Connection, and that choice can be DIRECT: "through
   // VPN" would be a lie there.

@@ -97,11 +97,6 @@ impl Paths {
         Paths::root().join(QD_NAME)
     }
 
-    /// Бинарники VOLT: их кладёт загрузка с выпуска `umiray-core` (D-181).
-    pub fn volt_dir() -> PathBuf {
-        Paths::root().join("volt")
-    }
-
     /// Состояние qd: его база, `client.db`. Пишет сам qd, мы только даём каталог.
     pub fn qd_dir() -> PathBuf {
         Paths::root().join("qd")
@@ -195,7 +190,6 @@ mod tests {
         ("effective_config", &["core/mihomo.rs"]),
         ("qd", &["core/qd.rs"]),
         ("qd_dir", &["core/qd.rs"]),
-        ("volt_dir", &["core/volt.rs", "core/volt/download.rs"]),
     ];
     /// Сам каталог данных общий: «убедиться, что он есть» — не знание о чужих данных.
     const SHARED: &[&str] = &["root", "ensure_root"];

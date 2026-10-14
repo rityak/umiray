@@ -7,15 +7,11 @@ import { t, tk } from "../i18n";
 import Flag from "../shell/Flag";
 import { hide } from "../shell/secret";
 import Uptime from "../shell/Uptime";
-import { bypassNote } from "./exits";
 import { groupName } from "./groups";
 import { delayTone } from "./NodeDelay";
 import PowerRow from "./PowerRow";
 
 type Props = {
-  /// A row under the capture switch: VOLT (D-182).
-  extra?: React.ReactNode;
-  directTarget: string;
   status: api.Status;
   mode: api.Choice;
   running: api.Choice | null;
@@ -111,8 +107,6 @@ function headline(status: api.Status, powering: boolean, stopping: boolean): str
  */
 /// Traffic ticks do not affect these controls.
 export default memo(function ConnectionPath({
-  directTarget,
-  extra,
   status,
   mode,
   running,
@@ -198,12 +192,7 @@ export default memo(function ConnectionPath({
                 {groupName(route[0])}
               </span>
             ) : direction === "direct" ? (
-              // Через обход выход называется своим именем (D-186): DIRECT-AUTO, DIRECT-VOLT.
-              directTarget === "DIRECT" ? (
-                t("Direct connection")
-              ) : (
-                directTarget
-              )
+              t("Direct connection")
             ) : direction === "auto" ? (
               // AUTO выбран и до подключения: «не выбран» было бы неправдой.
               "AUTO"
@@ -211,11 +200,7 @@ export default memo(function ConnectionPath({
               t("No exit selected")
             )
           }
-          description={
-            live
-              ? why
-              : (direction === "direct" && bypassNote(directTarget)) || t(WAITING[direction])
-          }
+          description={live ? why : t(WAITING[direction])}
           meta={
             live &&
             selected &&
@@ -265,7 +250,6 @@ export default memo(function ConnectionPath({
             />
           </Field>
         </div>
-        {extra}
       </div>
     </Card>
   );

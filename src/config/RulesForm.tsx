@@ -114,7 +114,7 @@ export default function RulesForm({ text, onDraft, onMessage, onPending, running
     api.connectionSnapshot().then(
       (snapshot) => {
         setNodes(snapshot.nodes.filter((node) => node.supported).map((node) => node.name));
-        setClientGroups([...snapshot.groups.map((group) => group.name), ...snapshot.directTargets]);
+        setClientGroups(snapshot.groups.map((group) => group.name));
         setExit(chosen(snapshot.direction, snapshot.node));
       },
       () => setNodes(null),
@@ -221,9 +221,7 @@ export default function RulesForm({ text, onDraft, onMessage, onPending, running
     groupNames !== null &&
     nodeNames !== null &&
     ![...TARGETS, ...EXITS, ...groups, ...nodes].includes(target);
-  const fallback = lost(routing.fallback)
-    ? lostLook(routing.fallback)
-    : targetLook(routing.fallback, nodes);
+  const fallback = lost(routing.fallback) ? lostLook() : targetLook(routing.fallback, nodes);
 
   return (
     <div className="flex flex-col gap-3">
@@ -306,7 +304,7 @@ export default function RulesForm({ text, onDraft, onMessage, onPending, running
                   value: id,
                   label: groupName(id),
                   icon: (() => {
-                    const { Icon } = lost(id) ? lostLook(id) : targetLook(id, nodes);
+                    const { Icon } = lost(id) ? lostLook() : targetLook(id, nodes);
                     return <Icon />;
                   })(),
                   count: routing.rules.filter((rule) => rule.target === id).length,

@@ -33,11 +33,7 @@ const LEVEL: Record<Level, LogLevel | undefined> = {
 export default function Logs({ engine, hidden }: { engine: api.Engine; hidden: boolean }) {
   const [raw, setRaw] = useCached<string[]>(`logs.${engine}`, []);
 
-  const [sources, setSources] = useCached<string[]>(`logs.${engine}.sources`, [
-    "umiray",
-    engine,
-    "volt",
-  ]);
+  const [sources, setSources] = useCached<string[]>(`logs.${engine}.sources`, ["umiray", engine]);
   const [levels, setLevels] = useCached<LogLevel[]>(`logs.${engine}.levels`, [
     "trace",
     "debug",
@@ -48,7 +44,6 @@ export default function Logs({ engine, hidden }: { engine: api.Engine; hidden: b
   const labels: Record<string, string> = {
     umiray: "Umiray",
     [engine]: engine,
-    volt: "VOLT",
   };
 
   usePoll(() => {
@@ -103,11 +98,11 @@ export default function Logs({ engine, hidden }: { engine: api.Engine; hidden: b
             placement="bottom-end"
             trigger={
               <Button size="sm" variant="ghost">
-                {t("Log sources")} ({sources.length}/3)
+                {t("Log sources")} ({sources.length}/2)
               </Button>
             }
           >
-            {["umiray", engine, "volt"].map((source) => (
+            {["umiray", engine].map((source) => (
               <MenuCheckboxItem
                 key={source}
                 checked={sources.includes(source)}

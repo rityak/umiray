@@ -8,5 +8,3 @@ pub mod mihomo;
 pub mod mihomo_groups;
 pub mod mihomo_lists;
 pub mod plan;
-
-pub mod mihomo_volt;

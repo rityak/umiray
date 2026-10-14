@@ -24,7 +24,7 @@ pub struct Route {
     pub adapter: String,
     pub gateway: String,
     pub metric: u32,
-    /// Номер адаптера в системе: им привязывают сокет к адаптеру (VOLT, D-176). На Linux 0.
+    /// Номер адаптера в системе. На Linux 0.
     pub index: u32,
 }
 

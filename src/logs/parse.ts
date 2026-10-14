@@ -62,9 +62,8 @@ export function matches(line: Line, filter: Filter, search: string): boolean {
 }
 
 export function logSource(text: string, engine: string): { source: string; message: string } {
-  for (const source of ["umiray", "volt"]) {
-    const prefix = `${source}:`;
-    if (text.startsWith(prefix)) return { source, message: text.slice(prefix.length).trim() };
-  }
+  const prefix = "umiray:";
+  if (text.startsWith(prefix))
+    return { source: "umiray", message: text.slice(prefix.length).trim() };
   return { source: engine, message: text };
 }

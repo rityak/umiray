@@ -65,15 +65,11 @@ describe("matches", () => {
 });
 
 describe("logSource", () => {
-  it("separates client, core and VOLT without matching text inside a message", () => {
+  it("separates client and core without matching text inside a message", () => {
     expect(logSource("umiray: connecting", "mihomo")).toEqual({
       source: "umiray",
       message: "connecting",
     });
-    expect(logSource("volt: Relay started", "mihomo")).toEqual({
-      source: "volt",
-      message: "Relay started",
-    });
-    expect(logSource("request to volt: failed", "mihomo").source).toBe("mihomo");
+    expect(logSource("request to umiray: failed", "mihomo").source).toBe("mihomo");
   });
 });

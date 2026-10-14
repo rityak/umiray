@@ -150,13 +150,7 @@ impl Controller {
         self.address.rsplit(':').next().unwrap_or(&self.address)
     }
 
-    /// `/dns/query` и секрет — для помощника, который должен видеть имена так же, как ядро
-    /// (VOLT Relay, D-176). Второе и последнее место, где секрет покидает модуль.
-    pub fn resolver(&self) -> (String, String) {
-        (format!("{}/dns/query", self.base()), self.secret.clone())
-    }
-
-    /// Аргументы для ядра. Секрет покидает модуль здесь и в `resolver`.
+    /// Аргументы для ядра. Единственное место, где секрет покидает модуль.
     pub fn args(&self) -> [String; 4] {
         [
             "-ext-ctl".into(),

@@ -7,12 +7,10 @@ import { useCached } from "../hooks/useCached";
 import type { NodeSpeed } from "../hooks/useTraffic";
 import { t } from "../i18n";
 import { hide } from "../shell/secret";
-import { bypassNote } from "./exits";
 import { inAuto } from "./groups";
 import NodeTiles from "./NodeTiles";
 
 type Props = {
-  directTarget: string;
   nodes: api.Node[];
   sources: api.Source[];
   /// Private mode (D-127): subscription names and addresses under dots.
@@ -32,7 +30,6 @@ type Props = {
 /// «Узлы»: выходы клиента сверху, под ними узлы по источникам (D-172). Шестерёнка AUTO
 /// включает выбор его состава — тумблеры у источника и узла и «Сохранить».
 export default function NodesView({
-  directTarget,
   nodes,
   sources,
   hidden,
@@ -102,16 +99,8 @@ export default function NodesView({
           selected={selected === "DIRECT"}
           onAction={() => onChoose("DIRECT")}
           icon={<direct.Icon />}
-          title={directTarget}
-          description={bypassNote(directTarget) ?? t("Direct, without proxy")}
-          // Через обход — видно, что он везёт (D-191): соединения выхода VOLT, как у узлов.
-          actions={
-            directTarget !== "DIRECT" && (
-              <Text size="xs" tone="muted">
-                {rates[directTarget]?.connections ?? 0} {t("conn.")}
-              </Text>
-            )
-          }
+          title="DIRECT"
+          description={t("Direct, without proxy")}
           className="select-none"
         />
         <Card

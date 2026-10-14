@@ -44,10 +44,3 @@ export function choice(name: string): { direction: api.Direction; node?: string 
   if (name === AUTO) return { direction: "auto" };
   return { direction: "manual", node: name };
 }
-
-/// Выход DIRECT через обход называется своим выходом ядра (D-186); подпись — как он идёт.
-export function bypassNote(target: string): string | null {
-  if (target === "DIRECT-AUTO") return t("without proxy, bypass when needed");
-  if (target === "DIRECT-VOLT") return t("without proxy, always bypassing");
-  return null;
-}

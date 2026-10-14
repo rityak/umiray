@@ -17,7 +17,6 @@ import PresetPicker from "./PresetPicker";
 import RulesForm from "./RulesForm";
 
 type Props = {
-  focusVolt?: boolean;
   /// Раздел окна вместе с документами внутри (D-070). В «Настройках» их два: конфиг ядра
   /// и настройки клиента (D-068), в остальных разделах — по одному.
   section: api.ConfigSection;
@@ -83,7 +82,6 @@ function savedText(doc: api.ConfigDoc, presets: boolean, running: boolean): stri
  * с «Сохранить», которая ничего не сохраняет и гасит всё соседнее, читалась непонятной.
  */
 export default function ConfigEditor({
-  focusVolt,
   section,
   drafts,
   onDraft,
@@ -134,11 +132,9 @@ export default function ConfigEditor({
   // в никуда. Подтверждение сброса относится к открытому документу.
   // biome-ignore lint/correctness/useExhaustiveDependencies: сброс по смене раздела
   useEffect(() => {
-    setDocId(
-      focusVolt && section.docs.some((item) => item.id === CLIENT) ? CLIENT : section.docs[0].id,
-    );
+    setDocId(section.docs[0].id);
     setView("visual");
-  }, [section.id, focusVolt]);
+  }, [section.id]);
 
   const save = async () => {
     if (draft === undefined) return;
@@ -317,7 +313,6 @@ export default function ConfigEditor({
       // Форма пишет в тот же документ, что открыт в коде, — после записи его перечитать (D-052).
       <ClientForm
         {...client}
-        focusVolt={focusVolt}
         onMessage={onMessage}
         onSaved={reload}
         start={start}

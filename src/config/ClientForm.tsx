@@ -20,8 +20,6 @@ import { type LanguagePreference, languagePreference, t, tk } from "../i18n";
 import { failure, type Message } from "../shell/Banner";
 import SectionBar from "../shell/SectionBar";
 import RefreshSchedule from "../sources/RefreshSchedule";
-import type { VoltController } from "../volt/useVolt";
-import { voltPart } from "../volt/VoltSettings";
 import ClientUpdate from "./ClientUpdate";
 import MaskForm from "./MaskForm";
 import Page, { type Group } from "./Page";
@@ -33,7 +31,6 @@ import Page, { type Group } from "./Page";
 /// `ConfigEditor`, которому до них дела нет, и десять транзитных строк в его сигнатуре
 /// были бы чистым шумом.
 export type ClientProps = {
-  volt: VoltController;
   settings: api.Settings;
   status: api.Status;
   /// Окно чем-то занято: пока идёт запуск, скачивание или сброс, отсюда ничего
@@ -54,7 +51,6 @@ export type ClientProps = {
   onAlwaysAdmin: (on: boolean) => void;
   onKillSwitch: (on: boolean) => void;
   onReset: () => void;
-  onElevate: () => void;
   /// Тумблер «qd»: включить — скачать, выключить — удалить бинарь (D-161).
   onQd: (on: boolean) => void;
   /// Тумблер маршрутизации (D-166) — в полосе раздела «Маршрутизация».
@@ -68,7 +64,6 @@ export type ClientProps = {
 };
 
 type Props = ClientProps & {
-  focusVolt?: boolean;
   onMessage: (message: Message | null) => void;
   /// Форма правит тот же документ, что открыт в коде (D-052): после записи его надо
   /// перечитать, иначе вкладка «Код» показывала бы текст до нажатия.
@@ -193,8 +188,6 @@ const cards = <T extends string>(
  * список решений про клиент, а не три хранилища.
  */
 export default function ClientForm({
-  focusVolt,
-  volt,
   settings,
   status,
   busy,
@@ -211,7 +204,6 @@ export default function ClientForm({
   onAlwaysAdmin,
   onKillSwitch,
   onReset,
-  onElevate,
   onQd,
   onSetup,
   onExport,
@@ -222,9 +214,6 @@ export default function ClientForm({
   start,
   hint,
 }: Props) {
-  useEffect(() => {
-    if (focusVolt) document.getElementById("antidpi-volt")?.scrollIntoView({ block: "start" });
-  }, [focusVolt]);
   const [method, setMethod] = useCached<api.PingMethod | null>("client.ping", null);
   const [health, setHealth] = useCached<string | null>("client.health", null);
   const [udp, setUdp] = useCached<api.Udp | null>("client.udp", null);
@@ -423,7 +412,6 @@ export default function ClientForm({
       id: "antidpi",
       label: "Anti-DPI",
       parts: [
-        voltPart(volt, busy, onSaved, onUnsavedChange, onElevate),
         {
           id: "antidpi-wireguard",
           label: "WireGuard",

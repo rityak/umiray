@@ -42,8 +42,6 @@ import Debug from "./shell/Debug";
 import LinkDialog from "./sources/LinkDialog";
 import NodeDialog from "./sources/NodeDialog";
 import WarpDialog from "./sources/WarpDialog";
-import { useVolt } from "./volt/useVolt";
-import VoltRow from "./volt/VoltRow";
 
 /// Постоянные разделы. Между ними встают разделы конфига: «Группы», «Маршрутизация»,
 /// «Настройки» (D-044). Документов внутри может быть больше одного (D-070), но полосе
@@ -74,8 +72,6 @@ const LAST: DockItem[] = [{ value: "logs", label: tk("Logs"), icon: ICONS.logs }
  */
 export default function App() {
   const [message, setMessage] = useState<Message | null>(null);
-  const volt = useVolt(setMessage);
-  const [focusVolt, setFocusVolt] = useState(false);
   const [tab, setTab] = useState("connection");
   const { status, setStatus } = useStatus(setMessage);
   const { settings, setSettings, update } = useSettings(setMessage);
@@ -251,7 +247,6 @@ export default function App() {
     section && (
       <ConfigEditor
         section={section}
-        focusVolt={focusVolt}
         own={own}
         drafts={drafts.configs}
         onDraft={drafts.onDraft}
@@ -259,7 +254,6 @@ export default function App() {
         onSections={reloadSections}
         onMessage={setMessage}
         client={{
-          volt,
           settings,
           status,
           busy,
@@ -276,7 +270,6 @@ export default function App() {
           onAlwaysAdmin: system.alwaysAdmin,
           onKillSwitch: system.killSwitch,
           onReset: system.reset,
-          onElevate: system.elevate,
           onQd: connection.qdSwitch,
           onRouting: connection.routing,
           onSetup: () => setSetupOpen(true),
@@ -384,7 +377,7 @@ export default function App() {
             info={updates.info}
             checking={updates.checking}
             progress={updates.progress}
-            busy={busy || volt.busy}
+            busy={busy}
             onCheck={updates.check}
             onInstall={updates.install}
           />
@@ -471,34 +464,12 @@ export default function App() {
                 <>
                   {tab === "connection" && (
                     <Connection
-                      directTarget={
-                        volt.snapshot?.options.directEnabled &&
-                        volt.snapshot.options.scope === "direct"
-                          ? volt.snapshot.options.mode === "auto"
-                            ? "DIRECT-AUTO"
-                            : "DIRECT-VOLT"
-                          : "DIRECT"
-                      }
                       status={status}
                       mode={connection.mode}
-                      busy={busy || volt.busy}
+                      busy={busy}
                       powering={job === "power"}
                       onMode={connection.choose}
                       onPower={connection.power}
-                      extra={(direction) =>
-                        has("volt") && (
-                          <VoltRow
-                            volt={volt}
-                            disabled={busy}
-                            running={status.running}
-                            direction={direction}
-                            onSettings={() => {
-                              setFocusVolt(true);
-                              navigate("advanced");
-                            }}
-                          />
-                        )
-                      }
                       sources={sources}
                       hidden={settings.private}
                       onHidden={() => update({ private: !settings.private })}

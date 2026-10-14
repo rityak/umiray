@@ -177,10 +177,6 @@ fn restart_reason(state: &AppState) -> Option<String> {
     let assembled = crate::render::effective::ConfigRenderer::effective(
         &state.routing.document(state).ok()?,
         state.mihomo.probe_port(),
-        state
-            .volt
-            .route(&crate::config::volt::Options::get().ok()?)
-            .ok()?,
     )
     .ok()?;
     match crate::core::mihomo::apply::Apply::needed(&launched, &assembled.yaml) {

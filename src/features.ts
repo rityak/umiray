@@ -10,7 +10,6 @@ import { z } from "zod";
 
 export const Feature = z.enum([
   "qd",
-  "volt",
   "alwaysAdmin",
   "systemProxy",
   "killSwitch",
@@ -44,7 +43,6 @@ export function setFeatures(list: readonly Feature[]): void {
 /// Settings rows (`Page` ids) that only make sense with the feature.
 const HIDES: Record<Feature, string[]> = {
   qd: ["service-qd"],
-  volt: ["volt-form"],
   alwaysAdmin: ["always-admin"],
   systemProxy: [],
   killSwitch: ["guard-firewall"],
