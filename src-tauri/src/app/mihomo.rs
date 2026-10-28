@@ -10,7 +10,8 @@ use crate::app::lifecycle::Lifecycle;
 use crate::app::lifecycle::{Hook, Phase, When};
 use crate::app::state::AppState;
 use crate::config::mode::Mode;
-use crate::core::mihomo::download::MihomoDownload;
+use crate::core::mihomo::build::Build;
+use crate::core::mihomo::download::CoreDownload;
 use crate::core::mihomo::lists::{Built, ListBuild};
 use crate::core::mihomo::Mihomo;
 use crate::core::process::LogRing;
@@ -113,12 +114,41 @@ impl Engine for Mihomo {
         Mihomo::log(self)
     }
 
+    /// Работающее — его сборка, даже если выбор уже сменили (D-194): kill switch выпускает
+    /// процесс, а не намерение.
     fn binary(&self) -> PathBuf {
-        Mihomo::binary()
+        self.running_build()
+            .map_or_else(Mihomo::binary, |build| build.binary())
     }
 
+    fn binaries(&self) -> Vec<PathBuf> {
+        Build::ALL.map(Build::binary).to_vec()
+    }
+
+    /// Выбранная сборка; miray не встал — запасной mihomo (D-194). Есть mihomo на диске —
+    /// отказ уезжает как есть: работать есть чем, а кнопка сказала «скачать miray».
     fn install(&self) -> Job<'_, String> {
-        Box::pin(MihomoDownload::install())
+        Box::pin(async move {
+            let chosen = Build::chosen();
+            let why = match CoreDownload::install(chosen).await {
+                Ok(tag) => return Ok(tag),
+                Err(why) if chosen == Build::Miray => why,
+                Err(why) => return Err(why),
+            };
+            self.log().note(
+                "warning",
+                &format!("miray не встал — {why}; работает mihomo"),
+            );
+            if Build::Mihomo.present() {
+                return Err(why);
+            }
+            CoreDownload::install(Build::Mihomo).await
+        })
+    }
+
+    /// Работающая сборка мешает только своей замене: miray качается и под живым mihomo.
+    fn installing_blocked(&self) -> bool {
+        self.running_build() == Some(Build::chosen())
     }
 
     /// Собрать `.mrs` из изменившихся списков и дать работающему ядру их перечитать.

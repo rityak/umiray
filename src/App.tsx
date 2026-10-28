@@ -39,6 +39,7 @@ import Setup from "./setup/Setup";
 import AdminOffer from "./shell/AdminOffer";
 import Banner, { failure, type Message, notice } from "./shell/Banner";
 import Debug from "./shell/Debug";
+import SectionGuard from "./shell/SectionGuard";
 import LinkDialog from "./sources/LinkDialog";
 import NodeDialog from "./sources/NodeDialog";
 import WarpDialog from "./sources/WarpDialog";
@@ -266,6 +267,7 @@ export default function App() {
           onUnsavedChange: setFormDirty,
           onChange: update,
           onInstall: connection.install,
+          onBuild: connection.build,
           onAutostart: system.autostart,
           onAlwaysAdmin: system.alwaysAdmin,
           onKillSwitch: system.killSwitch,
@@ -428,12 +430,14 @@ export default function App() {
         {dev ? (
           <Debug />
         ) : settingsOpen ? (
-          <Settings
-            onClose={() => {
-              setSettingsOpen(false);
-              opener.current?.focus();
-            }}
-          />
+          <SectionGuard>
+            <Settings
+              onClose={() => {
+                setSettingsOpen(false);
+                opener.current?.focus();
+              }}
+            />
+          </SectionGuard>
         ) : (
           <>
             {/* Подложку несёт каждая карточка раздела сама (D-142): листа под разделом нет. */}
@@ -444,55 +448,58 @@ export default function App() {
               aria-labelledby={`tab-${tab}`}
               className="um-section flex min-h-0 flex-1 flex-col gap-3"
             >
-              {/* Одна точка выбора ядра (D-154): свои разделы у каждого, общие — ниже. */}
-              {viewed === "qd" ? (
-                <QdSection
-                  tab={tab}
-                  section={section}
-                  qd={qd}
-                  status={status}
-                  powering={job === "power"}
-                  onPower={connection.power}
-                  hidden={settings.private}
-                  onHidden={() => update({ private: !settings.private })}
-                  onAdd={adding.pick}
-                  onElevate={system.elevate}
-                  onMessage={setMessage}
-                  config={config}
-                />
-              ) : (
-                <>
-                  {tab === "connection" && (
-                    <Connection
-                      status={status}
-                      mode={connection.mode}
-                      busy={busy}
-                      powering={job === "power"}
-                      onMode={connection.choose}
-                      onPower={connection.power}
-                      sources={sources}
-                      hidden={settings.private}
-                      onHidden={() => update({ private: !settings.private })}
-                      onStatus={setStatus}
-                      onAdd={adding.pick}
-                      onMessage={setMessage}
-                      schedule={settings.refresh}
-                      drafts={drafts.sources}
-                      onDraft={drafts.onSourceDraft}
-                      onDisk={drafts.onSourceDisk}
-                      onSourcesChanged={reloadSources}
-                      icons={settings.groupIcons}
-                      onIcons={(groupIcons) => update({ groupIcons })}
-                      onCreateGroup={() => {
-                        requestNewGroup();
-                        navigate("groups");
-                      }}
-                    />
-                  )}
-                  {config()}
-                </>
-              )}
-              {tab === "logs" && <Logs key={viewed} engine={viewed} hidden={settings.private} />}
+              {/* Исключение в разделе остаётся в разделе: шапка и dock живы (B-054). */}
+              <SectionGuard>
+                {/* Одна точка выбора ядра (D-154): свои разделы у каждого, общие — ниже. */}
+                {viewed === "qd" ? (
+                  <QdSection
+                    tab={tab}
+                    section={section}
+                    qd={qd}
+                    status={status}
+                    powering={job === "power"}
+                    onPower={connection.power}
+                    hidden={settings.private}
+                    onHidden={() => update({ private: !settings.private })}
+                    onAdd={adding.pick}
+                    onElevate={system.elevate}
+                    onMessage={setMessage}
+                    config={config}
+                  />
+                ) : (
+                  <>
+                    {tab === "connection" && (
+                      <Connection
+                        status={status}
+                        mode={connection.mode}
+                        busy={busy}
+                        powering={job === "power"}
+                        onMode={connection.choose}
+                        onPower={connection.power}
+                        sources={sources}
+                        hidden={settings.private}
+                        onHidden={() => update({ private: !settings.private })}
+                        onStatus={setStatus}
+                        onAdd={adding.pick}
+                        onMessage={setMessage}
+                        schedule={settings.refresh}
+                        drafts={drafts.sources}
+                        onDraft={drafts.onSourceDraft}
+                        onDisk={drafts.onSourceDisk}
+                        onSourcesChanged={reloadSources}
+                        icons={settings.groupIcons}
+                        onIcons={(groupIcons) => update({ groupIcons })}
+                        onCreateGroup={() => {
+                          requestNewGroup();
+                          navigate("groups");
+                        }}
+                      />
+                    )}
+                    {config()}
+                  </>
+                )}
+                {tab === "logs" && <Logs key={viewed} engine={viewed} hidden={settings.private} />}
+              </SectionGuard>
             </section>
           </>
         )}

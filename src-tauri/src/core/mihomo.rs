@@ -8,6 +8,7 @@
 //! списками в формате ядра (D-157).
 
 pub mod apply;
+pub mod build;
 pub mod controller;
 pub mod download;
 pub mod keys;
@@ -17,6 +18,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use build::Build;
 use controller::Controller;
 
 use crate::config::mode::Mode;
@@ -73,6 +75,8 @@ struct Running {
     /// Смерть процесса флаг не трогает — по нему и отличается падение от «выключили»
     /// (D-057). На диск не едет: желание живёт ровно одну сессию.
     wanted: bool,
+    /// Какая сборка работает (D-194): выбор могли сменить, а процесс остался прежним.
+    build: Option<Build>,
     /// Конфиг, на котором ядро **сейчас работает**. Не то же, что файл на диске: файл
     /// правится в любой момент, а работающее ядро живёт с тем, что ему дали (D-102).
     /// По этой разнице и считается, нужен ли перезапуск.
@@ -119,6 +123,7 @@ impl Mihomo {
             running.device = None;
             running.controller = None;
             running.started = None;
+            running.build = None;
             running.launched = None;
         }
         Status {
@@ -139,6 +144,12 @@ impl Mihomo {
 
     pub fn log(&self) -> &LogRing {
         &self.log
+    }
+
+    /// Какая сборка работает. Пусто — ядро не запущено.
+    pub fn running_build(&self) -> Option<Build> {
+        self.status();
+        self.running.lock().unwrap().build
     }
 
     /// Ручка к API ядра. Приватна намеренно: наружу из `core` торчат доменные операции
@@ -286,7 +297,8 @@ impl Mihomo {
         Mihomo::check_privileges(effective.mode, Elevation::is_elevated())?;
         self.stop();
 
-        let core = Paths::core();
+        let build = Build::current();
+        let core = build.binary();
         if !core.exists() {
             return Err(AppError::CoreMissing {
                 path: core.display().to_string(),
@@ -318,6 +330,7 @@ impl Mihomo {
         running.device = effective.device.clone();
         running.controller = Some(controller);
         running.started = crate::stamp::Stamp::now();
+        running.build = Some(build);
         running.wanted = true;
         running.launched = Some(effective.yaml.clone());
         Ok(())
@@ -342,6 +355,7 @@ impl Mihomo {
         running.device = None;
         running.controller = None;
         running.started = None;
+        running.build = None;
         running.launched = None;
     }
 
@@ -376,7 +390,10 @@ impl Mihomo {
             .stderr(Stdio::piped());
         // Своя группа процессов — ради мягкой остановки: без неё Ctrl+Break
         // прилетел бы и клиенту (S-021).
-        let mut child = CoreProcess::spawn(command, true, "mihomo")?;
+        let name = core
+            .file_stem()
+            .map_or("mihomo".into(), |stem| stem.to_string_lossy());
+        let mut child = CoreProcess::spawn(command, true, &name)?;
         if let Some(out) = child.stdout.take() {
             self.log.pump(out);
         }
@@ -388,10 +405,10 @@ impl Mihomo {
 }
 
 impl Mihomo {
-    /// Бинарь ядра. Где он лежит, знает только mihomo (D-155): диагностике и статусу
-    /// его отдают отсюда.
+    /// Бинарь ядра — той сборки, которой запускать сейчас (D-194). Где он лежит, знает
+    /// только mihomo (D-155): диагностике и статусу его отдают отсюда.
     pub fn binary() -> std::path::PathBuf {
-        Paths::core()
+        Build::current().binary()
     }
 
     /// Рабочий каталог ядра: кэш, собранный конфиг, пробные прогоны.

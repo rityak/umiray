@@ -265,6 +265,7 @@ mod tests {
                 "nodes/device.rs",
                 "nodes/geo.rs",
                 "core/qd.rs",
+                "core/mihomo/build.rs",
             ],
         ),
         ("Archive", &["app/import.rs"]),

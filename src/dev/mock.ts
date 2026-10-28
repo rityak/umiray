@@ -27,6 +27,8 @@ let status: api.Status = {
   trouble: null,
   port: 2080,
   corePresent: true,
+  coreBuild: "miray",
+  coreInUse: "miray",
   qdPresent: !fresh && !linux,
   elevated: true,
   alwaysAdmin: false,
@@ -558,9 +560,16 @@ const HANDLERS: Record<string, (args: Args) => unknown> = {
   core_traffic: traffic,
   core_logs: ({ engine }) => (engine === "qd" ? qdLogs : logs),
   core_install: ({ engine }) => {
-    if (engine !== "qd") return "v1.19.0";
+    if (engine !== "qd") {
+      status = { ...status, coreInUse: status.coreBuild };
+      return status.coreBuild === "miray" ? "v1.19.33-miray.1" : "v1.19.33";
+    }
     status = { ...status, qdPresent: true };
     return "v0.1.5";
+  },
+  core_build_set: ({ build }) => {
+    status = { ...status, coreBuild: build as api.CoreBuild, coreInUse: build as api.CoreBuild };
+    return status;
   },
   core_flush_fake_ip: () => null,
   mode_set: ({ mode }) => {

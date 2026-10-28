@@ -45,6 +45,8 @@ macro_rules! binary {
 }
 
 pub const CORE_NAME: &str = binary!("mihomo-dev", "mihomo");
+/// Сборка того же ядра — форк miray (D-194). Лежит рядом с mihomo: он — запасной.
+pub const MIRAY_NAME: &str = binary!("miray-dev", "miray");
 
 /// Переменная с корнем данных пользователя. Её же подменяют проверки (`Sandbox`).
 #[cfg(windows)]
@@ -132,6 +134,10 @@ impl Paths {
         Paths::root().join(CORE_NAME)
     }
 
+    pub fn miray() -> PathBuf {
+        Paths::root().join(MIRAY_NAME)
+    }
+
     pub fn ensure_root() -> io::Result<()> {
         std::fs::create_dir_all(Paths::root())
     }
@@ -184,7 +190,8 @@ mod tests {
         ("sources_dir", &["nodes/sources.rs"]),
         ("source_provider", &["nodes/sources.rs"]),
         ("lists_dir", &["lists/store.rs"]),
-        ("core", &["core/mihomo.rs"]),
+        ("core", &["core/mihomo/build.rs"]),
+        ("miray", &["core/mihomo/build.rs"]),
         ("run_dir", &["core/mihomo.rs"]),
         ("ensure_run_dir", &["core/mihomo.rs"]),
         ("effective_config", &["core/mihomo.rs"]),

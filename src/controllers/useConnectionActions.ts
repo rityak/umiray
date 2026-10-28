@@ -4,6 +4,7 @@ import * as api from "../api";
 import { t } from "../i18n";
 import * as qd from "../qd/api";
 import { failure, type Message, notice } from "../shell/Banner";
+import { installCore } from "./installCore";
 import type { Job } from "./useJob";
 
 type Deps = {
@@ -104,20 +105,37 @@ export function useConnectionActions({
     [status.foreignProxy, setJob, report, setStatus],
   );
 
-  /// Скачать mihomo — из баннера «ядра нет» и из формы клиента.
+  /// Скачать выбранную сборку mihomo — из баннера «ядра нет» и из формы клиента.
   const install = useCallback(async () => {
     setJob("install");
     report(null);
     try {
-      const version = await api.coreInstall("mihomo");
-      report(notice(t("{engine} {version} downloaded", { engine: "mihomo", version })));
-      setStatus(await api.coreStatus());
+      const done = await installCore();
+      report(done.message);
+      setStatus(done.status);
     } catch (e) {
       report(failure(e));
     } finally {
       setJob(null);
     }
   }, [setJob, report, setStatus]);
+
+  /// Сменить сборку mihomo (D-194): нет её — скачается, работает ядро — перезапустится.
+  const build = useCallback(
+    async (next: api.CoreBuild) => {
+      setJob("install");
+      report(null);
+      try {
+        setStatus(await api.coreBuildSet(next));
+      } catch (e) {
+        report(failure(e));
+        setStatus(await api.coreStatus());
+      } finally {
+        setJob(null);
+      }
+    },
+    [setJob, report, setStatus],
+  );
 
   /// Тумблер «qd» (D-161): включить — скачать, выключить — удалить бинарь. Загрузка —
   /// секунды, о которых говорит тост.
@@ -164,5 +182,5 @@ export function useConnectionActions({
   /// Режим, который показывает переключатель: целевой, пока идёт запись, иначе выбранный.
   const mode: api.Choice = pending ?? status.desiredMode;
 
-  return { power, restart, choose, install, qdSwitch, routing, mode };
+  return { power, restart, choose, install, build, qdSwitch, routing, mode };
 }

@@ -1,7 +1,7 @@
 {
   "name": "umiray-client",
   "private": true,
-  "version": "1.8.0",
+  "version": "1.9.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -37,6 +37,7 @@
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^4",
     "babel-plugin-react-compiler": "^1.0.0",
+    "happy-dom": "21.0.4",
     "typescript": "^5",
     "vite": "^7",
     "vitest": "^5.0.3"

@@ -23,6 +23,7 @@ use crate::app::lifecycle::Phase;
 use crate::app::state::AppState;
 use crate::app::status::Status;
 use crate::app::tray::Tray;
+use crate::core::mihomo::build::Build;
 use crate::core::EngineId;
 use crate::error::Result;
 
@@ -249,12 +250,28 @@ impl Connection {
     pub async fn install(&self, state: &AppState, engine: EngineId) -> Result<String> {
         let _transition = self.lock().await;
         let engine = state.engine(engine);
-        if engine.state().on {
+        if engine.installing_blocked() {
             return Err(crate::error::AppError::invalid(
                 "Сначала отключитесь: работающее ядро нельзя заменить",
             ));
         }
         engine.install().await
+    }
+
+    /// Сменить сборку mihomo (D-194). Её нет на диске — скачать: выбор без файла молча
+    /// работал бы запасной. Работает mihomo другой сборкой — поднять заново: трафик держит
+    /// то, что выбрано. Скачать не вышло — выбор остаётся, отказ уезжает в окно.
+    pub async fn build(&self, app: &AppHandle, state: &AppState, build: Build) -> Result<Status> {
+        let _transition = self.lock().await;
+        build.choose()?;
+        if !build.present() {
+            state.engine(EngineId::Mihomo).install().await?;
+        }
+        let running = state.mihomo.running_build();
+        if running.is_some() && running != Some(Build::current()) {
+            return self.restart_locked(app, state, EngineId::Mihomo).await;
+        }
+        Ok(self.shown(app, state))
     }
 
     /// Статус плюс значок: они меняются вместе, и разъезжаться им нельзя. Значок правим сразу,

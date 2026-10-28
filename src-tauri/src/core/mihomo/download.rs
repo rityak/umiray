@@ -1,22 +1,28 @@
-//! Доставка ядра: последний релиз mihomo с GitHub в каталог приложения (D-006, D-137).
+//! Доставка ядра: последний релиз выбранной сборки с GitHub в каталог приложения
+//! (D-006, D-137, D-194).
 //!
 //! Само собой это не запускается: поход в сеть — по кнопке (D-022). Единственное
-//! исключение — первый старт без ядра, и оно объявлено отдельно (D-094).
+//! исключение — выбранной сборки нет на диске, и оно объявлено отдельно (D-094).
 //!
-//! Проверять скачанное не по чему — релиз не публикует ни контрольных сумм, ни подписей
-//! (S-004). Поэтому доверие держится на TLS и точном адресе официального репозитория, а
-//! проверкой целостности служит сама распаковка: оборванная загрузка не разожмётся.
+//! mihomo не публикует ни контрольных сумм, ни подписей (S-004): доверие держится на TLS
+//! и точном адресе официального репозитория, а проверкой целостности служит сама
+//! распаковка. miray публикует `sha256sums.txt` — его архив сверяется. И то и другое
+//! считается вставшим, только когда ответило на `-v`.
 
 #[cfg(windows)]
 use std::io::Cursor;
+use std::process::Command;
 
+use super::build::Build;
+use crate::core::release;
 use crate::error::{AppError, Result};
 use crate::http::Http;
 use crate::paths::Paths;
 
-const LATEST_RELEASE: &str = "https://github.com/MetaCubeX/mihomo/releases/latest";
-const DOWNLOAD_BASE: &str = "https://github.com/MetaCubeX/mihomo/releases/download";
-/// Из шести сборок под amd64 эта самая широкая по совместимости с CPU (S-004).
+const MIHOMO: &str = "https://github.com/MetaCubeX/mihomo";
+const MIRAY: &str = "https://github.com/rityak/miray";
+const MIRAY_SUMS: &str = "sha256sums.txt";
+/// Из шести сборок mihomo под amd64 эта самая широкая по совместимости с CPU (S-004).
 /// Под Windows — `.zip`, под Linux — один сжатый бинарь `.gz`.
 #[cfg(windows)]
 const VARIANT: &str = "windows-amd64-compatible";
@@ -24,24 +30,93 @@ const VARIANT: &str = "windows-amd64-compatible";
 const VARIANT: &str = "linux-amd64-compatible";
 #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
 const VARIANT: &str = "linux-arm64";
+/// У miray то же самое — `amd64-v1`, любой x86-64; `v3` требует AVX2.
+#[cfg(windows)]
+const MIRAY_VARIANT: &str = "windows-amd64-v1";
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+const MIRAY_VARIANT: &str = "linux-amd64-v1";
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+const MIRAY_VARIANT: &str = "linux-arm64";
+/// Журнал аномалий `-diag` — разработке, не людям (D-194). Под arm64 его не выпускают.
+const MIRAY_DIAG: bool = cfg!(debug_assertions) && !cfg!(target_arch = "aarch64");
+const PACKED: &str = if cfg!(windows) { "zip" } else { "gz" };
 const MAX_ARCHIVE: usize = 128 * 1024 * 1024;
 const MAX_BINARY: u64 = 256 * 1024 * 1024;
 
-pub struct MihomoDownload;
+pub struct CoreDownload;
 
-impl MihomoDownload {
-    /// Скачивает ядро и кладёт его на место. Возвращает установленную версию.
-    pub async fn install() -> Result<String> {
+impl CoreDownload {
+    /// Скачивает сборку и кладёт её на место. Возвращает установленную версию.
+    pub async fn install(build: Build) -> Result<String> {
         let client = Http::client()?;
-        let tag = latest_tag(&client).await?;
-        let archive = fetch_asset(&client, &tag).await?;
+        let repo = repo(build);
+        let tag = latest_tag(&client, repo).await?;
+        let asset = asset(build, &tag);
+        let link = |name: &str| format!("{repo}/releases/download/{tag}/{name}");
+        let archive = Http::fetch(&client, &link(&asset), MAX_ARCHIVE).await?;
+        if build == Build::Miray {
+            let sums = Http::fetch(&client, &link(MIRAY_SUMS), 64 * 1024).await?;
+            verify(&archive, &String::from_utf8_lossy(&sums), &asset)?;
+        }
         let binary = extract_executable(&archive)?;
 
         Paths::ensure_root()?;
-        replace_binary(&super::Mihomo::binary(), &binary)?;
-
+        let path = build.binary();
+        replace_binary(&path, &binary)?;
+        if let Err(why) = answers(&path) {
+            let _ = std::fs::remove_file(&path);
+            return Err(why);
+        }
         Ok(tag)
     }
+}
+
+fn repo(build: Build) -> &'static str {
+    match build {
+        Build::Mihomo => MIHOMO,
+        Build::Miray => MIRAY,
+    }
+}
+
+/// Имя файла в релизе: `mihomo-windows-amd64-compatible-v1.19.33.zip`,
+/// `miray-windows-amd64-v1-diag-v1.19.33-miray.1.zip`.
+fn asset(build: Build, tag: &str) -> String {
+    match build {
+        Build::Mihomo => format!("mihomo-{VARIANT}-{tag}.{PACKED}"),
+        Build::Miray => {
+            let diag = if MIRAY_DIAG { "-diag" } else { "" };
+            format!("miray-{MIRAY_VARIANT}{diag}-{tag}.{PACKED}")
+        }
+    }
+}
+
+/// Не сошлось — отказ до распаковки: на диск ничего не попадает.
+fn verify(archive: &[u8], sums: &str, asset: &str) -> Result<()> {
+    let want = release::checksum(sums, asset)
+        .ok_or_else(|| AppError::invalid(format!("В {MIRAY_SUMS} нет строки для {asset}")))?;
+    if release::sha256(archive) != want {
+        return Err(AppError::invalid(
+            "Контрольная сумма ядра не совпала — файл не записан",
+        ));
+    }
+    Ok(())
+}
+
+/// Встало — значит запускается: файл, который не печатает версию, ядром не считается (D-194).
+fn answers(path: &std::path::Path) -> Result<()> {
+    let mut command = Command::new(path);
+    command.arg("-v");
+    crate::system::console::Console::hide(&mut command, false);
+    let output = command
+        .output()
+        .map_err(|e| AppError::io(format!("Скачанное ядро не запускается: {e}")))?;
+    if !output.status.success() {
+        return Err(AppError::io(format!(
+            "Скачанное ядро не ответило на -v ({})",
+            output.status
+        )));
+    }
+    Ok(())
 }
 
 fn replace_binary(path: &std::path::Path, binary: &[u8]) -> Result<()> {
@@ -58,9 +133,9 @@ fn replace_binary(path: &std::path::Path, binary: &[u8]) -> Result<()> {
 
 /// Версию берём из редиректа `/releases/latest` — GitHub API отдельно ограничивает частоту
 /// запросов и на общем адресе легко упереться в лимит.
-async fn latest_tag(client: &reqwest::Client) -> Result<String> {
+async fn latest_tag(client: &reqwest::Client, repo: &str) -> Result<String> {
     let response = client
-        .get(LATEST_RELEASE)
+        .get(format!("{repo}/releases/latest"))
         .send()
         .await
         .map_err(|e| AppError::network(format!("Не удалось узнать версию ядра: {e}")))?;
@@ -73,12 +148,6 @@ async fn latest_tag(client: &reqwest::Client) -> Result<String> {
         )));
     }
     Ok(tag)
-}
-
-async fn fetch_asset(client: &reqwest::Client, tag: &str) -> Result<Vec<u8>> {
-    let packed = if cfg!(windows) { "zip" } else { "gz" };
-    let url = format!("{DOWNLOAD_BASE}/{tag}/mihomo-{VARIANT}-{tag}.{packed}");
-    Http::fetch(client, &url, MAX_ARCHIVE).await
 }
 
 /// Под Linux релиз — один бинарь, сжатый gzip. Оборванная загрузка не разожмётся,
@@ -165,6 +234,29 @@ mod tests {
             extract_executable(&gzip(b"\x7fELF core")).unwrap(),
             b"\x7fELF core"
         );
+    }
+
+    /// Имена — как в настоящих релизах: промах здесь — 404 вместо ядра.
+    #[test]
+    #[cfg(windows)]
+    fn asset_names_match_the_releases() {
+        assert_eq!(
+            asset(Build::Mihomo, "v1.19.33"),
+            "mihomo-windows-amd64-compatible-v1.19.33.zip"
+        );
+        let diag = if cfg!(debug_assertions) { "-diag" } else { "" };
+        assert_eq!(
+            asset(Build::Miray, "v1.19.33-miray.1"),
+            format!("miray-windows-amd64-v1{diag}-v1.19.33-miray.1.zip")
+        );
+    }
+
+    #[test]
+    fn a_miray_archive_must_match_its_sum() {
+        let sums = format!("{}  core.zip\n", release::sha256(b"archive"));
+        assert!(verify(b"archive", &sums, "core.zip").is_ok());
+        assert!(verify(b"tampered", &sums, "core.zip").is_err());
+        assert!(verify(b"archive", &sums, "other.zip").is_err());
     }
 
     #[test]

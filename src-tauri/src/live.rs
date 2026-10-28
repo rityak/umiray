@@ -4717,3 +4717,28 @@ async fn live_masque_leaves_through_warp() {
     println!("{warp}");
     assert_eq!(warp, "warp=on", "ответил Cloudflare, но не через WARP");
 }
+
+/// D-194 на настоящем релизе: miray скачивается выбранной сборкой (в debug — `-diag`),
+/// сходится с `sha256sums.txt`, отвечает на `-v` и становится той, которой запускать.
+#[tokio::test]
+#[ignore]
+async fn live_miray_installs_and_becomes_the_current_build() {
+    use crate::core::mihomo::build::Build;
+    let _sandbox = crate::paths::Sandbox::new("miray-install");
+    Build::Miray.choose().unwrap();
+    assert!(!Build::Miray.present(), "песочница не пустая");
+
+    let tag = crate::core::mihomo::download::CoreDownload::install(Build::Miray)
+        .await
+        .unwrap();
+    println!("miray {tag}");
+    assert!(tag.contains("miray"), "{tag}");
+    assert_eq!(Build::current(), Build::Miray);
+    let out = std::process::Command::new(Build::Miray.binary())
+        .arg("-v")
+        .output()
+        .unwrap();
+    let said = String::from_utf8_lossy(&out.stdout);
+    println!("{said}");
+    assert_eq!(said.contains("-diag"), cfg!(debug_assertions), "{said}");
+}

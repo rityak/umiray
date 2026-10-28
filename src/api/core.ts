@@ -18,6 +18,10 @@ export type Choice = z.infer<typeof Choice>;
 export const Engine = z.enum(["mihomo", "qd"]);
 export type Engine = z.infer<typeof Engine>;
 
+/// Сборка ядра mihomo (D-194): сам mihomo или его форк miray, конфиг у них общий.
+export const CoreBuild = z.enum(["miray", "mihomo"]);
+export type CoreBuild = z.infer<typeof CoreBuild>;
+
 export const Status = z.object({
   /// Какое ядро держит трафик сейчас; `null` — никакое. Шапка говорит о нём.
   active: Engine.nullable(),
@@ -39,6 +43,10 @@ export const Status = z.object({
   /// Порт локального прокси в том виде, в каком он попал в конфиг.
   port: z.number().nullable(),
   corePresent: z.boolean(),
+  /// Какую сборку mihomo выбрал человек.
+  coreBuild: CoreBuild,
+  /// Какой сборкой ядро работает или будет работать: выбранной нет — запасной.
+  coreInUse: CoreBuild,
   /// Скачан ли qd: переключатель ядер в шапке виден только тогда (D-161).
   qdPresent: z.boolean(),
   elevated: z.boolean(),
@@ -96,6 +104,9 @@ export const modeSet = (mode: Choice) => call(Status, "mode_set", { mode });
 
 /// Скачать ядро; отдаёт версию. Любое ядро (D-154), пока оно не держит трафик.
 export const coreInstall = (engine: Engine) => call(z.string(), "core_install", { engine });
+
+/// Выбрать сборку (D-194): нет на диске — скачать, работает ядро — перезапустить.
+export const coreBuildSet = (build: CoreBuild) => call(Status, "core_build_set", { build });
 
 export const coreStart = () => call(Status, "core_start");
 /// Перезапуск: то, что ядро читает на старте, доезжает только так (D-010).

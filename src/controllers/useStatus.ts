@@ -15,6 +15,8 @@ const INITIAL: api.Status = {
   trouble: null,
   port: null,
   corePresent: true,
+  coreBuild: "miray",
+  coreInUse: "miray",
   qdPresent: false,
   elevated: false,
   alwaysAdmin: false,

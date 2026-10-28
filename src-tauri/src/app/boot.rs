@@ -212,7 +212,9 @@ fn replace(app: &AppHandle) -> Done {
 fn sweep(app: &AppHandle) -> Done {
     let state = app.state::<AppState>();
     for id in crate::core::EngineId::ALL {
-        crate::core::process::CoreProcess::sweep(&state.engine(id).binary());
+        for binary in state.engine(id).binaries() {
+            crate::core::process::CoreProcess::sweep(&binary);
+        }
     }
     Ok(())
 }

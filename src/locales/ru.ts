@@ -6,6 +6,8 @@ import type { Entry } from "../i18n";
  */
 const ru: Record<string, Entry> = {
   bypass: "обход",
+  "This section failed to open": "Раздел не открылся",
+  "Try again": "Попробовать снова",
   "Log sources": "Источники",
   "Interface language": "Язык интерфейса",
   Startup: "Запуск",
@@ -161,7 +163,7 @@ const ru: Record<string, Entry> = {
   "settings and sources": "настройки и источники",
   "Mihomo core": "Ядро mihomo",
   Client: "Клиент",
-  "downloading mihomo": "скачиваю mihomo",
+  "downloading {engine}": "скачиваю {engine}",
   "Couldn't download the core — can't connect without it.":
     "Ядро не скачалось само — без него не подключиться.",
   Sources: "Источники",
@@ -757,6 +759,13 @@ const ru: Record<string, Entry> = {
   "Country lookup interval": "Как часто спрашивать страну узла",
   Maintenance: "Обслуживание",
   "Update core": "Обновить ядро",
+  "Core build": "Сборка ядра",
+  "miray is a mihomo fork with the same config. mihomo is the fallback":
+    "miray — форк mihomo с тем же конфигом; mihomo — запасной",
+  "{build} isn't installed — {engine} is used": "{build} не установлен — работает {engine}",
+  "{build} didn't install — {engine} {version} downloaded instead":
+    "{build} не встал — вместо него скачан {engine} {version}",
+  "Couldn't download {build} — {engine} is used": "{build} не скачался — работает {engine}",
   "From the official GitHub release. Disconnect before replacing the core":
     "из официального релиза на GitHub; перед заменой отключитесь",
   "Client version": "Версия клиента",

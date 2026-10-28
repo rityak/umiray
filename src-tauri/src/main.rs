@@ -151,6 +151,7 @@ fn main() {
             commands::rules::rules_render,
             commands::rules::rules_processes,
             commands::core::core_install,
+            commands::core::core_build_set,
             commands::sources::sources_list,
             commands::sources::sources_add,
             commands::sources::sources_add_proxy,

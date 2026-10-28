@@ -9,6 +9,7 @@ use tauri::State;
 use crate::app::state::AppState;
 use crate::app::status::Status;
 use crate::app::tray::Tray;
+use crate::core::mihomo::build::Build;
 use crate::core::mihomo::controller::Traffic;
 use crate::core::EngineId;
 use crate::error::Result;
@@ -64,4 +65,14 @@ pub async fn core_traffic(state: State<'_, AppState>) -> Result<Option<Traffic>>
 #[tauri::command]
 pub async fn core_install(engine: EngineId, state: State<'_, AppState>) -> Result<String> {
     state.connection.install(&state, engine).await
+}
+
+/// Выбрать сборку mihomo (D-194): скачать, если её нет, и перезапустить работающее ядро.
+#[tauri::command]
+pub async fn core_build_set(
+    build: Build,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Status> {
+    state.connection.build(&app, &state, build).await
 }

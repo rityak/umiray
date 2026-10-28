@@ -47,6 +47,8 @@ export type ClientProps = {
   onUnsavedChange: (dirty: boolean) => void;
   onChange: (patch: api.SettingsPatch) => void;
   onInstall: () => void;
+  /// Сборка mihomo (D-194): выбрать — скачать, если нет, и перезапустить работающее.
+  onBuild: (build: api.CoreBuild) => void;
   onAutostart: (on: boolean) => void;
   onAlwaysAdmin: (on: boolean) => void;
   onKillSwitch: (on: boolean) => void;
@@ -200,6 +202,7 @@ export default function ClientForm({
   onUnsavedChange,
   onChange,
   onInstall,
+  onBuild,
   onAutostart,
   onAlwaysAdmin,
   onKillSwitch,
@@ -637,6 +640,26 @@ export default function ClientForm({
           id: "service-core",
           label: t("Mihomo core"),
           settings: [
+            {
+              id: "build",
+              label: t("Core build"),
+              hint:
+                status.coreInUse === status.coreBuild
+                  ? t("miray is a mihomo fork with the same config. mihomo is the fallback")
+                  : t("{build} isn't installed — {engine} is used", {
+                      build: status.coreBuild,
+                      engine: status.coreInUse,
+                    }),
+              control: (
+                <Select
+                  aria-label={t("Core build")}
+                  value={status.coreBuild}
+                  disabled={busy}
+                  onChange={(value) => onBuild(api.CoreBuild.parse(value))}
+                  options={api.CoreBuild.options.map((build) => ({ value: build, label: build }))}
+                />
+              ),
+            },
             {
               id: "install",
               label: t("Update core"),

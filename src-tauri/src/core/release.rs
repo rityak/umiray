@@ -59,7 +59,7 @@ fn newest_tag(feed: &str) -> Option<String> {
 
 /// Строка `checksums.txt` для файла → его SHA-256 строчными. Формат `sha256sum`:
 /// хеш, пробелы, имя; звёздочка перед именем — двоичный режим.
-fn checksum(sums: &str, file: &str) -> Option<String> {
+pub fn checksum(sums: &str, file: &str) -> Option<String> {
     sums.lines().find_map(|line| {
         let (hash, name) = line.split_once(char::is_whitespace)?;
         (name.trim().trim_start_matches('*') == file).then(|| hash.to_ascii_lowercase())

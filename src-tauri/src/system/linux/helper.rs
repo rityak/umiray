@@ -150,18 +150,17 @@ fn caller() -> std::result::Result<(u32, u32, PathBuf), String> {
 
 /// Ядро в TUN: права на адаптер, DNS туннеля, смерть вместе с клиентом (S-035).
 ///
-/// Бинарь — только ядро клиента в доме позвавшего пользователя и принадлежащее ему:
+/// Бинарь — только ядро клиента (любая его сборка, D-194) в доме позвавшего пользователя и принадлежащее ему:
 /// чужой файл под этим именем прав не получит.
 fn run_core(device: &str, core: &str, rest: &[String]) -> std::result::Result<(), String> {
     let device = checked_device(device)?;
     let (uid, gid, home) = caller()?;
     let core = Path::new(core);
     let meta = std::fs::metadata(core).map_err(|e| format!("ядро {}: {e}", core.display()))?;
-    if core.file_name() != Some(OsStr::new(crate::paths::CORE_NAME))
-        || !core.starts_with(&home)
-        || meta.uid() != uid
-        || !meta.is_file()
-    {
+    let named = [crate::paths::CORE_NAME, crate::paths::MIRAY_NAME]
+        .iter()
+        .any(|name| core.file_name() == Some(OsStr::new(name)));
+    if !named || !core.starts_with(&home) || meta.uid() != uid || !meta.is_file() {
         return Err(format!("{} — не ядро клиента", core.display()));
     }
     tell_resolved_later(device);

@@ -13,6 +13,7 @@ use crate::app::proxy::SystemProxy;
 use crate::app::state::AppState;
 use crate::app::tray;
 use crate::config::mode::Mode;
+use crate::core::mihomo::build::Build;
 use crate::core::EngineId;
 use crate::system::autostart::Autostart;
 use crate::system::elevation::Elevation;
@@ -40,6 +41,11 @@ pub struct Status {
     /// Адрес локального прокси показываем настоящий: пользователь мог сменить порт оверрайдом.
     port: Option<u16>,
     core_present: bool,
+    /// Какую сборку mihomo выбрал человек (D-194).
+    core_build: Build,
+    /// Какой сборкой ядро работает — или будет, если не работает: выбранной нет на диске,
+    /// и тогда это запасная.
+    core_in_use: Build,
     /// Скачан ли qd: переключатель ядер в шапке виден только тогда (D-161).
     qd_present: bool,
     /// TUN без прав администратора не поднимется, интерфейс должен это показывать заранее.
@@ -106,6 +112,8 @@ impl Status {
             port: core.port,
             started: running.as_ref().and_then(|(_, engine)| engine.started),
             core_present: crate::core::mihomo::Mihomo::binary().exists(),
+            core_build: Build::chosen(),
+            core_in_use: state.mihomo.running_build().unwrap_or_else(Build::current),
             qd_present: state.qd.present(),
             elevated: Elevation::is_elevated(),
             always_admin: Autostart::always_admin(),

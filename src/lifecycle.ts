@@ -20,8 +20,9 @@
  */
 
 import * as api from "./api";
+import { installCore } from "./controllers/installCore";
 import { t, tk } from "./i18n";
-import { failure, type Message, notice } from "./shell/Banner";
+import { failure, type Message } from "./shell/Banner";
 import * as splash from "./splash";
 
 /// Куда хук кладёт добытое. Это ровно те состояния окна, которые запуск и наполняет, —
@@ -94,7 +95,8 @@ on({
   },
 });
 
-/// Донести ядро, если его нет (D-094).
+/// Донести ядро, если его нет (D-094), — выбранной сборкой (D-194): был только mihomo,
+/// а выбран miray (клиент обновился) — miray докачается здесь же.
 ///
 /// **Только когда его нет.** Обновлять само, без спроса, клиент не берётся: политика
 /// обновления ядра ещё не решена (DECISION, «Не решено»), а подменять рабочий бинарь
@@ -109,27 +111,26 @@ on({
     const status = await api.coreStatus().catch(() => null);
     if (status === null) return;
     boot.status(status);
-    if (status.corePresent) return;
+    if (status.corePresent && status.coreInUse === status.coreBuild) return;
 
     // Строка называет и то, чего ждём, и то, что это не повторится: без второй половины
     // полминуты на бегунке читаются как «повисло». Потолок заставки на это время поднят.
-    splash.step(t("downloading mihomo"));
+    splash.step(t("downloading {engine}", { engine: status.coreBuild }));
     splash.hold();
-    try {
-      const version = await api.coreInstall("mihomo");
-      boot.message(notice(t("{engine} {version} downloaded", { engine: "mihomo", version })));
-      boot.status(await api.coreStatus());
-    } catch (e) {
-      // Окно откроется без ядра — и скажет об этом кнопкой, а не только текстом:
-      // причина уезжает в подробности, а действие остаётся тем же (D-028).
-      const error = api.asAppError(e);
-      boot.message({
-        tone: "error",
-        text: t("Couldn't download the core — can't connect without it."),
-        details: [error.message, ...error.details],
-        kind: "coreMissing",
-      });
-    }
+    const done = await installCore();
+    boot.status(done.status);
+    // Окно откроется без ядра — и скажет об этом кнопкой, а не только текстом:
+    // причина уезжает в подробности, а действие остаётся тем же (D-028).
+    boot.message(
+      done.message.tone === "error"
+        ? {
+            ...done.message,
+            text: t("Couldn't download the core — can't connect without it."),
+            details: [done.message.text, ...done.message.details],
+            kind: "coreMissing",
+          }
+        : done.message,
+    );
   },
 });
 

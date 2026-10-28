@@ -11,6 +11,8 @@ const status: api.Status = {
   trouble: null,
   port: null,
   corePresent: false,
+  coreBuild: "miray",
+  coreInUse: "miray",
   qdPresent: true,
   elevated: true,
   alwaysAdmin: false,
