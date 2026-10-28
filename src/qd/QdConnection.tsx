@@ -1,12 +1,10 @@
 import { Server, ShieldAlert } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { Button, Callout, Card, EmptyState, Field, Item, SegmentedControl } from "rootik";
-import type * as api from "../api";
 import NodeDelay from "../connection/NodeDelay";
 import NodeTiles from "../connection/NodeTiles";
 import PowerRow from "../connection/PowerRow";
 import Speed from "../connection/Speed";
-import { ENGINES } from "../engines";
 import { useCached } from "../hooks/useCached";
 import { unchanged, usePoll } from "../hooks/usePoll";
 import { type Speed as Rate, ZERO } from "../hooks/useTraffic";
@@ -23,8 +21,8 @@ type Props = {
   status: qd.Status | null;
   /// When the tunnel came up — counted by the client, not here: the window outlives it.
   started: number | null;
-  /// Another engine carries traffic now; turning qd on stops it first (D-154).
-  other: api.Engine | null;
+  /// Who carries traffic now (an engine or its build, D-194); turning qd on stops it first.
+  other: string | null;
   powering: boolean;
   onPower: () => void;
   onChanged: () => Promise<void> | void;
@@ -115,11 +113,8 @@ export default function QdConnection({
       <div className="flex flex-col gap-3">
         {status?.problem && <Callout tone="danger" title={status.problem} />}
         {other && (
-          <Callout
-            tone="info"
-            title={t("{engine} is running now", { engine: ENGINES[other].label })}
-          >
-            {t("Turning qd on stops {engine} first.", { engine: ENGINES[other].label })}
+          <Callout tone="info" title={t("{engine} is running now", { engine: other })}>
+            {t("Turning qd on stops {engine} first.", { engine: other })}
           </Callout>
         )}
         <Card padding="sm" aria-label={t("Connection")}>

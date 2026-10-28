@@ -18,7 +18,11 @@ type Seen = {
 export type Headline = { tone: api.Tone; label: string; detail: ReactNode };
 
 type Engine = {
+  /// Имя на переключателе ядер.
   label: string;
+  /// Кто везёт трафик, пока работает это ядро: у mihomo это сборка (D-194), и на деле
+  /// может работать не та, что на переключателе.
+  carrier: (status: api.Status) => string;
   /// Вторая строка шапки, пока это ядро держит трафик: чем оно его держит.
   detail: (seen: Seen) => ReactNode;
   /// Разделы конфига, какими их показывает это ядро: чего у него нет — нет и в dock.
@@ -37,6 +41,7 @@ type Engine = {
 export const ENGINES: Record<api.Engine, Engine> = {
   mihomo: {
     label: "mihomo",
+    carrier: (status) => status.coreInUse,
     detail: ({ status }) => {
       const mode = api.runningMode(status);
       return (
@@ -53,6 +58,7 @@ export const ENGINES: Record<api.Engine, Engine> = {
   },
   qd: {
     label: "qd",
+    carrier: () => "qd",
     detail: ({ qd: seen, status }) =>
       seen?.state?.node?.name ?? <Uptime started={status.started} fallback={t("just now")} />,
     // Узлы qd выбирает сам — групп нет; маршруты — свои правила по приложениям,
@@ -101,5 +107,5 @@ export function headline(seen: Seen): Headline {
   const detail = on ? on.detail(seen) : t("core stopped");
   if (powering) return { tone: "connecting", label: t("Starting…"), detail };
   if (!on) return { tone: "off", label: t("Disconnected"), detail };
-  return { tone: "on", label: `${t("Connected")} · ${on.label}`, detail };
+  return { tone: "on", label: `${t("Connected")} · ${on.carrier(status)}`, detail };
 }

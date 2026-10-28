@@ -11,8 +11,8 @@ const status: api.Status = {
   trouble: null,
   port: null,
   corePresent: false,
-  coreBuild: "miray",
-  coreInUse: "miray",
+  coreBuild: "mihomo",
+  coreInUse: "mihomo",
   qdPresent: true,
   elevated: true,
   alwaysAdmin: false,
@@ -33,6 +33,14 @@ test("the header names the client's state and the engine carrying traffic", () =
   const mihomo = { ...status, active: "mihomo" as const, running: true, mode: "tun" as const };
   const on = headline({ status: mihomo, qd: null, powering: false });
   expect([on.tone, on.label]).toEqual(["on", "Connected · mihomo"]);
+
+  // Шапка называет сборку, которая работает, а не ядро на переключателе (D-194).
+  const miray = headline({
+    status: { ...mihomo, coreInUse: "miray" },
+    qd: null,
+    powering: false,
+  });
+  expect(miray.label).toBe("Connected · miray");
 
   expect(headline({ status: mihomo, qd: null, powering: true }).tone).toBe("connecting");
 });

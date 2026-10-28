@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import * as api from "../api";
-import { QD_SETTINGS } from "../engines";
+import { ENGINES, QD_SETTINGS } from "../engines";
 import { t } from "../i18n";
 import { failure, type Message, notice } from "../shell/Banner";
 import type { AddKind } from "../sources/AddMenu";
@@ -65,7 +65,9 @@ export default function QdSection({
       <QdConnection
         status={qd.status}
         started={status.active === "qd" ? status.started : null}
-        other={status.active !== "qd" ? status.active : null}
+        other={
+          status.active && status.active !== "qd" ? ENGINES[status.active].carrier(status) : null
+        }
         powering={powering}
         onPower={onPower}
         onChanged={qd.reload}
