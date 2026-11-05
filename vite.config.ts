@@ -13,5 +13,10 @@ export default defineConfig({
   // и держать второе такое число в коде значило бы однажды соврать в отчёте.
   define: { __APP_VERSION__: JSON.stringify(version) },
   clearScreen: false,
-  server: { port: 1420, strictPort: true },
+  server: {
+    host: "127.0.0.1",
+    port: 1420,
+    strictPort: true,
+    watch: { ignored: ["**/src-tauri/target/**"] },
+  },
 });

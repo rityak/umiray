@@ -17,8 +17,7 @@ use std::collections::HashSet;
 use crate::error::AppError;
 use crate::error::Result;
 
-/// Маршрут по умолчанию: чей адаптер и с какой метрикой. Побеждает наименьшая сумма
-/// метрик — по ней и видно, идёт ли трафик в туннель или мимо него.
+/// Маршрут до адреса в интернете: чей адаптер и с какой метрикой.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Route {
     pub adapter: String,
@@ -61,18 +60,17 @@ fn powershell(script: &str) -> Result<String> {
 pub struct NetInfo;
 
 impl NetInfo {
-    /// Маршруты по умолчанию — все, а не один: их бывает несколько, и вопрос как раз в том,
-    /// чей выиграл.
+    /// Маршрут, который Windows реально выберет до внешнего адреса.
+    /// Смотреть только на `0.0.0.0/0` нельзя: TUN перехватывает его более точными
+    /// маршрутами, а исправный туннель тогда выглядит утечкой.
     #[cfg(windows)]
     pub fn default_routes() -> Result<Vec<Route>> {
         let raw = powershell(
-        "Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | \
-         ForEach-Object { \"$($_.InterfaceAlias)|$($_.NextHop)|$($_.RouteMetric + $_.InterfaceMetric)|$($_.ifIndex)\" }",
-    )?;
-        let mut routes = parse_routes(&raw);
-        // Побеждает меньшая метрика — сортируем сразу, чтобы читающий не считал сам.
-        routes.sort_by_key(|route| route.metric);
-        Ok(routes)
+            "Find-NetRoute -RemoteIPAddress '1.1.1.1' -ErrorAction SilentlyContinue | \
+         Where-Object { $_.CimClass.CimClassName -eq 'MSFT_NetRoute' } | \
+         ForEach-Object { \"$($_.InterfaceAlias)|$($_.NextHop)|$($_.RouteMetric)|$($_.ifIndex)\" }",
+        )?;
+        Ok(parse_routes(&raw))
     }
 
     /// DNS поднятых физических адаптеров до появления TUN. Берём оба семейства: IPv6 DNS

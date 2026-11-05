@@ -1,7 +1,7 @@
 {
   "name": "umiray-client",
   "private": true,
-  "version": "1.9.1",
+  "version": "1.10.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -26,7 +26,7 @@
     "lucide-react": "^1.35.0",
     "react": "^19",
     "react-dom": "^19",
-    "rootik": "0.6.1",
+    "rootik": "1.0.0",
     "tailwindcss": "^4.3.3",
     "zod": "^4.6.5"
   },

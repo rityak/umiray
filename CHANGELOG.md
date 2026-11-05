@@ -3,6 +3,24 @@
 The version comes from `package.json`, is mirrored in `Cargo.toml`, and appears in
 the subscription User-Agent as `umiray/<version>`.
 
+## 1.10.0
+
+### Changes
+
+- Update the interface to rootik 1.0.0
+- Detect IP-CIDR rules that overlap TUN route exclusions instead of silently bypassing them
+- Avoid false traffic-leak warnings when Windows routes the checked address through TUN
+- Use the system resolver for direct fake-IP traffic on Windows
+- Keep the development server from watching Rust build artifacts
+
+Install from this release's assets:
+- Windows x64: `umiray_1.10.0_x64-setup.exe`
+- Debian, Ubuntu: `umiray_1.10.0_amd64.deb` (`sudo apt install ./umiray_1.10.0_amd64.deb`)
+- Fedora: `umiray-1.10.0-1.x86_64.rpm` (`sudo dnf install ./umiray-1.10.0-1.x86_64.rpm`)
+- Arch: `umiray-bin` from the AUR, or `PKGBUILD` with `umiray.install` from this release (`makepkg -si`)
+
+Existing installations update from within the client; on Arch, with the package manager.
+
 ## 1.9.1
 
 ### Changes

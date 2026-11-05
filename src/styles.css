@@ -40,6 +40,10 @@
     overflow: hidden;
   }
 
+  .um-shell .rk-shell-content[data-dock] {
+    padding-bottom: calc(var(--rk-dock-height) + var(--rk-shell-gap) * 2 + 8px);
+  }
+
   .um-rate.rk-stat {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);

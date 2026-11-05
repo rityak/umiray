@@ -4,6 +4,8 @@
 //! (D-027). Ссылки разбирает само ядро (D-031) — кроме схем, которых его конвертер не знает:
 //! их описание приходит из `nodes::outbound`, а полями ядра оно становится здесь (D-063).
 
+use std::net::IpAddr;
+
 use serde_yaml::{Mapping, Value};
 
 use crate::config::auto::Exclude;
@@ -60,6 +62,7 @@ impl MihomoRenderer {
     ) -> Result<Effective> {
         let mut map = assemble(user, sources, client)?;
         builtin_rules(&mut map, builtin);
+        reachable_cidr_rules(&map)?;
         // После встроенных: их строки тоже вправе ссылаться на скачанный список.
         crate::render::mihomo_lists::MihomoLists::apply(&mut map, &client.lists);
         providers(&mut map, sources, &client.health);
@@ -205,6 +208,87 @@ fn is_match(line: &str) -> bool {
         .is_some_and(|kind| kind.trim() == "MATCH")
 }
 
+/// `route-exclude-address` выпускает сеть до mihomo, поэтому пересекающееся IP-CIDR
+/// правило мёртво. Отказ словами лучше тихой неработающей маршрутизации.
+fn reachable_cidr_rules(map: &Mapping) -> Result<()> {
+    if Mode::of(map) != Mode::Tun {
+        return Ok(());
+    }
+    let excluded = map
+        .get(Value::from("tun"))
+        .and_then(Value::as_mapping)
+        .and_then(|tun| tun.get(Value::from("route-exclude-address")))
+        .and_then(Value::as_sequence)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str);
+    let rules: Vec<&str> = map
+        .get(Value::from("rules"))
+        .and_then(Value::as_sequence)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+
+    for excluded in excluded {
+        let Some(excluded_net) = network(excluded) else {
+            continue;
+        };
+        for rule in &rules {
+            let mut parts = rule.split(',').map(str::trim);
+            let kind = parts.next().unwrap_or_default();
+            let cidr = parts.next().unwrap_or_default();
+            if matches!(kind, "IP-CIDR" | "IP-CIDR6")
+                && network(cidr).is_some_and(|net| overlaps(excluded_net, net))
+            {
+                return Err(AppError::invalid(format!(
+                    "IP-CIDR {cidr} не сработает: tun.route-exclude-address {excluded} \
+выпускает эту сеть до правил. Уберите исключение из Mihomo Settings."
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+struct Network {
+    address: u128,
+    prefix: u8,
+    bits: u8,
+}
+
+fn network(text: &str) -> Option<Network> {
+    let (address, prefix) = text.trim().split_once('/').unwrap_or((text.trim(), ""));
+    let address: IpAddr = address.parse().ok()?;
+    let (address, bits) = match address {
+        IpAddr::V4(ip) => (u32::from(ip) as u128, 32),
+        IpAddr::V6(ip) => (u128::from(ip), 128),
+    };
+    let prefix = if prefix.is_empty() {
+        bits
+    } else {
+        prefix.parse().ok()?
+    };
+    (prefix <= bits).then_some(Network {
+        address,
+        prefix,
+        bits,
+    })
+}
+
+fn overlaps(left: Network, right: Network) -> bool {
+    if left.bits != right.bits {
+        return false;
+    }
+    let common = left.prefix.min(right.prefix);
+    if common == 0 {
+        return true;
+    }
+    let shift = left.bits - common;
+    left.address >> shift == right.address >> shift
+}
+
 /// Общая часть конфига и списка выбора: документы пользователя, узлы, которые ядро
 /// из ссылки не прочитает, и наши группы.
 fn assemble(user: &[String], sources: &[NodeSource], client: &Client) -> Result<Mapping> {
@@ -283,6 +367,25 @@ fn baseline(map: &mut Mapping, mode: Mode) {
         let mut section = Mapping::new();
         Yaml::set(&mut section, "enable", Value::from(false));
         map.insert(Value::from("dns"), Value::Mapping(section));
+    }
+
+    // Windows DIRECT в fake-IP должен разрешить имя заново в настоящий IP. Без
+    // системного DNS правило PROCESS-NAME срабатывает, но сам DIRECT падает.
+    #[cfg(windows)]
+    if let Some(dns) = map
+        .get_mut(Value::from("dns"))
+        .and_then(Value::as_mapping_mut)
+        .filter(|dns| {
+            dns.get(Value::from("enhanced-mode"))
+                .and_then(Value::as_str)
+                == Some("fake-ip")
+        })
+    {
+        Yaml::fill(
+            dns,
+            "direct-nameserver",
+            Value::Sequence(vec![Value::from("system")]),
+        );
     }
 
     // Последнее правило решает, куда идёт всё остальное. Псевдоним есть всегда — даже без
@@ -861,6 +964,41 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_rule_hidden_by_a_tun_exclusion_is_refused() {
+        let hidden = "tun:
+  enable: true
+  route-exclude-address: [192.168.0.0/16]
+rules:
+  - IP-CIDR,192.168.1.0/24,DIRECT,no-resolve
+  - MATCH,umiray
+";
+        let error = config(&[hidden.to_string()], &[], &[], None).err().unwrap();
+        assert!(error.to_string().contains("route-exclude-address"));
+        assert!(config(
+            &[hidden.replace("enable: true", "enable: false")],
+            &[],
+            &[],
+            None
+        )
+        .is_ok());
+
+        let reachable = hidden.replace("192.168.1.0/24", "10.0.0.0/8");
+        assert!(config(&[reachable], &[], &[], None).is_ok());
+        assert!(overlaps(
+            network("2001:db8::/32").unwrap(),
+            network("2001:db8:1::/48").unwrap()
+        ));
+        assert!(!overlaps(
+            network("2001:db8::/32").unwrap(),
+            network("192.168.0.0/16").unwrap()
+        ));
+        assert!(overlaps(
+            network("0.0.0.0/0").unwrap(),
+            network("203.0.113.0/24").unwrap()
+        ));
+    }
+
     /// Выключенный набор не оставляет ни строки, а без документа пользователя встроенное
     /// всё равно доезжает: направление на это не влияет (D-083).
     #[test]
@@ -1180,6 +1318,24 @@ mod tests {
             out["dns"].get("enable").is_none(),
             "в чужой раздел `enable` не дописываем"
         );
+    }
+
+    #[test]
+    fn windows_fake_ip_direct_uses_the_system_resolver() {
+        let out = parsed(&assembled(
+            &["dns:\n  enable: true\n  enhanced-mode: fake-ip\n"],
+            &[],
+        ));
+        #[cfg(windows)]
+        assert_eq!(out["dns"]["direct-nameserver"][0], Value::from("system"));
+        #[cfg(not(windows))]
+        assert!(out["dns"].get("direct-nameserver").is_none());
+
+        let own = parsed(&assembled(
+            &["dns:\n  enhanced-mode: fake-ip\n  direct-nameserver: [8.8.8.8]\n"],
+            &[],
+        ));
+        assert_eq!(own["dns"]["direct-nameserver"][0], Value::from("8.8.8.8"));
     }
 
     /// Каждый источник — провайдер ядра, и все они подтягиваются и в автогруппу,
