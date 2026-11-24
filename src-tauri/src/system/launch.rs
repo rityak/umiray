@@ -21,5 +21,7 @@ impl Launch {
                 None => false,
             }
         }
+        #[cfg(not(any(windows, target_os = "linux")))]
+        false
     }
 }

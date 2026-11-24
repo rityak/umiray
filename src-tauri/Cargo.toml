@@ -27,7 +27,6 @@ tauri-plugin-single-instance = "2"
 reqwest = { version = "0.13", features = ["json", "socks"] }
 base64 = "0.22"
 getrandom = "0.3"
-zip = { version = "2", default-features = false, features = ["deflate"] }
 # rt и macros — только ради живых тестов, помеченных ignore; Tauri тянет их всё равно.
 # net — UDP для запросов к резолверам (D-097); остальное было и раньше.
 tokio = { version = "1", features = ["time", "rt", "macros", "net", "sync", "signal"] }
@@ -42,13 +41,14 @@ rusqlite = { version = "0.40.2", features = ["bundled"] }
 # Linux: сигналы ядру, время, netlink, ICMP без прав (D-173). Уже в дереве через tokio.
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-# Сборка ядра под Linux — `.gz`, а не `.zip`. Уже в дереве через zip.
+# Сборка ядра под Unix — `.gz`, а не `.zip`. Уже в дереве через zip.
 flate2 = "1"
 
 # Спрятанному в трей окну WebView2 говорят «тебя не видно» (`IsVisible`): иначе страница
 # считает себя на экране и крутит таймеры и отрисовку часами. Уже в дереве через wry.
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.38"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 # Права администратора для TUN: проверка токена и перезапуск через UAC.
 # Плюс клетка процессов: ядро не переживает падение клиента (D-058),

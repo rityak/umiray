@@ -105,7 +105,7 @@ impl NetInfo {
     /// Таблица `main` здесь не отвечает: ядро в TUN уводит трафик правилами `ip rule`
     /// в свою таблицу, а маршрут по умолчанию в `main` остаётся физическим — по нему
     /// исправный туннель выглядел бы обворованным.
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
     pub fn default_routes() -> Result<Vec<Route>> {
         let out = std::process::Command::new("ip")
             .args(["-o", "route", "get", "1.1.1.1"])
@@ -115,7 +115,7 @@ impl NetInfo {
             .collect())
     }
 
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
     pub fn port_owner(port: u16) -> Option<String> {
         let out = std::process::Command::new("ss")
             .args(["-Htlnp", &format!("sport = :{port}")])
@@ -123,10 +123,29 @@ impl NetInfo {
             .ok()?;
         ss_owner(&String::from_utf8_lossy(&out.stdout))
     }
+
+    #[cfg(target_os = "macos")]
+    pub fn default_routes() -> Result<Vec<Route>> {
+        let out = std::process::Command::new("/sbin/route")
+            .args(["-n", "get", "1.1.1.1"])
+            .output()?;
+        Ok(mac_route(&String::from_utf8_lossy(&out.stdout))
+            .into_iter()
+            .collect())
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn port_owner(port: u16) -> Option<String> {
+        let out = std::process::Command::new("/usr/sbin/lsof")
+            .args(["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN", "-Fpct"])
+            .output()
+            .ok()?;
+        mac_owner(&String::from_utf8_lossy(&out.stdout))
+    }
 }
 
 /// `1.1.1.1 via 198.18.0.2 dev Meta table 2022 src 198.18.0.1 uid 1000` → адаптер и шлюз.
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
 fn chosen_route(line: &str) -> Option<Route> {
     let words: Vec<&str> = line.split_whitespace().collect();
     let after = |key: &str| {
@@ -144,9 +163,44 @@ fn chosen_route(line: &str) -> Option<Route> {
     })
 }
 
+#[cfg(target_os = "macos")]
+fn mac_route(raw: &str) -> Option<Route> {
+    let value = |key: &str| {
+        raw.lines()
+            .find_map(|line| line.trim().strip_prefix(key)?.strip_prefix(": "))
+            .map(str::trim)
+            .unwrap_or_default()
+            .to_string()
+    };
+    let adapter = value("interface");
+    (!adapter.is_empty()).then(|| Route {
+        adapter,
+        gateway: value("gateway"),
+        metric: 0,
+        index: 0,
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn mac_owner(raw: &str) -> Option<String> {
+    let mut pid = None;
+    let mut name = None;
+    for line in raw.lines() {
+        if let Some(value) = line.strip_prefix('p') {
+            pid = Some(value);
+        } else if let Some(value) = line.strip_prefix('c') {
+            name = Some(value);
+        }
+    }
+    Some(match (name, pid) {
+        (Some(name), Some(pid)) => format!("{name} (PID {pid})"),
+        _ => return None,
+    })
+}
+
 /// `users:(("mihomo",pid=4242,fd=7))` → `mihomo (PID 4242)`. Чужой процесс `ss` без прав
 /// не называет — тогда ответа нет: номера без имени тоже нет.
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
 fn ss_owner(raw: &str) -> Option<String> {
     let users = raw.lines().next()?.split("users:((\"").nth(1)?;
     let (name, rest) = users.split_once('"')?;
@@ -250,7 +304,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
     fn the_route_the_kernel_would_take_is_named() {
         let tunnel =
             "1.1.1.1 via 198.18.0.2 dev Meta table 2022 src 198.18.0.1 uid 1000 \\    cache \n";
@@ -265,11 +319,28 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
     fn ss_names_the_listener() {
         let line = "LISTEN 0 4096 127.0.0.1:7890 0.0.0.0:* users:((\"mihomo\",pid=4242,fd=7))\n";
         assert_eq!(ss_owner(line).as_deref(), Some("mihomo (PID 4242)"));
         assert_eq!(ss_owner(""), None);
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn macos_route_and_listener_are_parsed() {
+        let route =
+            mac_route("   route to: 1.1.1.1\n gateway: 192.168.1.1\n interface: en0\n").unwrap();
+        assert_eq!(
+            (route.adapter.as_str(), route.gateway.as_str()),
+            ("en0", "192.168.1.1")
+        );
+        assert!(mac_route("").is_none());
+        assert_eq!(
+            mac_owner("p4242\ncmihomo\n").as_deref(),
+            Some("mihomo (PID 4242)")
+        );
+        assert_eq!(mac_owner(""), None);
     }
 
     #[test]

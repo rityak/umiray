@@ -50,21 +50,32 @@ impl Build {
         }
     }
 
-    /// Что выбрал человек. Нет записи или она незнакома — умолчание, miray.
+    /// Что выбрал человек. На macOS умолчание — mihomo: у miray там нет релизов.
     pub fn chosen() -> Build {
         match Db::get(Table::State, ROW, "").ok().flatten().as_deref() {
             Some("mihomo") => Build::Mihomo,
+            Some("miray") => Build::Miray,
+            _ if cfg!(target_os = "macos") => Build::Mihomo,
             _ => Build::Miray,
         }
     }
 
     pub fn choose(self) -> Result<()> {
+        if cfg!(target_os = "macos") && self == Build::Miray {
+            return Err(crate::error::AppError::invalid(
+                "Miray не публикует сборок для macOS — используйте mihomo",
+            ));
+        }
         Db::put(Table::State, ROW, "", self.name())
     }
 
     /// Какой сборкой запускать сейчас.
     pub fn current() -> Build {
-        pick(Build::chosen(), Build::present)
+        let chosen = Build::chosen();
+        if cfg!(target_os = "macos") && chosen == Build::Miray && !Build::Miray.present() {
+            return Build::Mihomo;
+        }
+        pick(chosen, Build::present)
     }
 }
 
@@ -93,9 +104,14 @@ mod tests {
     }
 
     #[test]
-    fn the_choice_survives_and_miray_is_the_default() {
+    fn the_choice_survives_and_the_default_has_a_native_release() {
         let _sandbox = crate::paths::Sandbox::new("core-build");
-        assert_eq!(Build::chosen(), Build::Miray);
+        let fallback = if cfg!(target_os = "macos") {
+            Build::Mihomo
+        } else {
+            Build::Miray
+        };
+        assert_eq!(Build::chosen(), fallback);
         Build::Mihomo.choose().unwrap();
         assert_eq!(Build::chosen(), Build::Mihomo);
     }

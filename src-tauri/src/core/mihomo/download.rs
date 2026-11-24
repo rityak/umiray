@@ -30,6 +30,8 @@ const VARIANT: &str = "windows-amd64-compatible";
 const VARIANT: &str = "linux-amd64-compatible";
 #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
 const VARIANT: &str = "linux-arm64";
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+const VARIANT: &str = "darwin-arm64";
 /// У miray то же самое — `amd64-v1`, любой x86-64; `v3` требует AVX2.
 #[cfg(windows)]
 const MIRAY_VARIANT: &str = "windows-amd64-v1";
@@ -37,6 +39,8 @@ const MIRAY_VARIANT: &str = "windows-amd64-v1";
 const MIRAY_VARIANT: &str = "linux-amd64-v1";
 #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
 const MIRAY_VARIANT: &str = "linux-arm64";
+#[cfg(target_os = "macos")]
+const MIRAY_VARIANT: &str = "darwin-arm64";
 /// Журнал аномалий `-diag` — разработке, не людям (D-194). Под arm64 его не выпускают.
 const MIRAY_DIAG: bool = cfg!(debug_assertions) && !cfg!(target_arch = "aarch64");
 const PACKED: &str = if cfg!(windows) { "zip" } else { "gz" };
@@ -150,8 +154,8 @@ async fn latest_tag(client: &reqwest::Client, repo: &str) -> Result<String> {
     Ok(tag)
 }
 
-/// Под Linux релиз — один бинарь, сжатый gzip. Оборванная загрузка не разожмётся,
-/// чужой файл не начнётся с заголовка ELF.
+/// Под Linux и macOS релиз — один бинарь, сжатый gzip. Проверяем формат и,
+/// на Apple Silicon, тип процессора в заголовке Mach-O.
 #[cfg(not(windows))]
 fn extract_executable(archive: &[u8]) -> Result<Vec<u8>> {
     use std::io::Read;
@@ -165,10 +169,23 @@ fn extract_executable(archive: &[u8]) -> Result<Vec<u8>> {
             "Исполняемый файл ядра имеет неожиданный размер",
         ));
     }
+    #[cfg(target_os = "linux")]
     if !binary.starts_with(b"\x7fELF") {
         return Err(AppError::invalid("В релизе файл без заголовка ELF"));
     }
+    #[cfg(target_os = "macos")]
+    if !macos_arm64(&binary) {
+        return Err(AppError::invalid(
+            "В релизе файл не является исполняемым Mach-O для Apple Silicon",
+        ));
+    }
     Ok(binary)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_arm64(binary: &[u8]) -> bool {
+    // MH_MAGIC_64 и CPU_TYPE_ARM64 в little-endian, как в тонком darwin/arm64 бинаре.
+    binary.len() >= 8 && binary[..8] == [0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0x00, 0x00, 0x01]
 }
 
 /// В архиве ровно один файл — сам бинарь; имя внутри зависит от варианта сборки,
@@ -219,21 +236,54 @@ mod tests {
         assert!(extract_executable(&empty_zip).is_err());
     }
 
-    #[test]
     #[cfg(not(windows))]
-    fn only_a_gzipped_elf_is_a_core() {
+    fn gzip(body: &[u8]) -> Vec<u8> {
         use std::io::Write;
-        let gzip = |body: &[u8]| {
-            let mut out = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
-            out.write_all(body).unwrap();
-            out.finish().unwrap()
-        };
+        let mut out = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        out.write_all(body).unwrap();
+        out.finish().unwrap()
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn only_a_gzipped_elf_is_a_core() {
         assert!(extract_executable(b"not gzip").is_err());
         assert!(extract_executable(&gzip(b"MZ windows")).is_err());
         assert_eq!(
             extract_executable(&gzip(b"\x7fELF core")).unwrap(),
             b"\x7fELF core"
         );
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn only_a_gzipped_arm64_macho_is_a_core() {
+        let arm64 = [0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0x00, 0x00, 0x01, 0, 0];
+        let x64 = [0xcf, 0xfa, 0xed, 0xfe, 0x07, 0x00, 0x00, 0x01, 0, 0];
+        assert!(extract_executable(b"not gzip").is_err());
+        assert!(extract_executable(&gzip(b"\x7fELF linux")).is_err());
+        assert!(extract_executable(&gzip(&x64)).is_err());
+        assert_eq!(extract_executable(&gzip(&arm64)).unwrap(), arm64);
+        assert_eq!(
+            asset(Build::Mihomo, "v1.19.34"),
+            "mihomo-darwin-arm64-v1.19.34.gz"
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    #[ignore]
+    fn live_downloads_and_runs_the_native_core() {
+        let _sandbox = crate::paths::Sandbox::new("macos-core-download");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let version = runtime
+            .block_on(CoreDownload::install(Build::Mihomo))
+            .unwrap();
+        assert!(version.starts_with('v'));
+        assert!(Build::Mihomo.present());
     }
 
     /// Имена — как в настоящих релизах: промах здесь — 404 вместо ядра.

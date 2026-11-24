@@ -254,7 +254,24 @@ fn icmp(host: IpAddr) -> Option<u32> {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+fn icmp(host: IpAddr) -> Option<u32> {
+    let out = std::process::Command::new("/sbin/ping")
+        .args(["-c", "1", "-n", "-W", "1500"])
+        .arg(host.to_string())
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let raw = String::from_utf8_lossy(&out.stdout);
+    raw.split_whitespace()
+        .find_map(|word| word.strip_prefix("time=")?.strip_suffix(" ms"))
+        .and_then(|time| time.parse::<f64>().ok())
+        .map(|time| time as u32)
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 fn icmp(_host: IpAddr) -> Option<u32> {
     None
 }

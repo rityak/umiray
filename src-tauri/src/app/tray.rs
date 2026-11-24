@@ -42,7 +42,7 @@ impl Look {
             Look::Off => "отключено",
             Look::Local => "Proxy",
             Look::Tun => "TUN",
-            Look::System => "System: прокси прописан в Windows",
+            Look::System => "System: системный прокси включён",
             Look::Divert => "по приложениям",
         };
         format!("{} — {state}", crate::paths::APP_NAME)

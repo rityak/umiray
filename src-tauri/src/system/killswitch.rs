@@ -194,6 +194,8 @@ impl Firewall {
         powershell(&script(&allowed.core, &allowed.device))?;
         #[cfg(target_os = "linux")]
         linux_apply(allowed)?;
+        #[cfg(not(any(windows, target_os = "linux")))]
+        let _ = allowed;
         Ok(())
     }
 
@@ -206,6 +208,8 @@ impl Firewall {
         // Таблица nftables заменяется одним файлом — это уже замена без окна.
         #[cfg(target_os = "linux")]
         linux_apply(allowed)?;
+        #[cfg(not(any(windows, target_os = "linux")))]
+        let _ = allowed;
         Ok(())
     }
 
@@ -224,6 +228,8 @@ impl Firewall {
             let _ = previous;
             crate::system::helper::Helper::run(&["killswitch", "release"])?;
         }
+        #[cfg(not(any(windows, target_os = "linux")))]
+        let _ = previous;
         Ok(())
     }
 }

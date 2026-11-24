@@ -25,8 +25,22 @@ impl Lang {
         }
     }
 
+    #[cfg(target_os = "macos")]
+    pub fn detect() -> Lang {
+        let history = std::process::Command::new("/usr/bin/defaults")
+            .args(["read", "NSGlobalDomain", "AppleInputSourceHistory"])
+            .output()
+            .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+            .unwrap_or_default();
+        if history.contains("Russian") || history.contains("ru_RU") {
+            Lang::Ru
+        } else {
+            Lang::En
+        }
+    }
+
     /// Linux: раскладки рабочего стола (GNOME), системные (`localectl`) и язык сеанса.
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
     pub fn detect() -> Lang {
         let locale = ["LC_ALL", "LC_MESSAGES", "LANG"]
             .iter()
@@ -54,7 +68,7 @@ impl Lang {
 
 /// Русская раскладка у GNOME — `('xkb', 'ru')`, у `localectl` — `ru` в списке
 /// `X11 Layout: us,ru`.
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
 fn russian_unix(locale: &str, gnome: &str, system: &str) -> bool {
     locale.starts_with("ru")
         || gnome.contains("'ru'")
@@ -89,10 +103,11 @@ fn is_russian(lang_id: u16) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(any(windows, target_os = "linux"))]
     use super::*;
 
     #[test]
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
     fn a_russian_layout_or_locale_means_russian() {
         assert!(russian_unix("ru_RU.UTF-8", "", ""));
         assert!(russian_unix(

@@ -109,7 +109,19 @@ fn fits(host: Ipv4Addr, payload: u32) -> bool {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+fn fits(host: Ipv4Addr, payload: u32) -> bool {
+    std::process::Command::new("/sbin/ping")
+        .args(["-c", "1", "-n", "-W", "1200", "-D", "-s"])
+        .arg(payload.to_string())
+        .arg(host.to_string())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 fn fits(_host: Ipv4Addr, _payload: u32) -> bool {
     false
 }

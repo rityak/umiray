@@ -24,7 +24,7 @@ impl ProcessTable {
 
     /// Linux: имя исполняемого файла, как его сверяет PROCESS-NAME ядра; процессы, чей
     /// бинарь не прочитать, — по `comm`.
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
     pub fn running() -> Result<Vec<Process>> {
         let names: std::collections::BTreeSet<String> = pids()?
             .filter_map(|pid| {
@@ -39,6 +39,20 @@ impl ProcessTable {
                     })
             })
             .filter(|name| !name.is_empty())
+            .collect();
+        Ok(names.into_iter().map(|name| Process { name }).collect())
+    }
+
+    /// macOS отдаёт полные пути исполняемых файлов через системный `ps`.
+    #[cfg(target_os = "macos")]
+    pub fn running() -> Result<Vec<Process>> {
+        let names: std::collections::BTreeSet<String> = snapshot()?
+            .into_iter()
+            .filter_map(|(_, path)| {
+                Path::new(&path)
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+            })
             .collect();
         Ok(names.into_iter().map(|name| Process { name }).collect())
     }
@@ -85,7 +99,7 @@ impl ProcessTable {
 
     /// Linux: по `/proc/<pid>/exe`, а у ядра, запущенного с правами, его не прочитать
     /// (S-035) — тогда по первому аргументу командной строки: клиент зовёт ядро полным путём.
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
     pub fn kill_by_path(path: &Path) {
         let Ok(wanted) = std::fs::canonicalize(path) else {
             return;
@@ -106,14 +120,50 @@ impl ProcessTable {
             }
         }
     }
+
+    #[cfg(target_os = "macos")]
+    pub fn kill_by_path(path: &Path) {
+        let Ok(wanted) = std::fs::canonicalize(path) else {
+            return;
+        };
+        let Ok(processes) = snapshot() else {
+            return;
+        };
+        for (pid, exe) in processes {
+            if pid != std::process::id()
+                && std::fs::canonicalize(exe).ok().as_deref() == Some(wanted.as_path())
+            {
+                // SAFETY: только сигнал; процесс другого пользователя просто откажет.
+                unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
+            }
+        }
+    }
 }
 
 /// Номера всех процессов из `/proc`.
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
 fn pids() -> Result<impl Iterator<Item = u32>> {
     Ok(std::fs::read_dir("/proc")?
         .flatten()
         .filter_map(|entry| entry.file_name().to_str()?.parse().ok()))
+}
+
+#[cfg(target_os = "macos")]
+fn snapshot() -> Result<Vec<(u32, String)>> {
+    let out = std::process::Command::new("/bin/ps")
+        .args(["-axo", "pid=,comm="])
+        .output()?;
+    if !out.status.success() {
+        return Err(std::io::Error::other("ps не отдал список процессов").into());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            let (pid, path) = line.split_once(char::is_whitespace)?;
+            Some((pid.parse().ok()?, path.trim().to_string()))
+        })
+        .collect())
 }
 
 /// Full path of the process's executable.
@@ -183,7 +233,11 @@ mod unix_tests {
         let (ours, theirs) = (dir.join("ours"), dir.join("theirs"));
         std::fs::create_dir_all(&ours).unwrap();
         std::fs::create_dir_all(&theirs).unwrap();
-        let sleep = std::path::Path::new("/usr/bin/sleep");
+        let sleep = if cfg!(target_os = "macos") {
+            std::path::Path::new("/bin/sleep")
+        } else {
+            std::path::Path::new("/usr/bin/sleep")
+        };
         let (a, b) = (ours.join("sleep"), theirs.join("sleep"));
         std::fs::copy(sleep, &a).unwrap();
         std::fs::copy(sleep, &b).unwrap();

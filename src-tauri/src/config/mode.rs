@@ -27,7 +27,10 @@ use crate::yaml::Yaml;
 
 /// Записать режим, не тронув ничего лишнего.
 /// Как ядро называет свой адаптер, если `tun.device` не задан.
+#[cfg(not(target_os = "macos"))]
 pub const DEFAULT_DEVICE: &str = "Meta";
+#[cfg(target_os = "macos")]
+pub const DEFAULT_DEVICE: &str = "utun";
 
 impl Mode {
     pub fn write(mode: Mode) -> Result<()> {

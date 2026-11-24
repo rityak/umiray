@@ -31,7 +31,7 @@ impl AddressWatcher {
 
     /// Linux: сокет netlink, подписанный на изменения адресов, — тот же смысл, что
     /// у `NotifyAddrChange`: нить спит в ядре, пока таблица адресов не изменится.
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
     pub fn next_change() -> bool {
         // SAFETY: сокет создаётся, привязывается, читается и закрывается здесь же.
         unsafe {
@@ -50,6 +50,22 @@ impl AddressWatcher {
             let mut buffer = [0u8; 4096];
             let heard =
                 bound && libc::recv(socket, buffer.as_mut_ptr().cast(), buffer.len(), 0) > 0;
+            libc::close(socket);
+            heard
+        }
+    }
+
+    /// macOS сообщает об изменениях адресов и маршрутов через routing socket.
+    #[cfg(target_os = "macos")]
+    pub fn next_change() -> bool {
+        // SAFETY: сокет создаётся, читается и закрывается здесь же.
+        unsafe {
+            let socket = libc::socket(libc::PF_ROUTE, libc::SOCK_RAW, 0);
+            if socket < 0 {
+                return false;
+            }
+            let mut buffer = [0u8; 4096];
+            let heard = libc::recv(socket, buffer.as_mut_ptr().cast(), buffer.len(), 0) > 0;
             libc::close(socket);
             heard
         }

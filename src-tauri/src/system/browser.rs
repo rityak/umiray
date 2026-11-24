@@ -20,9 +20,18 @@ impl Browser {
 }
 
 /// Linux: `xdg-open` передаёт адрес браузеру, выбранному в окружении.
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
 fn open(url: &str) -> Result<()> {
     std::process::Command::new("xdg-open")
+        .arg(url)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| AppError::io(format!("Браузер не открылся: {e}")))
+}
+
+#[cfg(target_os = "macos")]
+fn open(url: &str) -> Result<()> {
+    std::process::Command::new("/usr/bin/open")
         .arg(url)
         .spawn()
         .map(|_| ())

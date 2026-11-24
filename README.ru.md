@@ -5,7 +5,7 @@
 <h1 align="center">Umiray</h1>
 
 <p align="center">
-  Прокси-клиент для Windows и Linux на ядре <a href="https://github.com/MetaCubeX/mihomo">Mihomo</a>.<br>
+  Прокси-клиент для Windows, Linux и macOS на ядре <a href="https://github.com/MetaCubeX/mihomo">Mihomo</a>.<br>
   Tauri 2 · Rust · React · <a href="https://github.com/rityak/rootik">Rootik</a>
 </p>
 
@@ -39,6 +39,9 @@
   `sudo dnf install ./umiray-<версия>-1.x86_64.rpm`.
 - **Arch** и производные — `umiray-bin` из AUR (`yay -S umiray-bin`) или `PKGBUILD`
   и `umiray.install` из релиза: `makepkg -si`.
+- **macOS Apple Silicon** — откройте DMG и перенесите `umiray.app` в «Программы».
+  Локальная сборка без цифровой подписи разработчика может потребовать подтверждения
+  в «Системных настройках» → «Конфиденциальность и безопасность».
 
 Ядро mihomo клиент скачает с официальной страницы релизов при первом запуске.
 Добавьте подписку, ссылку на прокси или файл конфигурации, выберите узел и нажмите подключение.
@@ -48,8 +51,10 @@ TUN перехватывает трафик через виртуальный и
 Для TUN нужны дополнительные права. На Windows клиент может создать задачу в планировщике,
 чтобы запускаться с правами без подтверждения UAC каждый раз. На Linux клиент работает
 от вас, а права на сеть через polkit получает только ядро; в своём сеансе пароль не спрашивается.
+На macOS система запрашивает пароль администратора или Touch ID при запуске ядра в TUN.
 
-Данные хранятся в `%LOCALAPPDATA%\umiray` на Windows и в `~/.local/share/umiray` на Linux.
+Данные хранятся в `%LOCALAPPDATA%\umiray` на Windows, в `~/.local/share/umiray` на Linux
+и в `~/Library/Application Support/umiray` на macOS.
 
 Если установлена русская раскладка клавиатуры, интерфейс выбирает русский язык.
 В остальных случаях — английский.
@@ -71,8 +76,16 @@ npm run tauri dev
 npm run tauri build -- --no-bundle
 ```
 
-Бинарник: `src-tauri/target/release/umiray.exe` (`umiray` на Linux). Пакеты Linux:
-`npx tauri build --bundles deb,rpm`; собирайте на Ubuntu 22.04 — тогда они встанут и на старые системы.
+Приложение и DMG для macOS Apple Silicon:
+
+```sh
+npm run build:macos
+```
+
+Результат — `src-tauri/target/aarch64-apple-darwin/release/bundle/macos/umiray.app`
+и образ в соседнем каталоге `dmg`. Бинарник без установщика: `src-tauri/target/release/umiray.exe`
+(`umiray` на Linux). Пакеты Linux: `npx tauri build --bundles deb,rpm`; собирайте на Ubuntu 22.04 —
+тогда они встанут и на старые системы.
 
 Проверки: `npm run lint`, `npm test`, `npx tsc --noEmit` и `cargo test` в `src-tauri`.
 `npm run dev` открывает интерфейс в браузере с демонстрационными данными.
