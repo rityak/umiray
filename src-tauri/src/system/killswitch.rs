@@ -142,6 +142,10 @@ fn powershell(script: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
+#[cfg(target_os = "macos")]
+#[path = "macos/killswitch.rs"]
+mod platform;
+
 pub struct Firewall;
 
 impl Firewall {
@@ -150,8 +154,10 @@ impl Firewall {
     pub fn profiles() -> Result<Vec<Profile>> {
         #[cfg(windows)]
         return read_profiles();
+        #[cfg(target_os = "macos")]
+        return platform::profiles();
         // Профилей у nftables нет, а своя таблица исполняется всегда.
-        #[cfg(not(windows))]
+        #[cfg(target_os = "linux")]
         Ok(Vec::new())
     }
 
@@ -194,7 +200,9 @@ impl Firewall {
         powershell(&script(&allowed.core, &allowed.device))?;
         #[cfg(target_os = "linux")]
         linux_apply(allowed)?;
-        #[cfg(not(any(windows, target_os = "linux")))]
+        #[cfg(target_os = "macos")]
+        platform::apply(allowed)?;
+        #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
         let _ = allowed;
         Ok(())
     }
@@ -208,7 +216,9 @@ impl Firewall {
         // Таблица nftables заменяется одним файлом — это уже замена без окна.
         #[cfg(target_os = "linux")]
         linux_apply(allowed)?;
-        #[cfg(not(any(windows, target_os = "linux")))]
+        #[cfg(target_os = "macos")]
+        platform::apply(allowed)?;
+        #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
         let _ = allowed;
         Ok(())
     }
@@ -228,7 +238,9 @@ impl Firewall {
             let _ = previous;
             crate::system::helper::Helper::run(&["killswitch", "release"])?;
         }
-        #[cfg(not(any(windows, target_os = "linux")))]
+        #[cfg(target_os = "macos")]
+        platform::release(previous)?;
+        #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
         let _ = previous;
         Ok(())
     }

@@ -39,7 +39,12 @@ impl Features {
             features.push(Feature::MirayCore);
         }
         if cfg!(target_os = "macos") {
-            features.extend([Feature::IcmpPing, Feature::MtuProbe]);
+            features.extend([
+                Feature::IcmpPing,
+                Feature::MtuProbe,
+                Feature::KillSwitch,
+                Feature::SelfUpdate,
+            ]);
         }
         if cfg!(windows) {
             features.extend([

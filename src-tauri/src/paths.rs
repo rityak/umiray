@@ -199,7 +199,14 @@ mod tests {
         ("lists_dir", &["lists/store.rs"]),
         ("core", &["core/mihomo/build.rs"]),
         ("miray", &["core/mihomo/build.rs"]),
-        ("run_dir", &["core/mihomo.rs", "system/macos/elevation.rs"]),
+        (
+            "run_dir",
+            &[
+                "core/mihomo.rs",
+                "system/macos/elevation.rs",
+                "system/macos/killswitch.rs",
+            ],
+        ),
         ("ensure_run_dir", &["core/mihomo.rs"]),
         ("effective_config", &["core/mihomo.rs"]),
         ("qd", &["core/qd.rs"]),

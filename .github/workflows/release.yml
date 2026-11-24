@@ -141,14 +141,19 @@ jobs:
         working-directory: src-tauri
       - run: cargo clippy --locked --all-targets -- -D warnings
         working-directory: src-tauri
-      - name: Build Apple Silicon app and DMG
-        run: npx tauri build --target aarch64-apple-darwin -- --locked
-      - name: Upload DMG to the draft release
+      - name: Build Apple Silicon app, DMG and updater package
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx tauri build --config src-tauri/tauri.macos.updater.conf.json --target aarch64-apple-darwin -- --locked
+      - name: Upload DMG and updater package to the draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: >-
           gh release upload "$TAG" --clobber --repo "$GITHUB_REPOSITORY"
           src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+          src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz
+          src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
 
   # latest.json получает deb и rpm (ключи linux-x86_64-deb/-rpm), Arch — PKGBUILD с sha256
   # этого выпуска. В AUR пакет уходит, только если задан секрет AUR_SSH_PRIVATE_KEY.
@@ -164,11 +169,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Add Linux packages to latest.json and build the Arch package
+      - name: Add macOS and Linux packages to latest.json and build the Arch package
         run: |
           mkdir out
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir out --pattern latest.json --pattern '*.deb' --pattern '*.deb.sig' --pattern '*.rpm' --pattern '*.rpm.sig'
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir out --pattern latest.json --pattern '*.deb' --pattern '*.deb.sig' --pattern '*.rpm' --pattern '*.rpm.sig' --pattern 'umiray.app.tar.gz*'
           node tools/linux-release.mjs "${TAG#v}" out
+          node tools/macos-release.mjs "${TAG#v}" out
           gh release upload "$TAG" --clobber --repo "$GITHUB_REPOSITORY" out/latest.json out/PKGBUILD out/umiray.install
       - name: Publish to the AUR
         if: env.AUR_SSH_PRIVATE_KEY != ''
