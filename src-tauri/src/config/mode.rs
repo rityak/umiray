@@ -27,7 +27,10 @@ use crate::yaml::Yaml;
 
 /// Записать режим, не тронув ничего лишнего.
 /// Как ядро называет свой адаптер, если `tun.device` не задан.
+#[cfg(not(target_os = "macos"))]
 pub const DEFAULT_DEVICE: &str = "Meta";
+#[cfg(target_os = "macos")]
+pub const DEFAULT_DEVICE: &str = "utun";
 
 impl Mode {
     pub fn write(mode: Mode) -> Result<()> {
@@ -99,6 +102,11 @@ fn apply(map: &mut Mapping, mode: Mode) {
             Yaml::fill(tun, "auto-detect-interface", Value::from(true));
             // Windows-default закрывает обход DNS через физический адаптер (D-139).
             Yaml::fill(tun, "strict-route", Value::from(true));
+            #[cfg(target_os = "macos")]
+            {
+                tun.remove("inet6-address");
+                tun.remove("route-address");
+            }
             Yaml::fill(
                 tun,
                 "dns-hijack",
@@ -162,6 +170,11 @@ rules:
             out["tun"]["dns-hijack"],
             Value::Sequence(vec![Value::from("any:53"), Value::from("tcp://any:53")])
         );
+        #[cfg(target_os = "macos")]
+        {
+            assert!(out["tun"].get("inet6-address").is_none());
+            assert!(out["tun"].get("route-address").is_none());
+        }
     }
 
     #[test]

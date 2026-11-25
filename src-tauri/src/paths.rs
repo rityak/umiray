@@ -71,7 +71,14 @@ impl Paths {
             return PathBuf::from(".");
         }
         std::env::var_os("HOME")
-            .map(|home| PathBuf::from(home).join(".local/share"))
+            .map(|home| {
+                let home = PathBuf::from(home);
+                if cfg!(target_os = "macos") {
+                    home.join("Library/Application Support")
+                } else {
+                    home.join(".local/share")
+                }
+            })
             .unwrap_or_else(|| PathBuf::from("."))
     }
 
@@ -192,7 +199,14 @@ mod tests {
         ("lists_dir", &["lists/store.rs"]),
         ("core", &["core/mihomo/build.rs"]),
         ("miray", &["core/mihomo/build.rs"]),
-        ("run_dir", &["core/mihomo.rs"]),
+        (
+            "run_dir",
+            &[
+                "core/mihomo.rs",
+                "system/macos/elevation.rs",
+                "system/macos/killswitch.rs",
+            ],
+        ),
         ("ensure_run_dir", &["core/mihomo.rs"]),
         ("effective_config", &["core/mihomo.rs"]),
         ("qd", &["core/qd.rs"]),

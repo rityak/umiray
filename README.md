@@ -5,13 +5,13 @@
 <h1 align="center">Umiray</h1>
 
 <p align="center">
-  A proxy client for Windows and Linux powered by <a href="https://github.com/MetaCubeX/mihomo">Mihomo</a>.<br>
+  A proxy client for Windows, Linux and macOS powered by <a href="https://github.com/MetaCubeX/mihomo">Mihomo</a>.<br>
   Tauri&nbsp;2 · Rust · React · <a href="https://github.com/rityak/rootik">Rootik</a>
 </p>
 
 <p align="center"><b>1.10.0</b> · <a href="README.ru.md">Русская версия</a></p>
 
-> **Umiray is a proxy client for Windows and Linux powered by Mihomo.** It runs solely on the user’s computer, at their request, and provides local proxy, system proxy or TUN modes. It includes no servers, does not encrypt or tunnel traffic by itself, and grants no access to any service. The code and builds are provided as is. You are responsible for using them in accordance with the laws of your country and the terms of your network provider. The authors do not encourage any violation of these rules and accept no liability for any use.
+> **Umiray is a proxy client for Windows, Linux and macOS powered by Mihomo.** It runs solely on the user’s computer, at their request, and provides local proxy, system proxy or TUN modes. It includes no servers, does not encrypt or tunnel traffic by itself, and grants no access to any service. The code and builds are provided as is. You are responsible for using them in accordance with the laws of your country and the terms of your network provider. The authors do not encourage any violation of these rules and accept no liability for any use.
 
 
 ![Connection](screenshots/connection.png)
@@ -40,6 +40,9 @@ Download from [Releases](https://github.com/rityak/umiray/releases/latest):
   `sudo dnf install ./umiray-<version>-1.x86_64.rpm`.
 - **Arch** and derivatives — `umiray-bin` from the AUR (`yay -S umiray-bin`), or the `PKGBUILD`
   and `umiray.install` from the release: `makepkg -si`.
+- **macOS Apple Silicon** — open the DMG and drag `umiray.app` to Applications. A locally
+  built app without a Developer ID signature may require approval in System Settings →
+  Privacy & Security.
 
 The client downloads mihomo from its official release page on first launch.
 Add your subscription, proxy link or configuration file, choose a node and press Connect.
@@ -49,9 +52,11 @@ TUN captures traffic through a virtual interface. Servers are not included.
 TUN needs extra rights. On Windows, the client can create a scheduled task to launch with
 administrator rights without asking for UAC confirmation each time. On Linux, the client
 runs as you and gives only the core the network rights through polkit; in your desktop
-session no password is asked.
+session no password is asked. On macOS, the system asks for an administrator password or
+Touch ID when starting the core in TUN mode.
 
-Data is stored in `%LOCALAPPDATA%\umiray` on Windows and `~/.local/share/umiray` on Linux.
+Data is stored in `%LOCALAPPDATA%\umiray` on Windows, `~/.local/share/umiray` on Linux,
+and `~/Library/Application Support/umiray` on macOS.
 
 The interface selects Russian when a Russian keyboard layout is installed; otherwise,
 it selects English. Override this in Settings → Umiray Settings → Interface language.
@@ -73,7 +78,15 @@ Build an executable without an installer:
 npm run tauri build -- --no-bundle
 ```
 
-The executable is `src-tauri/target/release/umiray.exe` (`umiray` on Linux). Linux packages:
+Build the app and DMG for macOS Apple Silicon:
+
+```sh
+npm run build:macos
+```
+
+The result is `src-tauri/target/aarch64-apple-darwin/release/bundle/macos/umiray.app`
+and a DMG in the adjacent `dmg` directory. The executable without an installer is
+`src-tauri/target/release/umiray.exe` (`umiray` on Linux). Linux packages:
 `npx tauri build --bundles deb,rpm`; build them on Ubuntu 22.04 so they run on older systems too.
 
 Checks: `npm run lint`, `npm test`, `npx tsc --noEmit`, and `cargo test` in `src-tauri`.

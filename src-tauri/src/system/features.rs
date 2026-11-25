@@ -11,6 +11,8 @@ use serde::Serialize;
 pub enum Feature {
     /// Второе ядро. Его сборка — только под Windows (WinDivert).
     Qd,
+    /// Форк ядра miray выпускается только для Windows и Linux.
+    MirayCore,
     /// «Всегда от администратора» — задача планировщика (D-087).
     AlwaysAdmin,
     /// Прописать адрес ядра системе (D-047).
@@ -33,6 +35,17 @@ pub struct Features;
 impl Features {
     pub fn supported() -> Vec<Feature> {
         let mut features = vec![Feature::Autostart];
+        if !cfg!(target_os = "macos") {
+            features.push(Feature::MirayCore);
+        }
+        if cfg!(target_os = "macos") {
+            features.extend([
+                Feature::IcmpPing,
+                Feature::MtuProbe,
+                Feature::KillSwitch,
+                Feature::SelfUpdate,
+            ]);
+        }
         if cfg!(windows) {
             features.extend([
                 Feature::Qd,

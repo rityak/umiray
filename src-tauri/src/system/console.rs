@@ -152,7 +152,12 @@ fn is_console(handle: windows_sys::Win32::Foundation::HANDLE) -> bool {
 }
 
 impl Console {
-    #[cfg(unix)]
+    #[cfg(target_os = "macos")]
+    pub fn interrupt(pid: u32) -> bool {
+        crate::system::elevation::Elevation::interrupt(pid)
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
     pub fn interrupt(pid: u32) -> bool {
         // SAFETY: только посылка сигнала; чужой pid просто вернёт ошибку.
         unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) == 0 }

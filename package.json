@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "tauri": "tauri",
+    "build:macos": "tauri build --target aarch64-apple-darwin",
     "lint": "biome check src tools vite.config.ts",
     "format": "biome check --write src tools vite.config.ts",
     "test": "vitest run",

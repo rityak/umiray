@@ -57,7 +57,7 @@ impl FileDialog {
 
     /// Linux: окно рабочего стола — `kdialog` в KDE, `zenity` в остальных (пакет тянет
     /// его зависимостью, D-173).
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
     pub fn file(title: &str, filter: &[(&str, &str)]) -> Option<std::path::PathBuf> {
         if kde() {
             return ask(
@@ -119,7 +119,7 @@ impl FileDialog {
         )))
     }
 
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
     pub fn save(
         title: &str,
         filter: &[(&str, &str)],
@@ -158,9 +158,50 @@ impl FileDialog {
             picked
         })
     }
+
+    #[cfg(target_os = "macos")]
+    pub fn file(title: &str, _filter: &[(&str, &str)]) -> Option<std::path::PathBuf> {
+        ask_mac(
+            "on run argv\nPOSIX path of (choose file with prompt (item 1 of argv))\nend run",
+            &[title],
+        )
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn save(
+        title: &str,
+        _filter: &[(&str, &str)],
+        name: &str,
+        extension: &str,
+    ) -> Option<std::path::PathBuf> {
+        let picked = ask_mac(
+            "on run argv\nPOSIX path of (choose file name with prompt (item 1 of argv) default name (item 2 of argv))\nend run",
+            &[title, name],
+        )?;
+        Some(if picked.extension().is_none() {
+            picked.with_extension(extension)
+        } else {
+            picked
+        })
+    }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+fn ask_mac(script: &str, args: &[&str]) -> Option<std::path::PathBuf> {
+    let out = std::process::Command::new("/usr/bin/osascript")
+        .arg("-e")
+        .arg(script)
+        .arg("--")
+        .args(args)
+        .output()
+        .ok()?;
+    let path = String::from_utf8_lossy(&out.stdout)
+        .trim_end_matches('\n')
+        .to_string();
+    (out.status.success() && !path.is_empty()).then(|| path.into())
+}
+
+#[cfg(target_os = "linux")]
 /// KDE и в нём есть `kdialog`. Без него и в KDE — `zenity`: пакеты тянут его зависимостью.
 fn kde() -> bool {
     std::env::var("XDG_CURRENT_DESKTOP")
@@ -174,7 +215,7 @@ fn kde() -> bool {
 }
 
 /// Ответ окна — путь строкой; закрыли окно — пусто и ненулевой код.
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
 fn ask(program: &str, args: &[&str]) -> Option<std::path::PathBuf> {
     let out = std::process::Command::new(program)
         .args(args)
@@ -187,7 +228,7 @@ fn ask(program: &str, args: &[&str]) -> Option<std::path::PathBuf> {
 }
 
 /// Маски Windows `*.yaml;*.yml` у zenity — `подпись | *.yaml *.yml`.
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
 fn zenity_filter(filter: &[(&str, &str)]) -> Vec<String> {
     filter
         .iter()
@@ -196,7 +237,7 @@ fn zenity_filter(filter: &[(&str, &str)]) -> Vec<String> {
 }
 
 /// У kdialog — `*.yaml *.yml|подпись`, фильтры через перевод строки.
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
 fn kde_filter(filter: &[(&str, &str)]) -> String {
     filter
         .iter()
@@ -205,7 +246,7 @@ fn kde_filter(filter: &[(&str, &str)]) -> String {
         .join("\n")
 }
 
-#[cfg(all(test, not(windows)))]
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
 

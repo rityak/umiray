@@ -6,19 +6,18 @@ pub struct Machine;
 impl Machine {
     /// Идентификатор машины, переживающий переустановку клиента: иначе каждое повторное
     /// добавление подписки съедало бы у провайдера слот устройства.
-    ///
-    /// Windows — MachineGuid. Linux — производное от `/etc/machine-id`: сам он по совету
-    /// systemd наружу не уходит, а хэш с именем клиента так же постоянен и с другими
-    /// программами не сопоставляется.
     pub fn id() -> Option<String> {
         #[cfg(windows)]
         return hklm("SOFTWARE\\Microsoft\\Cryptography", "MachineGuid");
+        #[cfg(target_os = "linux")]
+        let raw = ["/etc/machine-id", "/var/lib/dbus/machine-id"]
+            .iter()
+            .find_map(|path| std::fs::read_to_string(path).ok())?;
+        #[cfg(target_os = "macos")]
+        let raw = macos_uuid()?;
         #[cfg(not(windows))]
         {
             use sha2::Digest;
-            let raw = ["/etc/machine-id", "/var/lib/dbus/machine-id"]
-                .iter()
-                .find_map(|path| std::fs::read_to_string(path).ok())?;
             let raw = raw.trim();
             if raw.is_empty() {
                 return None;
@@ -37,6 +36,8 @@ impl Machine {
     pub fn os() -> &'static str {
         if cfg!(windows) {
             "Windows"
+        } else if cfg!(target_os = "macos") {
+            "macOS"
         } else {
             "Linux"
         }
@@ -51,8 +52,12 @@ impl Machine {
         ) {
             return format!("10.0.{build}");
         }
-        #[cfg(not(windows))]
+        #[cfg(target_os = "linux")]
         if let Some(version) = os_release() {
+            return version;
+        }
+        #[cfg(target_os = "macos")]
+        if let Some(version) = macos_version() {
             return version;
         }
         "unknown".into()
@@ -60,7 +65,7 @@ impl Machine {
 }
 
 /// `ID VERSION_ID` из `/etc/os-release`: `fedora 43`, `ubuntu 24.04`.
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
 fn os_release() -> Option<String> {
     let text = std::fs::read_to_string("/etc/os-release").ok()?;
     let field = |name: &str| {
@@ -73,6 +78,31 @@ fn os_release() -> Option<String> {
         Some(version) => format!("{id} {version}"),
         None => id,
     })
+}
+
+#[cfg(target_os = "macos")]
+fn macos_uuid() -> Option<String> {
+    let out = std::process::Command::new("/usr/sbin/ioreg")
+        .args(["-rd1", "-c", "IOPlatformExpertDevice"])
+        .output()
+        .ok()?;
+    let raw = String::from_utf8_lossy(&out.stdout);
+    raw.split("IOPlatformUUID\" = \"")
+        .nth(1)?
+        .split('"')
+        .next()
+        .map(str::to_string)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_version() -> Option<String> {
+    let out = std::process::Command::new("/usr/bin/sw_vers")
+        .arg("-productVersion")
+        .output()
+        .ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
 /// Чтение одной строки из HKEY_LOCAL_MACHINE.

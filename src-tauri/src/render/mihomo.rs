@@ -340,6 +340,16 @@ fn baseline(map: &mut Mapping, mode: Mode) {
     }
     Yaml::fill(map, "log-level", Value::from("info"));
     Yaml::fill(map, "allow-lan", Value::from(false));
+    #[cfg(target_os = "macos")]
+    {
+        Yaml::fill(map, "ipv6", Value::from(false));
+        if mode == Mode::Tun {
+            let tun = Yaml::sub(map, "tun");
+            tun.remove("inet6-address");
+            tun.remove("route-address");
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
     Yaml::fill(map, "ipv6", Value::from(false));
 
     // Выбранный узел помним сами (D-039), и `store-selected` у ядра его через перезапуск
@@ -1306,6 +1316,17 @@ rules:
         let out = parsed(&assembled(&["allow-lan: true\nipv6: true\n"], &[]));
         assert_eq!(out["allow-lan"], Value::from(true));
         assert_eq!(out["ipv6"], Value::from(true));
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn macos_tun_does_not_install_ipv6_routes() {
+        let out = parsed(&assembled(&[""], &[]));
+        assert_eq!(out["ipv6"], Value::from(false));
+        let tun = parsed(&assembled(&["tun:\n  enable: true\n"], &[]));
+        assert_eq!(tun["ipv6"], Value::from(false));
+        assert!(tun["tun"].get("inet6-address").is_none());
+        assert!(tun["tun"].get("route-address").is_none());
     }
 
     /// Пользовательский `dns` без `enable` трогать нельзя: дописав туда `false`,

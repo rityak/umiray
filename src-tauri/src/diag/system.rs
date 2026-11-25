@@ -32,7 +32,14 @@ impl SystemProbe {
 /// маршрута у туннеля нет вовсе, только назвать вора тогда некем.
 fn thief(device: &str, routes: &[net::Route]) -> Option<String> {
     let winner = routes.first()?;
-    (winner.adapter != device).then(|| winner.adapter.clone())
+    #[cfg(target_os = "macos")]
+    let ours = winner.adapter == device
+        || (device == "utun"
+            && winner.adapter.starts_with("utun")
+            && winner.gateway == "198.18.0.1");
+    #[cfg(not(target_os = "macos"))]
+    let ours = winner.adapter == device;
+    (!ours).then(|| winner.adapter.clone())
 }
 
 #[cfg(test)]
@@ -79,5 +86,16 @@ mod tests {
             None,
             "называть некого, но и хвалить нечего"
         );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_numbered_utun_of_our_core_is_not_a_thief() {
+        let mut ours = route("utun7", 0);
+        ours.gateway = "198.18.0.1".into();
+        assert_eq!(thief("utun", &[ours]), None);
+        let mut other = route("utun7", 0);
+        other.gateway = "100.64.0.1".into();
+        assert_eq!(thief("utun", &[other]).as_deref(), Some("utun7"));
     }
 }

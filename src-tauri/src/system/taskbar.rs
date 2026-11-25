@@ -5,6 +5,7 @@ pub struct Taskbar;
 impl Taskbar {
     /// Светлая ли панель: от этого зависит, тёмный или светлый значок на ней виден.
     /// Windows красит панель по теме системы, а не приложения.
+    #[cfg(not(target_os = "macos"))]
     pub fn is_light() -> bool {
         #[cfg(windows)]
         return crate::system::registry::Registry::read_dword(
@@ -16,7 +17,7 @@ impl Taskbar {
             == Some(1);
         // Верхняя панель GNOME тёмная при любой теме. Панель Plasma идёт за схемой цветов:
         // по умолчанию (Breeze) — светлая, у тёмных схем в имени есть «Dark».
-        #[cfg(not(windows))]
+        #[cfg(target_os = "linux")]
         {
             let kde = std::env::var("XDG_CURRENT_DESKTOP")
                 .unwrap_or_default()
@@ -40,9 +41,9 @@ impl Taskbar {
     /// кто-то держит `StatusNotifierWatcher`: GNOME без расширения AppIndicator его
     /// не держит, и окно, спрятанное в несуществующий трей, пропало бы без возврата.
     pub fn has_tray() -> bool {
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         return true;
-        #[cfg(not(windows))]
+        #[cfg(target_os = "linux")]
         {
             static FOUND: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
             *FOUND.get_or_init(|| {
