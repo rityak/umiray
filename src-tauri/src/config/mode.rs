@@ -102,6 +102,11 @@ fn apply(map: &mut Mapping, mode: Mode) {
             Yaml::fill(tun, "auto-detect-interface", Value::from(true));
             // Windows-default закрывает обход DNS через физический адаптер (D-139).
             Yaml::fill(tun, "strict-route", Value::from(true));
+            #[cfg(target_os = "macos")]
+            {
+                tun.remove("inet6-address");
+                tun.remove("route-address");
+            }
             Yaml::fill(
                 tun,
                 "dns-hijack",
@@ -165,6 +170,11 @@ rules:
             out["tun"]["dns-hijack"],
             Value::Sequence(vec![Value::from("any:53"), Value::from("tcp://any:53")])
         );
+        #[cfg(target_os = "macos")]
+        {
+            assert!(out["tun"].get("inet6-address").is_none());
+            assert!(out["tun"].get("route-address").is_none());
+        }
     }
 
     #[test]
