@@ -71,6 +71,9 @@ impl Look {
 static SHOWN: Mutex<Option<(Look, bool)>> = Mutex::new(None);
 
 fn light_taskbar() -> bool {
+    #[cfg(target_os = "macos")]
+    return true;
+    #[cfg(not(target_os = "macos"))]
     crate::system::taskbar::Taskbar::is_light()
 }
 
@@ -134,6 +137,10 @@ impl Tray {
         // одна — различается только цвет луча (D-051).
         let light = light_taskbar();
         tray = tray.icon(Image::from_bytes(Look::Off.png(light))?);
+        #[cfg(target_os = "macos")]
+        {
+            tray = tray.icon_as_template(true);
+        }
 
         tray.build(app)?;
         *SHOWN.lock().unwrap() = Some((Look::Off, light));
@@ -171,6 +178,9 @@ fn apply<R: Runtime>(app: &AppHandle<R>, look: Look) {
         return;
     };
     if let Ok(icon) = Image::from_bytes(look.png(light)) {
+        #[cfg(target_os = "macos")]
+        let _ = tray.set_icon_with_as_template(Some(icon), true);
+        #[cfg(not(target_os = "macos"))]
         let _ = tray.set_icon(Some(icon));
     }
     let _ = tray.set_tooltip(Some(look.tooltip()));

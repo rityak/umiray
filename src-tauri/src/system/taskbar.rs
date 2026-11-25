@@ -5,6 +5,7 @@ pub struct Taskbar;
 impl Taskbar {
     /// Светлая ли панель: от этого зависит, тёмный или светлый значок на ней виден.
     /// Windows красит панель по теме системы, а не приложения.
+    #[cfg(not(target_os = "macos"))]
     pub fn is_light() -> bool {
         #[cfg(windows)]
         return crate::system::registry::Registry::read_dword(
@@ -14,11 +15,6 @@ impl Taskbar {
         .ok()
         .flatten()
             == Some(1);
-        #[cfg(target_os = "macos")]
-        return !std::process::Command::new("/usr/bin/defaults")
-            .args(["read", "-g", "AppleInterfaceStyle"])
-            .output()
-            .is_ok_and(|out| String::from_utf8_lossy(&out.stdout).contains("Dark"));
         // Верхняя панель GNOME тёмная при любой теме. Панель Plasma идёт за схемой цветов:
         // по умолчанию (Breeze) — светлая, у тёмных схем в имени есть «Dark».
         #[cfg(target_os = "linux")]
